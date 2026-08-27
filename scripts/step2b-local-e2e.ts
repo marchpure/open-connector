@@ -123,18 +123,50 @@ const transit = new TransitFileService({
   maxBytes: 10 * 1024 * 1024,
 });
 const files = new TenantFileAdapter("tenant-a", "workspace-a", transit, new DatabaseSync(":memory:"));
-const csv = await files.upload(new File(["a,b\\n1,2\\n"], "data.csv", { type: "text/csv" }));
+const csv = await files.upload(new File(["a,b\n1,2\n"], "data.csv", { type: "text/csv" }));
 const json = await files.upload(new File(['{"ok":true}'], "data.json", { type: "application/json" }));
-const pdf = await files.upload(new File(["%PDF-1.7\\nfixture"], "data.pdf", { type: "application/pdf" }));
 const excelSource = "/Users/bytedance/DB-GPT/docker/examples/excel/example.xlsx";
+const pdfSource = "/Users/bytedance/.openhands/cache/skills/public-skills/skills/theme-factory/theme-showcase.pdf";
+const parquetSource = "/Users/bytedance/oracle_byaan_e2e/container_parquet/d_arc_brand.parquet";
 const excelBytes = await readFile(excelSource);
+const pdfBytes = await readFile(pdfSource);
+const parquetBytes = await readFile(parquetSource);
 const excel = await files.upload(
   new File([excelBytes], "data.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
 );
+const pdf = await files.upload(new File([pdfBytes], "data.pdf", { type: "application/pdf" }));
+const parquet = await files.upload(new File([parquetBytes], "data.parquet"));
+const [csvPreview, jsonPreview, excelPreview, pdfPreview, parquetPreview] = await Promise.all([
+  files.preview(csv.fileId),
+  files.preview(json.fileId),
+  files.preview(excel.fileId),
+  files.preview(pdf.fileId),
+  files.preview(parquet.fileId),
+]);
 checks.files = {
-  status: files.list().length === 4,
+  status:
+    files.list().length === 5 &&
+    csvPreview.kind === "csv" &&
+    csvPreview.rows[0]?.[0] === "1" &&
+    jsonPreview.kind === "json" &&
+    excelPreview.kind === "excel" &&
+    excelPreview.sheets.length > 0 &&
+    pdfPreview.kind === "pdf" &&
+    pdfPreview.text.length > 0 &&
+    parquetPreview.kind === "parquet" &&
+    parquetPreview.rows.length > 0,
   kinds: files.list().map((file) => file.kind),
-  ids: [csv.fileId, json.fileId, pdf.fileId, excel.fileId],
+  ids: [csv.fileId, json.fileId, pdf.fileId, excel.fileId, parquet.fileId],
+  previews: {
+    csv: csvPreview.kind === "csv" ? { columns: csvPreview.columns, rows: csvPreview.rows.length } : null,
+    json: jsonPreview.kind === "json" ? { truncated: jsonPreview.truncated } : null,
+    excel: excelPreview.kind === "excel" ? { sheets: excelPreview.sheets.length } : null,
+    pdf: pdfPreview.kind === "pdf" ? { pages: pdfPreview.pageCount, textCharacters: pdfPreview.text.length } : null,
+    parquet:
+      parquetPreview.kind === "parquet"
+        ? { columns: parquetPreview.columns, rows: parquetPreview.rows.length }
+        : null,
+  },
 };
 
 const provider: ProviderDefinition = {
