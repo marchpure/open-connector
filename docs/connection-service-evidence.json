@@ -1,7 +1,7 @@
 {
-  "recordedAt": "2026-08-28T04:45:00+08:00",
+  "recordedAt": "2026-08-28T04:59:44+08:00",
   "classification": "sanitized-local-evidence",
-  "testedServiceCommit": "8f812af42fefe092fe004152b38c5ceda3afaa85",
+  "testedServiceCommit": "2af7e87c80588063cbb860f87667683597e66995",
   "service": {
     "catalogProviderCountObserved": 1445,
     "catalogActionCountObserved": 15156,
@@ -84,10 +84,7 @@
     "thinDriverSelectDual": "passed",
     "schemaDiscovery": "STEP3B",
     "tableDiscovery": "STEP3B_ORDERS",
-    "columnDiscovery": [
-      "ORDER_ID VARCHAR2 NOT NULL",
-      "AMOUNT NUMBER NOT NULL"
-    ],
+    "columnDiscovery": ["ORDER_ID VARCHAR2 NOT NULL", "AMOUNT NUMBER NOT NULL"],
     "writeQueryRejectedBeforeExecution": "passed",
     "credentials": "not recorded"
   },
@@ -110,11 +107,7 @@
   "feishu": {
     "providerTier": "beta",
     "oauthClientConfigAndAuthorizationStart": "passed",
-    "requestedScopes": [
-      "offline_access",
-      "auth:user.id:read",
-      "docx:document:readonly"
-    ],
+    "requestedScopes": ["offline_access", "auth:user.id:read", "docx:document:readonly"],
     "environmentObservation": "A separate lark-cli user session successfully read the real design document, but this is not Connection Service E2E evidence and has broader scopes.",
     "authorizedResourceReadThroughConnectionService": "not evidenced",
     "revocationAfterResourceRead": "not evidenced"
@@ -166,10 +159,10 @@
   },
   "docker": {
     "connectionServiceImage": "step2b-connection-service:test",
-    "connectionServiceDigest": "sha256:a0469797bd2e51881381f9bd0812d0d8dc077ce4e559470b03bf8b7de4e41671",
+    "connectionServiceDigest": "sha256:f3720e2f3cf396904657a420cb69b7d725b7a41cf4a16f01fe9f41585c97fe24",
     "connectionServiceHealth": "GET http://127.0.0.1:<published-port>/health returned the expected service/version payload",
     "webDiscoveryWorkerImage": "step2b-web-discovery-worker:test",
-    "webDiscoveryWorkerDigest": "sha256:99db71076a06207749ebc703046a6d155685a6e36a616023558fd6587b872d41",
+    "webDiscoveryWorkerDigest": "sha256:e879c19a55862f58bdac4258ba56dbcbec18cc21c15697167572c14b0362c555",
     "runAs": "node (uid 1000)"
   },
   "replaceableBoundaries": {
