@@ -1,0 +1,172 @@
+import type { DatabaseSync } from "node:sqlite";
+
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import type { ConnectionLeaseClaims, TenantPrincipal } from "./types.ts";
+
+export class LeaseError extends Error {
+  readonly code: "invalid_lease" | "lease_expired" | "lease_revoked" | "lease_scope_denied";
+
+  constructor(code: LeaseError["code"], message: string) {
+    super(message);
+    this.name = "LeaseError";
+    this.code = code;
+  }
+}
+
+export class ConnectionLeaseService {
+  private readonly database: DatabaseSync;
+  private readonly now: () => Date;
+
+  constructor(database: DatabaseSync, now: () => Date = () => new Date()) {
+    this.database = database;
+    this.now = now;
+    this.database.exec(`
+      create table if not exists connection_leases (
+        token_hash text primary key,
+        jti text not null unique,
+        tenant_id text not null,
+        workspace_id text not null,
+        subject text not null,
+        invocation_id text not null,
+        audience text not null,
+        connection_ids_json text not null,
+        allowed_actions_json text not null,
+        issued_at text not null,
+        expires_at text not null,
+        revoked_at text
+      );
+      create index if not exists idx_connection_leases_scope
+        on connection_leases (tenant_id, workspace_id, expires_at);
+    `);
+  }
+
+  issue(
+    principal: TenantPrincipal,
+    input: {
+      connectionIds: string[];
+      allowedActions: string[];
+      invocationId: string;
+      audience: string;
+      ttlSeconds?: number;
+    },
+  ): { token: string; claims: ConnectionLeaseClaims } {
+    const connectionIds = uniqueNonEmpty(input.connectionIds);
+    const allowedActions = uniqueNonEmpty(input.allowedActions);
+    if (connectionIds.length === 0 || allowedActions.length === 0) {
+      throw new LeaseError("invalid_lease", "connection_ids and allowed_actions must both be non-empty.");
+    }
+    if (!input.invocationId.trim() || !input.audience.trim()) {
+      throw new LeaseError("invalid_lease", "invocation_id and audience are required.");
+    }
+    const ttlSeconds = input.ttlSeconds ?? 300;
+    if (!Number.isInteger(ttlSeconds) || ttlSeconds < 1 || ttlSeconds > 900) {
+      throw new LeaseError("invalid_lease", "Lease TTL must be between 1 and 900 seconds.");
+    }
+    const issued = this.now();
+    const expires = new Date(issued.getTime() + ttlSeconds * 1000);
+    const claims: ConnectionLeaseClaims = {
+      tenantId: principal.tenantId,
+      workspaceId: principal.workspaceId,
+      subject: principal.subject,
+      invocationId: input.invocationId,
+      audience: input.audience,
+      connectionIds,
+      allowedActions,
+      issuedAt: issued.toISOString(),
+      expiresAt: expires.toISOString(),
+      jti: randomUUID(),
+    };
+    const token = `cl_${randomBytes(32).toString("base64url")}`;
+    this.database
+      .prepare(
+        `insert into connection_leases
+          (token_hash, jti, tenant_id, workspace_id, subject, invocation_id, audience,
+           connection_ids_json, allowed_actions_json, issued_at, expires_at)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        hashToken(token),
+        claims.jti,
+        claims.tenantId,
+        claims.workspaceId,
+        claims.subject,
+        claims.invocationId,
+        claims.audience,
+        JSON.stringify(claims.connectionIds),
+        JSON.stringify(claims.allowedActions),
+        claims.issuedAt,
+        claims.expiresAt,
+      );
+    return { token, claims };
+  }
+
+  verify(token: string, principal: TenantPrincipal, expected: { connectionId: string; actionId: string; audience: string; invocationId: string }): ConnectionLeaseClaims {
+    if (!token.startsWith("cl_")) {
+      throw new LeaseError("invalid_lease", "Malformed connection lease.");
+    }
+    const tokenHash = hashToken(token);
+    const row = this.database
+      .prepare("select * from connection_leases where token_hash = ?")
+      .get(tokenHash) as Record<string, unknown> | undefined;
+    if (!row || !equalHash(String(row.token_hash), tokenHash)) {
+      throw new LeaseError("invalid_lease", "Connection lease was not found.");
+    }
+    if (row.revoked_at) {
+      throw new LeaseError("lease_revoked", "Connection lease was revoked.");
+    }
+    if (new Date(String(row.expires_at)).getTime() <= this.now().getTime()) {
+      throw new LeaseError("lease_expired", "Connection lease expired.");
+    }
+    const claims = rowToClaims(row);
+    if (
+      claims.tenantId !== principal.tenantId ||
+      claims.workspaceId !== principal.workspaceId ||
+      claims.subject !== principal.subject ||
+      claims.audience !== expected.audience ||
+      claims.invocationId !== expected.invocationId ||
+      !claims.connectionIds.includes(expected.connectionId) ||
+      !claims.allowedActions.includes(expected.actionId)
+    ) {
+      throw new LeaseError("lease_scope_denied", "Connection lease does not grant this invocation.");
+    }
+    return claims;
+  }
+
+  revoke(jti: string, principal: TenantPrincipal): boolean {
+    const result = this.database
+      .prepare(
+        "update connection_leases set revoked_at = ? where jti = ? and tenant_id = ? and workspace_id = ? and revoked_at is null",
+      )
+      .run(this.now().toISOString(), jti, principal.tenantId, principal.workspaceId);
+    return Number(result.changes) === 1;
+  }
+}
+
+function uniqueNonEmpty(values: string[]): string[] {
+  return [...new Set(values.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim()))];
+}
+
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function equalHash(left: string, right: string): boolean {
+  const a = Buffer.from(left, "utf8");
+  const b = Buffer.from(right, "utf8");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function rowToClaims(row: Record<string, unknown>): ConnectionLeaseClaims {
+  return {
+    tenantId: String(row.tenant_id),
+    workspaceId: String(row.workspace_id),
+    subject: String(row.subject),
+    invocationId: String(row.invocation_id),
+    audience: String(row.audience),
+    connectionIds: JSON.parse(String(row.connection_ids_json)) as string[],
+    allowedActions: JSON.parse(String(row.allowed_actions_json)) as string[],
+    issuedAt: String(row.issued_at),
+    expiresAt: String(row.expires_at),
+    jti: String(row.jti),
+  };
+}

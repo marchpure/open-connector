@@ -1,0 +1,85 @@
+{
+  "recordedAt": "2026-08-28T00:18:15+08:00",
+  "classification": "sanitized-local-evidence",
+  "service": {
+    "catalogProviderCountObserved": 1445,
+    "catalogActionCountObserved": 15156,
+    "enabledServices": [
+      {
+        "service": "feishu",
+        "tier": "beta"
+      }
+    ],
+    "unauthorizedControlApi": {
+      "status": 401
+    }
+  },
+  "automated": {
+    "focusedControlPlane": {
+      "testFiles": 7,
+      "testsPassed": 15
+    },
+    "fullUpstreamSuite": {
+      "testFiles": 159,
+      "testsPassed": 1432,
+      "testsSkipped": 4
+    },
+    "typecheck": "passed",
+    "lint": "passed with deny-warnings",
+    "gitDiffCheck": "passed",
+    "security": [
+      "SSRF loopback target rejected before transport",
+      "malformed PDF and Parquet rejected",
+      "ZIP central-directory traversal and compression limits enforced",
+      "encrypted connection, file metadata, lease, and revocation survive SQLite restart",
+      "duplicate REST write replayed without a second transport call",
+      "lease token is not persisted; only SHA-256 hash is stored"
+    ]
+  },
+  "realLocalE2e": {
+    "fixtureRestTcp": "passed",
+    "restIdempotentWriteReplay": "passed",
+    "mcpStdioInitializeToolsListCall": "passed",
+    "fileBytes": [
+      "csv",
+      "excel",
+      "json",
+      "pdf"
+    ],
+    "tenantIsolation": "passed",
+    "credentialRedaction": "passed",
+    "credentialCiphertextAtRest": "passed"
+  },
+  "realOracle": {
+    "container": "step3b-oracle-integration",
+    "service": "FREEPDB1",
+    "thinDriverSelectDual": "passed",
+    "writeQueryRejectedBeforeExecution": "passed",
+    "credentials": "not recorded"
+  },
+  "feishu": {
+    "oauthClientConfigAndAuthorizationStart": "passed",
+    "requestedScopes": [
+      "offline_access",
+      "auth:user.id:read",
+      "docx:document:readonly"
+    ],
+    "authorizedResourceRead": "pending_user_authorization_and_test_resource",
+    "revocationAfterResourceRead": "not evidenced"
+  },
+  "releaseGates": {
+    "npmAudit": {
+      "status": "blocked",
+      "moderate": 3,
+      "high": 6,
+      "critical": 0,
+      "report": "/tmp/step2b-audit.json"
+    },
+    "sbom": {
+      "status": "generated_outside_repo",
+      "report": "/tmp/step2b-npm-sbom.json"
+    },
+    "fullNegativeProviderMatrix": "pending",
+    "status": "NOT_FROZEN"
+  }
+}

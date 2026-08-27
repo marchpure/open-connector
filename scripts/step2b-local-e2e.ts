@@ -1,0 +1,173 @@
+import { serve } from "@hono/node-server";
+import { Hono } from "hono";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { networkInterfaces, tmpdir } from "node:os";
+import { join } from "node:path";
+import { unlink } from "node:fs/promises";
+import { createConnectionControlApp } from "../src/control-plane/server.ts";
+import { createPrincipalToken } from "../src/control-plane/auth.ts";
+import { createCatalogStore } from "../src/catalog-store.ts";
+import { AesGcmSecretCodec } from "../src/server/secrets/secret-codec.ts";
+import { TenantFileAdapter } from "../src/control-plane/file-adapter.ts";
+import { RestOpenApiAdapter } from "../src/control-plane/rest-adapter.ts";
+import { ControlledMcpAdapter } from "../src/control-plane/mcp-adapter.ts";
+import type { ProviderDefinition } from "../src/core/types.ts";
+import { TransitFileService } from "../src/server/files/transit-files.ts";
+import { createGuardedFetch } from "../src/core/guarded-fetch.ts";
+
+const evidenceDir = await mkdtemp(join(tmpdir(), "step2b-evidence-"));
+const results: Record<string, unknown> = {
+  generatedAt: new Date().toISOString(),
+  evidenceDir,
+  checks: {},
+};
+const checks = results.checks as Record<string, unknown>;
+
+const fixture = new Hono();
+fixture.get("/records", (context) => context.json({ items: [{ id: "fixture-1" }] }));
+fixture.post("/records", async (context) => context.json({ created: await context.req.json() }, 201));
+const fixtureServer = serve({ fetch: fixture.fetch, hostname: "0.0.0.0", port: 0 });
+const fixturePort = await new Promise<number>((resolve) => fixtureServer.on("listening", () => resolve((fixtureServer.address() as { port: number }).port)));
+try {
+  const fixtureHost = process.env.STEP2B_FIXTURE_HOST ?? findFixtureHost();
+  const fixtureUrl = `http://${fixtureHost}:${fixturePort}`;
+  const fixtureFetcher = createGuardedFetch({ allowPrivateNetwork: true, lookup: null });
+  const adapter = RestOpenApiAdapter.fromSpec(fixtureUrl, {
+    info: { version: "fixture-1" },
+    paths: {
+      "/records": {
+        get: { operationId: "listRecords", responses: { "200": {} } },
+        post: { operationId: "createRecord", responses: { "201": {} } },
+      },
+    },
+  }, { type: "none" }, true, fixtureFetcher);
+  const read = await adapter.invoke({ operationId: "listRecords" });
+  const firstWrite = await adapter.invoke({
+    operationId: "createRecord",
+    body: { name: "e2e" },
+    confirmed: true,
+    idempotencyKey: "fixture-write-1",
+  });
+  const secondWrite = await adapter.invoke({
+    operationId: "createRecord",
+    body: { name: "e2e" },
+    confirmed: true,
+    idempotencyKey: "fixture-write-1",
+  });
+  checks.rest = {
+    status: read.status === 200 && firstWrite.status === 201,
+    idempotentReplay: JSON.stringify(firstWrite) === JSON.stringify(secondWrite),
+    fixtureUrl,
+  };
+} finally {
+  fixtureServer.close();
+}
+
+const mcpPath = join(process.cwd(), "scripts", ".step2b-fixture-mcp.mjs");
+await writeFile(mcpPath, `
+  let buffer = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => {
+    buffer += chunk;
+    const lines = buffer.split("\\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const request = JSON.parse(line);
+      let result = {};
+      if (request.method === "initialize") {
+        result = { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "fixture-mcp", version: "1.0.0" } };
+      } else if (request.method === "tools/list") {
+        result = { tools: [{ name: "echo", description: "echo", inputSchema: { type: "object" } }] };
+      } else if (request.method === "tools/call") {
+        result = { content: [{ type: "text", text: JSON.stringify(request.params.arguments ?? {}) }] };
+      }
+      if (request.id !== undefined) process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) + "\\n");
+    }
+  });
+`);
+const mcp = new ControlledMcpAdapter({
+  transport: "stdio",
+  command: process.execPath,
+  args: [mcpPath],
+  allowedCommands: [process.execPath],
+});
+try {
+  const discovered = await mcp.discover();
+  const called = await mcp.callTool("echo", { value: "e2e" });
+  checks.mcp = { status: discovered.tools.length === 1, toolCall: JSON.stringify(called).includes("e2e") };
+} catch (error) {
+  checks.mcp = { status: false, error: error instanceof Error ? error.message : String(error) };
+}
+await unlink(mcpPath).catch(() => undefined);
+
+const fileRoot = join(evidenceDir, "files");
+const transit = new TransitFileService({
+  rootDir: fileRoot,
+  publicOrigin: "http://127.0.0.1",
+  ttlSeconds: 3600,
+  maxBytes: 10 * 1024 * 1024,
+});
+const files = new TenantFileAdapter("tenant-a", "workspace-a", transit, new DatabaseSync(":memory:"));
+const csv = await files.upload(new File(["a,b\\n1,2\\n"], "data.csv", { type: "text/csv" }));
+const json = await files.upload(new File(['{"ok":true}'], "data.json", { type: "application/json" }));
+const pdf = await files.upload(new File(["%PDF-1.7\\nfixture"], "data.pdf", { type: "application/pdf" }));
+const excelSource = "/Users/bytedance/DB-GPT/docker/examples/excel/example.xlsx";
+const excelBytes = await readFile(excelSource);
+const excel = await files.upload(new File([excelBytes], "data.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+checks.files = { status: files.list().length === 4, kinds: files.list().map((file) => file.kind), ids: [csv.fileId, json.fileId, pdf.fileId, excel.fileId] };
+
+const provider: ProviderDefinition = {
+  service: "fixture",
+  displayName: "Fixture",
+  categories: ["test"],
+  authTypes: ["custom_credential"],
+  auth: [{ type: "custom_credential", fields: [{ key: "secret", label: "Secret", inputType: "password", required: true, secret: true }] }],
+  actions: [],
+};
+const controlDb = new DatabaseSync(":memory:");
+const controlApp = createConnectionControlApp({
+  catalog: createCatalogStore([provider]),
+  providerLoader: {
+    loadActionExecutor: async () => undefined,
+    loadProxyExecutor: async () => undefined,
+    loadCredentialValidators: async () => undefined,
+  },
+  controlDatabase: controlDb,
+  secretCodec: new AesGcmSecretCodec("e2e-encryption-key"),
+  authSecret: "e2e-auth-secret",
+  publicOrigin: "http://127.0.0.1",
+  enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "e2e" }],
+  fileStore: transit,
+});
+const tenant = { tenantId: "tenant-a", workspaceId: "workspace-a", subject: "user-a", ownerId: "user-a", audience: "runtime" };
+const token = createPrincipalToken(tenant, "e2e-auth-secret");
+const created = await controlApp.request("/v1/connections", {
+  method: "POST",
+  headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+  body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "never-return-this" } }),
+});
+const createdBody = await created.json() as Record<string, unknown>;
+const listed = await controlApp.request("/v1/connections", { headers: { authorization: `Bearer ${token}` } });
+checks.controlPlane = {
+  createStatus: created.status,
+  listStatus: listed.status,
+  credentialRedacted: !JSON.stringify(createdBody).includes("never-return-this"),
+  ciphertextStored: Boolean((controlDb.prepare("select credential_ciphertext from tenant_connections").get() as { credential_ciphertext?: string })?.credential_ciphertext?.startsWith("enc:v1:")),
+};
+
+await writeFile(join(evidenceDir, "results.json"), JSON.stringify(results, null, 2));
+console.log(JSON.stringify(results, null, 2));
+
+function findFixtureHost(): string {
+  const candidates = Object.values(networkInterfaces())
+    .flatMap((entries) => entries ?? [])
+    .filter((entry) => entry.family === "IPv4" && !entry.internal)
+    .map((entry) => entry.address);
+  const host = candidates.find((address) => address.startsWith("192.168.")) ?? candidates[0];
+  if (!host) {
+    throw new Error("No non-loopback IPv4 address is available for the TCP fixture.");
+  }
+  return host;
+}
