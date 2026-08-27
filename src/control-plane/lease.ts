@@ -1,7 +1,7 @@
+import type { ConnectionLeaseClaims, TenantPrincipal } from "./types.ts";
 import type { DatabaseSync } from "node:sqlite";
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import type { ConnectionLeaseClaims, TenantPrincipal } from "./types.ts";
 
 export class LeaseError extends Error {
   readonly code: "invalid_lease" | "lease_expired" | "lease_revoked" | "lease_scope_denied";
@@ -100,14 +100,18 @@ export class ConnectionLeaseService {
     return { token, claims };
   }
 
-  verify(token: string, principal: TenantPrincipal, expected: { connectionId: string; actionId: string; audience: string; invocationId: string }): ConnectionLeaseClaims {
+  verify(
+    token: string,
+    principal: TenantPrincipal,
+    expected: { connectionId: string; actionId: string; audience: string; invocationId: string },
+  ): ConnectionLeaseClaims {
     if (!token.startsWith("cl_")) {
       throw new LeaseError("invalid_lease", "Malformed connection lease.");
     }
     const tokenHash = hashToken(token);
-    const row = this.database
-      .prepare("select * from connection_leases where token_hash = ?")
-      .get(tokenHash) as Record<string, unknown> | undefined;
+    const row = this.database.prepare("select * from connection_leases where token_hash = ?").get(tokenHash) as
+      | Record<string, unknown>
+      | undefined;
     if (!row || !equalHash(String(row.token_hash), tokenHash)) {
       throw new LeaseError("invalid_lease", "Connection lease was not found.");
     }
@@ -139,6 +143,18 @@ export class ConnectionLeaseService {
       )
       .run(this.now().toISOString(), jti, principal.tenantId, principal.workspaceId);
     return Number(result.changes) === 1;
+  }
+
+  revokeForConnection(connectionId: string, principal: TenantPrincipal): number {
+    const pattern = `%"${connectionId.replaceAll("%", "\\%").replaceAll("_", "\\_")}"%`;
+    const result = this.database
+      .prepare(
+        `update connection_leases set revoked_at = ?
+          where tenant_id = ? and workspace_id = ? and revoked_at is null
+            and connection_ids_json like ? escape '\\'`,
+      )
+      .run(this.now().toISOString(), principal.tenantId, principal.workspaceId, pattern);
+    return Number(result.changes);
   }
 }
 

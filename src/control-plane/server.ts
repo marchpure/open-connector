@@ -91,6 +91,55 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     const runtime = tenantRuntime(options, principalOf(context));
     return context.json({ items: await runtime.records() });
   });
+  app.patch("/v1/connections/:connectionId", async (context) => {
+    const body = await readJsonBody(context);
+    const runtime = tenantRuntime(options, principalOf(context));
+    const connectionId = context.req.param("connectionId");
+    if (runtime.connections.visibleRecord(connectionId) && !runtime.connections.ownerRecord(connectionId)) {
+      return jsonError(context, 403, "connection_forbidden", "Only the connection owner may manage it.");
+    }
+    const connectionName = optionalString(body.connectionName);
+    const visibility = optionalVisibility(body.visibility);
+    if (!connectionName && !visibility) {
+      return jsonError(context, 400, "invalid_input", "connectionName or visibility is required.");
+    }
+    const record = runtime.connections.updateRecord(connectionId, { connectionName, visibility });
+    if (record && visibility) {
+      leases.revokeForConnection(connectionId, principalOf(context));
+    }
+    return record
+      ? context.json({ connection: record })
+      : jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
+  });
+  app.delete("/v1/connections/:connectionId", (context) => {
+    const principal = principalOf(context);
+    const runtime = tenantRuntime(options, principal);
+    const connectionId = context.req.param("connectionId");
+    if (runtime.connections.visibleRecord(connectionId) && !runtime.connections.ownerRecord(connectionId)) {
+      return jsonError(context, 403, "connection_forbidden", "Only the connection owner may manage it.");
+    }
+    if (!runtime.connections.revokeRecord(connectionId)) {
+      return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
+    }
+    leases.revokeForConnection(connectionId, principal);
+    return new Response(null, { status: 204 });
+  });
+  app.put("/v1/connections/:connectionId/acl", async (context) => {
+    const body = await readJsonBody(context);
+    const principal = principalOf(context);
+    const runtime = tenantRuntime(options, principal);
+    const connectionId = context.req.param("connectionId");
+    if (runtime.connections.visibleRecord(connectionId) && !runtime.connections.ownerRecord(connectionId)) {
+      return jsonError(context, 403, "connection_forbidden", "Only the connection owner may manage it.");
+    }
+    const subjects = stringArray(body.subjects);
+    const acl = runtime.connections.replaceAcl(connectionId, subjects);
+    if (!acl) {
+      return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
+    }
+    leases.revokeForConnection(connectionId, principal);
+    return context.json({ acl });
+  });
   app.post("/v1/connections", async (context) => {
     const body = await readJsonBody(context);
     const service = requiredString(body.service);
@@ -393,9 +442,22 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function optionalVisibility(value: unknown): "personal" | "team" | undefined {
+  if (value === undefined) return undefined;
+  if (value === "personal" || value === "team") return value;
+  throw new Error("visibility must be personal or team.");
+}
+
 function requiredStringArray(value: unknown): string[] {
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item.trim())) {
     throw new Error("A non-empty string array is required.");
+  }
+  return value.map((item) => String(item).trim());
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item.trim())) {
+    throw new Error("A string array is required.");
   }
   return value.map((item) => String(item).trim());
 }

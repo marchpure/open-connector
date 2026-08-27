@@ -119,4 +119,185 @@ describe("connection control API", () => {
     );
     database.close();
   });
+
+  it("enforces personal/team visibility and owner-only connection management", async () => {
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([provider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => undefined,
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const ownerToken = createPrincipalToken(principal, "auth-secret");
+    const teammateToken = createPrincipalToken({ ...principal, subject: "user-b", ownerId: "user-b" }, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "secret" } }),
+    });
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+
+    const hidden = await app.request("/v1/connections", {
+      headers: { authorization: `Bearer ${teammateToken}` },
+    });
+    expect(await hidden.json()).toEqual({ items: [] });
+
+    const shared = await app.request(`/v1/connections/${connectionId}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ visibility: "team" }),
+    });
+    expect(shared.status).toBe(200);
+    expect(await shared.json()).toMatchObject({ connection: { id: connectionId, visibility: "team", revision: 2 } });
+
+    const visible = await app.request("/v1/connections", {
+      headers: { authorization: `Bearer ${teammateToken}` },
+    });
+    expect(await visible.json()).toMatchObject({ items: [{ id: connectionId }] });
+    const teammateLease = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${teammateToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["fixture.read"],
+        invocationId: "team-invocation",
+        audience: "knowledge-runtime",
+      }),
+    });
+    const { claims } = (await teammateLease.json()) as { claims: { jti: string } };
+    const forbidden = await app.request(`/v1/connections/${connectionId}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${teammateToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ connectionName: "stolen" }),
+    });
+    expect(forbidden.status).toBe(403);
+
+    await app.request(`/v1/connections/${connectionId}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ visibility: "personal" }),
+    });
+    expect(database.prepare("select revoked_at from connection_leases where jti=?").get(claims.jti)).toMatchObject({
+      revoked_at: expect.any(String),
+    });
+    database.close();
+  });
+
+  it("revokes a connection and all of its active leases", async () => {
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([provider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => undefined,
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "secret" } }),
+    });
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+    const leaseResponse = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["fixture.read"],
+        invocationId: "inv-1",
+        audience: "knowledge-runtime",
+      }),
+    });
+    const lease = (await leaseResponse.json()) as { claims: { jti: string } };
+
+    const revoked = await app.request(`/v1/connections/${connectionId}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${auth}` },
+    });
+    expect(revoked.status).toBe(204);
+    expect(database.prepare("select status from tenant_connections where id=?").get(connectionId)).toEqual({
+      status: "revoked",
+    });
+    expect(
+      database.prepare("select revoked_at from connection_leases where jti=?").get(lease.claims.jti),
+    ).toMatchObject({
+      revoked_at: expect.any(String),
+    });
+    database.close();
+  });
+
+  it("grants and removes explicit connection use ACLs with lease revocation", async () => {
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([provider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => undefined,
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const ownerToken = createPrincipalToken(principal, "auth-secret");
+    const teammateToken = createPrincipalToken({ ...principal, subject: "user-b", ownerId: "user-b" }, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "secret" } }),
+    });
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+
+    const granted = await app.request(`/v1/connections/${connectionId}/acl`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ subjects: ["user-b"] }),
+    });
+    expect(await granted.json()).toEqual({ acl: [{ subject: "user-b", permission: "use" }] });
+    const visible = await app.request("/v1/connections", {
+      headers: { authorization: `Bearer ${teammateToken}` },
+    });
+    expect(await visible.json()).toMatchObject({ items: [{ id: connectionId }] });
+
+    const leaseResponse = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${teammateToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["fixture.read"],
+        invocationId: "inv-acl",
+        audience: "knowledge-runtime",
+      }),
+    });
+    const lease = (await leaseResponse.json()) as { claims: { jti: string } };
+    await app.request(`/v1/connections/${connectionId}/acl`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ subjects: [] }),
+    });
+
+    const hidden = await app.request("/v1/connections", {
+      headers: { authorization: `Bearer ${teammateToken}` },
+    });
+    expect(await hidden.json()).toEqual({ items: [] });
+    expect(
+      database.prepare("select revoked_at from connection_leases where jti=?").get(lease.claims.jti),
+    ).toMatchObject({
+      revoked_at: expect.any(String),
+    });
+    database.close();
+  });
 });

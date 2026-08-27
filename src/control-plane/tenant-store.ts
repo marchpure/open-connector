@@ -1,13 +1,19 @@
 import type { IConnectionStore, StoredConnection } from "../connection-service.ts";
 import type { ResolvedCredential } from "../core/types.ts";
-import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
-import type { IRunLogStore, RunLog, RunLogListInput, RunLogPage, RunLogWriteResult } from "../server/storage/runtime-store.ts";
 import type { IOAuthClientConfigStore, OAuthClientConfig } from "../oauth/oauth-client-config-service.ts";
 import type { IOAuthStateStore, OAuthAuthorizationState } from "../oauth/oauth-flow-service.ts";
+import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
+import type {
+  IRunLogStore,
+  RunLog,
+  RunLogListInput,
+  RunLogPage,
+  RunLogWriteResult,
+} from "../server/storage/runtime-store.ts";
+import type { ConnectionRecord, TenantPrincipal } from "./types.ts";
+import type { DatabaseSync } from "node:sqlite";
 
 import { randomUUID } from "node:crypto";
-import type { DatabaseSync } from "node:sqlite";
-import type { ConnectionRecord, TenantPrincipal } from "./types.ts";
 import { redactSecrets, safeConnectionProfile } from "./redaction.ts";
 
 export class TenantConnectionStore implements IConnectionStore {
@@ -15,11 +21,7 @@ export class TenantConnectionStore implements IConnectionStore {
   private readonly principal: TenantPrincipal;
   private readonly secretCodec: ISecretCodec;
 
-  constructor(
-    database: DatabaseSync,
-    principal: TenantPrincipal,
-    secretCodec: ISecretCodec,
-  ) {
+  constructor(database: DatabaseSync, principal: TenantPrincipal, secretCodec: ISecretCodec) {
     this.database = database;
     this.principal = principal;
     this.secretCodec = secretCodec;
@@ -44,6 +46,18 @@ export class TenantConnectionStore implements IConnectionStore {
       );
       create index if not exists idx_tenant_connections_scope
         on tenant_connections (tenant_id, workspace_id);
+      create table if not exists connection_acl (
+        connection_id text not null,
+        tenant_id text not null,
+        workspace_id text not null,
+        subject text not null,
+        permission text not null check (permission in ('use')),
+        created_at text not null,
+        primary key (connection_id, subject, permission),
+        foreign key (connection_id) references tenant_connections(id)
+      );
+      create index if not exists idx_connection_acl_scope
+        on connection_acl (tenant_id, workspace_id, subject);
       create table if not exists control_execution_audit (
         id text primary key,
         tenant_id text not null,
@@ -66,9 +80,26 @@ export class TenantConnectionStore implements IConnectionStore {
   async get(service: string, connectionName: string): Promise<StoredConnection | undefined> {
     const row = this.database
       .prepare(
-        "select * from tenant_connections where tenant_id = ? and workspace_id = ? and service = ? and connection_name = ?",
+        `select * from tenant_connections
+          where tenant_id = ? and workspace_id = ? and service = ? and connection_name = ?
+            and status <> 'revoked'
+            and (owner_id = ? or visibility = 'team' or exists (
+              select 1 from connection_acl
+               where connection_acl.connection_id = tenant_connections.id
+                 and connection_acl.tenant_id = tenant_connections.tenant_id
+                 and connection_acl.workspace_id = tenant_connections.workspace_id
+                 and connection_acl.subject = ?
+                 and connection_acl.permission = 'use'
+            ))`,
       )
-      .get(this.principal.tenantId, this.principal.workspaceId, service, connectionName) as Record<string, unknown> | undefined;
+      .get(
+        this.principal.tenantId,
+        this.principal.workspaceId,
+        service,
+        connectionName,
+        this.principal.ownerId,
+        this.principal.subject,
+      ) as Record<string, unknown> | undefined;
     return row ? await this.toStored(row) : undefined;
   }
 
@@ -77,9 +108,10 @@ export class TenantConnectionStore implements IConnectionStore {
     const now = new Date().toISOString();
     const id = existing?.id ?? randomUUID();
     const revision = (existing ? Number(existing.revision) : 0) + 1;
-    const profile = credential.authType === "no_auth"
-      ? { accountId: `${service}:public`, displayName: service, grantedScopes: [] }
-      : credential.profile;
+    const profile =
+      credential.authType === "no_auth"
+        ? { accountId: `${service}:public`, displayName: service, grantedScopes: [] }
+        : credential.profile;
     const ciphertext = await this.secretCodec.encode(JSON.stringify(credential));
     this.database
       .prepare(
@@ -140,37 +172,162 @@ export class TenantConnectionStore implements IConnectionStore {
 
   async list(): Promise<StoredConnection[]> {
     const rows = this.database
-      .prepare("select * from tenant_connections where tenant_id=? and workspace_id=? and status <> 'revoked' order by created_at")
-      .all(this.principal.tenantId, this.principal.workspaceId) as Record<string, unknown>[];
+      .prepare(
+        `select * from tenant_connections
+          where tenant_id=? and workspace_id=? and status <> 'revoked'
+            and (owner_id=? or visibility='team' or exists (
+              select 1 from connection_acl
+               where connection_acl.connection_id=tenant_connections.id
+                 and connection_acl.tenant_id=tenant_connections.tenant_id
+                 and connection_acl.workspace_id=tenant_connections.workspace_id
+                 and connection_acl.subject=?
+                 and connection_acl.permission='use'
+            ))
+          order by created_at`,
+      )
+      .all(
+        this.principal.tenantId,
+        this.principal.workspaceId,
+        this.principal.ownerId,
+        this.principal.subject,
+      ) as Record<string, unknown>[];
     return Promise.all(rows.map((row) => this.toStored(row)));
   }
 
   async listRecords(): Promise<ConnectionRecord[]> {
     const rows = this.database
-      .prepare("select * from tenant_connections where tenant_id=? and workspace_id=? order by created_at")
-      .all(this.principal.tenantId, this.principal.workspaceId) as Record<string, unknown>[];
-    return rows.map((row) => ({
-      id: String(row.id),
-      tenantId: String(row.tenant_id),
-      workspaceId: String(row.workspace_id),
-      ownerId: String(row.owner_id),
-      service: String(row.service),
-      connectionName: String(row.connection_name),
-      connectorDefinitionVersion: String(row.connector_definition_version),
-      credentialRef: String(row.credential_ref),
-      status: String(row.status) as ConnectionRecord["status"],
-      revision: Number(row.revision),
-      visibility: String(row.visibility) as ConnectionRecord["visibility"],
-      profile: JSON.parse(String(row.profile_json)),
-      createdAt: String(row.created_at),
-      updatedAt: String(row.updated_at),
-    }));
+      .prepare(
+        `select * from tenant_connections
+          where tenant_id=? and workspace_id=? and status <> 'revoked'
+            and (owner_id=? or visibility='team' or exists (
+              select 1 from connection_acl
+               where connection_acl.connection_id=tenant_connections.id
+                 and connection_acl.tenant_id=tenant_connections.tenant_id
+                 and connection_acl.workspace_id=tenant_connections.workspace_id
+                 and connection_acl.subject=?
+                 and connection_acl.permission='use'
+            ))
+          order by created_at`,
+      )
+      .all(
+        this.principal.tenantId,
+        this.principal.workspaceId,
+        this.principal.ownerId,
+        this.principal.subject,
+      ) as Record<string, unknown>[];
+    return rows.map(rowToConnectionRecord);
+  }
+
+  updateRecord(
+    id: string,
+    input: { connectionName?: string; visibility?: ConnectionRecord["visibility"] },
+  ): ConnectionRecord | undefined {
+    const current = this.ownerRecord(id);
+    if (!current) return undefined;
+    const connectionName = input.connectionName ?? current.connectionName;
+    const visibility = input.visibility ?? current.visibility;
+    this.database
+      .prepare(
+        `update tenant_connections
+            set connection_name=?, visibility=?, revision=revision+1, updated_at=?
+          where id=? and tenant_id=? and workspace_id=? and owner_id=?`,
+      )
+      .run(
+        connectionName,
+        visibility,
+        new Date().toISOString(),
+        id,
+        this.principal.tenantId,
+        this.principal.workspaceId,
+        this.principal.ownerId,
+      );
+    return this.ownerRecord(id);
+  }
+
+  revokeRecord(id: string): boolean {
+    const result = this.database
+      .prepare(
+        `update tenant_connections
+            set status='revoked', revision=revision+1, updated_at=?
+          where id=? and tenant_id=? and workspace_id=? and owner_id=? and status <> 'revoked'`,
+      )
+      .run(new Date().toISOString(), id, this.principal.tenantId, this.principal.workspaceId, this.principal.ownerId);
+    return Number(result.changes) === 1;
+  }
+
+  replaceAcl(id: string, subjects: string[]): Array<{ subject: string; permission: "use" }> | undefined {
+    if (!this.ownerRecord(id)) return undefined;
+    const uniqueSubjects = [...new Set(subjects.map((subject) => subject.trim()).filter(Boolean))];
+    this.database.exec("begin immediate");
+    try {
+      this.database
+        .prepare("delete from connection_acl where connection_id=? and tenant_id=? and workspace_id=?")
+        .run(id, this.principal.tenantId, this.principal.workspaceId);
+      const insert = this.database.prepare(
+        `insert into connection_acl
+          (connection_id, tenant_id, workspace_id, subject, permission, created_at)
+         values (?, ?, ?, ?, 'use', ?)`,
+      );
+      for (const subject of uniqueSubjects) {
+        insert.run(id, this.principal.tenantId, this.principal.workspaceId, subject, new Date().toISOString());
+      }
+      this.database.exec("commit");
+    } catch (error) {
+      this.database.exec("rollback");
+      throw error;
+    }
+    return uniqueSubjects.map((subject) => ({ subject, permission: "use" }));
+  }
+
+  ownerRecord(id: string): ConnectionRecord | undefined {
+    const row = this.database
+      .prepare(
+        `select * from tenant_connections
+          where id=? and tenant_id=? and workspace_id=? and owner_id=? and status <> 'revoked'`,
+      )
+      .get(id, this.principal.tenantId, this.principal.workspaceId, this.principal.ownerId) as
+      | Record<string, unknown>
+      | undefined;
+    return row ? rowToConnectionRecord(row) : undefined;
+  }
+
+  visibleRecord(id: string): ConnectionRecord | undefined {
+    const row = this.database
+      .prepare(
+        `select * from tenant_connections
+          where id=? and tenant_id=? and workspace_id=? and status <> 'revoked'
+            and (owner_id=? or visibility='team' or exists (
+              select 1 from connection_acl
+               where connection_acl.connection_id=tenant_connections.id
+                 and connection_acl.tenant_id=tenant_connections.tenant_id
+                 and connection_acl.workspace_id=tenant_connections.workspace_id
+                 and connection_acl.subject=?
+                 and connection_acl.permission='use'
+            ))`,
+      )
+      .get(id, this.principal.tenantId, this.principal.workspaceId, this.principal.ownerId, this.principal.subject) as
+      | Record<string, unknown>
+      | undefined;
+    return row ? rowToConnectionRecord(row) : undefined;
   }
 
   async connectionNameForId(id: string): Promise<{ service: string; connectionName: string } | undefined> {
     const row = this.database
-      .prepare("select service, connection_name from tenant_connections where id=? and tenant_id=? and workspace_id=?")
-      .get(id, this.principal.tenantId, this.principal.workspaceId) as Record<string, unknown> | undefined;
+      .prepare(
+        `select service, connection_name from tenant_connections
+          where id=? and tenant_id=? and workspace_id=? and status <> 'revoked'
+            and (owner_id=? or visibility='team' or exists (
+              select 1 from connection_acl
+               where connection_acl.connection_id=tenant_connections.id
+                 and connection_acl.tenant_id=tenant_connections.tenant_id
+                 and connection_acl.workspace_id=tenant_connections.workspace_id
+                 and connection_acl.subject=?
+                 and connection_acl.permission='use'
+            ))`,
+      )
+      .get(id, this.principal.tenantId, this.principal.workspaceId, this.principal.ownerId, this.principal.subject) as
+      | Record<string, unknown>
+      | undefined;
     return row ? { service: String(row.service), connectionName: String(row.connection_name) } : undefined;
   }
 
@@ -183,6 +340,25 @@ export class TenantConnectionStore implements IConnectionStore {
       credential: JSON.parse(await this.secretCodec.decode(String(row.credential_ciphertext))) as ResolvedCredential,
     };
   }
+}
+
+function rowToConnectionRecord(row: Record<string, unknown>): ConnectionRecord {
+  return {
+    id: String(row.id),
+    tenantId: String(row.tenant_id),
+    workspaceId: String(row.workspace_id),
+    ownerId: String(row.owner_id),
+    service: String(row.service),
+    connectionName: String(row.connection_name),
+    connectorDefinitionVersion: String(row.connector_definition_version),
+    credentialRef: String(row.credential_ref),
+    status: String(row.status) as ConnectionRecord["status"],
+    revision: Number(row.revision),
+    visibility: String(row.visibility) as ConnectionRecord["visibility"],
+    profile: JSON.parse(String(row.profile_json)),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
 }
 
 export class TenantRunLogStore implements IRunLogStore {
@@ -228,7 +404,9 @@ export class TenantRunLogStore implements IRunLogStore {
 
   async list(_input: RunLogListInput = {}): Promise<RunLogPage> {
     const rows = this.database
-      .prepare("select * from control_execution_audit where tenant_id=? and workspace_id=? order by started_at desc limit 100")
+      .prepare(
+        "select * from control_execution_audit where tenant_id=? and workspace_id=? order by started_at desc limit 100",
+      )
       .all(this.principal.tenantId, this.principal.workspaceId) as Record<string, unknown>[];
     return { items: rows.map(rowToRun) };
   }
@@ -257,10 +435,12 @@ export class TenantOAuthClientConfigStore implements IOAuthClientConfigStore {
 
   async get(service: string): Promise<OAuthClientConfig | undefined> {
     const row = this.database
-      .prepare("select value_ciphertext from tenant_oauth_client_configs where tenant_id=? and workspace_id=? and service=?")
+      .prepare(
+        "select value_ciphertext from tenant_oauth_client_configs where tenant_id=? and workspace_id=? and service=?",
+      )
       .get(this.principal.tenantId, this.principal.workspaceId, service) as Record<string, unknown> | undefined;
     return row
-      ? JSON.parse(await this.secretCodec.decode(String(row.value_ciphertext))) as OAuthClientConfig
+      ? (JSON.parse(await this.secretCodec.decode(String(row.value_ciphertext))) as OAuthClientConfig)
       : undefined;
   }
 
@@ -292,8 +472,11 @@ export class TenantOAuthClientConfigStore implements IOAuthClientConfigStore {
     const rows = this.database
       .prepare("select value_ciphertext from tenant_oauth_client_configs where tenant_id=? and workspace_id=?")
       .all(this.principal.tenantId, this.principal.workspaceId) as Record<string, unknown>[];
-    return Promise.all(rows.map(async (row) =>
-      JSON.parse(await this.secretCodec.decode(String(row.value_ciphertext))) as OAuthClientConfig));
+    return Promise.all(
+      rows.map(
+        async (row) => JSON.parse(await this.secretCodec.decode(String(row.value_ciphertext))) as OAuthClientConfig,
+      ),
+    );
   }
 }
 
