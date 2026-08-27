@@ -17,6 +17,7 @@ import { readJsonBody, jsonError } from "../server/api/http-utils.ts";
 import { verifyPrincipalToken } from "./auth.ts";
 import { CatalogEnablement } from "./catalog.ts";
 import { TenantFileAdapter } from "./file-adapter.ts";
+import { ConnectionJobStore } from "./job-store.ts";
 import { ConnectionLeaseService, LeaseError } from "./lease.ts";
 import { ControlledMcpAdapter, TenantMcpDefinitionStore } from "./mcp-adapter.ts";
 import { OracleDatabaseAdapter } from "./oracle-adapter.ts";
@@ -149,6 +150,67 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     }
     leases.revokeForConnection(connectionId, principal);
     return context.json({ acl });
+  });
+  app.post("/v1/connections/:connectionId/validate", async (context) => {
+    const runtime = tenantRuntime(options, principalOf(context));
+    const connectionId = context.req.param("connectionId");
+    const connection = runtime.connections.visibleRecord(connectionId);
+    if (!connection) {
+      return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
+    }
+    const jobs = tenantJobs(options, principalOf(context));
+    const job = jobs.create(connectionId, "validate");
+    jobs.start(job.id);
+    runtime.connections.setStatus(connectionId, "validating");
+    try {
+      await runtime.connectionService.validateStoredConnection(
+        connection.service,
+        connection.connectionName,
+        context.req.raw.signal,
+      );
+      jobs.succeed(job.id, { validated: true });
+      runtime.connections.setStatus(connectionId, "ready");
+    } catch (error) {
+      jobs.fail(job.id, {
+        code: error instanceof ConnectionError ? error.code : "validation_failed",
+        message: error instanceof Error ? error.message : "Connection validation failed.",
+      });
+      runtime.connections.setStatus(connectionId, "error");
+    }
+    return context.json({ job: jobs.get(job.id) }, 202);
+  });
+  app.post("/v1/connections/:connectionId/discover", async (context) => {
+    const runtime = tenantRuntime(options, principalOf(context));
+    const connectionId = context.req.param("connectionId");
+    const connection = runtime.connections.visibleRecord(connectionId);
+    if (!connection) {
+      return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
+    }
+    const jobs = tenantJobs(options, principalOf(context));
+    const job = jobs.create(connectionId, "discover");
+    jobs.start(job.id);
+    const provider = options.catalog.providers.find((entry) => entry.service === connection.service);
+    if (!provider) {
+      jobs.fail(job.id, { code: "provider_not_found", message: "Provider definition was not found." });
+    } else {
+      jobs.succeed(job.id, {
+        service: provider.service,
+        definitionVersion: connection.connectorDefinitionVersion,
+        actions: provider.actions.map(({ id, name, description, inputSchema, outputSchema, execution }) => ({
+          id,
+          name,
+          description,
+          inputSchema,
+          outputSchema,
+          executable: execution.locallyExecutable,
+        })),
+      });
+    }
+    return context.json({ job: jobs.get(job.id) }, 202);
+  });
+  app.get("/v1/jobs/:jobId", (context) => {
+    const job = tenantJobs(options, principalOf(context)).get(context.req.param("jobId"));
+    return job ? context.json({ job }) : jsonError(context, 404, "job_not_found", "Connection job was not found.");
   });
   app.post("/v1/connections", async (context) => {
     const body = await readJsonBody(context);
@@ -579,6 +641,13 @@ function tenantWebDiscovery(options: ConnectionControlAppOptions, principal: Ten
     },
     options.secretCodec,
   );
+}
+
+function tenantJobs(options: ConnectionControlAppOptions, principal: TenantPrincipal) {
+  return new ConnectionJobStore(options.controlDatabase, {
+    tenantId: principal.tenantId,
+    workspaceId: principal.workspaceId,
+  });
 }
 
 function principalOf(context: Context): TenantPrincipal {

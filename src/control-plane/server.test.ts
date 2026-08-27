@@ -300,4 +300,99 @@ describe("connection control API", () => {
     });
     database.close();
   });
+
+  it("runs durable tenant-scoped validation and discovery jobs", async () => {
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([provider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          customCredential: async () => ({ profile: { accountId: "validated" } }),
+        }),
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "secret" } }),
+    });
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+
+    const validation = await app.request(`/v1/connections/${connectionId}/validate`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}` },
+    });
+    expect(validation.status).toBe(202);
+    const validationJob = (await validation.json()) as { job: { id: string } };
+    const fetched = await app.request(`/v1/jobs/${validationJob.job.id}`, {
+      headers: { authorization: `Bearer ${auth}` },
+    });
+    expect(await fetched.json()).toMatchObject({
+      job: { id: validationJob.job.id, kind: "validate", status: "succeeded" },
+    });
+
+    const discovery = await app.request(`/v1/connections/${connectionId}/discover`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}` },
+    });
+    expect(discovery.status).toBe(202);
+    expect(await discovery.json()).toMatchObject({
+      job: { kind: "discover", status: "succeeded", result: { service: "fixture", actions: [] } },
+    });
+    database.close();
+  });
+
+  it("persists failed validation and marks the connection error", async () => {
+    const database = new DatabaseSync(":memory:");
+    const validateCredential = vi
+      .fn()
+      .mockResolvedValueOnce({ profile: { accountId: "created" } })
+      .mockRejectedValueOnce(new Error("upstream rejected credential"));
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([provider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          customCredential: validateCredential,
+        }),
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "secret" } }),
+    });
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+    const validation = await app.request(`/v1/connections/${connectionId}/validate`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}` },
+    });
+
+    expect(await validation.json()).toMatchObject({
+      job: {
+        kind: "validate",
+        status: "failed",
+        error: { code: "credential_verification_failed" },
+      },
+    });
+    expect(database.prepare("select status from tenant_connections where id=?").get(connectionId)).toEqual({
+      status: "error",
+    });
+    database.close();
+  });
 });

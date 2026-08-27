@@ -253,6 +253,22 @@ export class ConnectionService {
     return this.supportsAuth(provider, "no_auth") ? { authType: "no_auth" } : undefined;
   }
 
+  async validateStoredConnection(service: string, connectionName?: string, signal?: AbortSignal): Promise<void> {
+    const name = normalizeConnectionName(connectionName);
+    const stored = await this.store.get(service, name);
+    if (!stored) {
+      throw new ConnectionError("connection_not_found", `${service} connection not found: ${name}.`);
+    }
+    const credential = stored.credential;
+    if (credential.authType === "api_key") {
+      await this.validateApiKeyCredential(service, { apiKey: credential.apiKey, values: credential.values }, signal);
+    } else if (credential.authType === "custom_credential") {
+      await this.validateCustomCredential(service, { values: credential.values }, signal);
+    } else if (credential.authType === "oauth2") {
+      await this.validateOAuthCredential(service, credential, signal);
+    }
+  }
+
   forConnection(connectionName?: string): Pick<ConnectionService, "getCredential"> {
     return {
       getCredential: (service: string) => this.getCredential(service, connectionName),

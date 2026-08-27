@@ -255,6 +255,16 @@ export class TenantConnectionStore implements IConnectionStore {
     return Number(result.changes) === 1;
   }
 
+  setStatus(id: string, status: ConnectionRecord["status"]): boolean {
+    const updated = this.database
+      .prepare(
+        `update tenant_connections set status=?, updated_at=?
+          where id=? and tenant_id=? and workspace_id=? and status <> 'revoked'`,
+      )
+      .run(status, new Date().toISOString(), id, this.principal.tenantId, this.principal.workspaceId);
+    return Number(updated.changes) === 1;
+  }
+
   replaceAcl(id: string, subjects: string[]): Array<{ subject: string; permission: "use" }> | undefined {
     if (!this.ownerRecord(id)) return undefined;
     const uniqueSubjects = [...new Set(subjects.map((subject) => subject.trim()).filter(Boolean))];
