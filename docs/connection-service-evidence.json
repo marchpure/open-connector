@@ -1,7 +1,7 @@
 {
-  "recordedAt": "2026-08-28T01:29:04+08:00",
+  "recordedAt": "2026-08-28T04:45:00+08:00",
   "classification": "sanitized-local-evidence",
-  "testedServiceCommit": "d711fe24cf924132b4096d56867dd947c5743d06",
+  "testedServiceCommit": "8f812af42fefe092fe004152b38c5ceda3afaa85",
   "service": {
     "catalogProviderCountObserved": 1445,
     "catalogActionCountObserved": 15156,
@@ -18,9 +18,9 @@
   "automated": {
     "fullSuite": {
       "command": "npm test -- --run",
-      "testFilesPassed": 162,
+      "testFilesPassed": 163,
       "testFilesSkipped": 1,
-      "testsPassed": 1457,
+      "testsPassed": 1467,
       "testsSkipped": 4
     },
     "focusedControlPlane": {
@@ -33,7 +33,7 @@
         "durable validation/discovery jobs and restart recovery",
         "Oracle AST, discovery, limits, and driver read-only transaction",
         "durable tenant REST idempotency, OAuth bearer, pagination, and rate limit",
-        "MCP definition encryption, allowlists, schema rejection, and timeout",
+        "MCP definition encryption, allowlists, schema rejection, timeout, and real HTTP transports",
         "Web Discovery token, origin, redirect, cookie, CSRF, and confirmation controls",
         "file scan, deduplication, parsing, and preview"
       ]
@@ -56,11 +56,14 @@
   },
   "realLocalE2e": {
     "command": "npx --no-install tsx scripts/step2b-local-e2e.ts",
-    "result": "/var/folders/y5/s7wzkl8d44q4z4lj2ljg4lrc0000gn/T/step2b-evidence-Q3pS9S/results.json",
-    "resultSha256": "2c91aeacfb793561029dee5e02755e1be0f36689fb5d821c31c7cc525d593f47",
+    "result": "/tmp/step2b-local-e2e-final.json",
+    "resultSha256": "f93fe5da5e0abf1efad40ef98ece8170765240d415db42caed73ec135b297ec4",
+    "connectionLifecycle": "passed over Control API: create, validate, discover, update, lease issue, real fixture invocation, revoke, rejection after revoke, delete",
     "fixtureRestTcp": "passed",
     "restIdempotentWriteReplay": "passed",
-    "mcpStdioInitializeToolsListCall": "passed",
+    "mcpStdioInitializeToolsResourcesPromptsCallReconnectDisconnectTimeout": "passed with independent real processes",
+    "mcpStreamableHttp": "passed against a real local MCP HTTP server",
+    "mcpLegacySse": "passed against a real local MCP SSE server",
     "fileParsePreviews": {
       "csv": "passed",
       "json": "passed",
@@ -68,14 +71,14 @@
       "pdf": "passed with real 10-page PDF and 4515 extracted characters",
       "parquet": "passed with real ZSTD Parquet and 17 preview rows"
     },
-    "tenantIsolation": "passed in automated integration tests",
+    "tenantIsolation": "passed in real local lifecycle and automated integration tests",
     "credentialRedaction": "passed",
     "credentialCiphertextAtRest": "passed"
   },
   "realOracle": {
     "command": "npx --no-install tsx scripts/step2b-oracle-e2e.ts with STEP2B_ORACLE_* environment variables",
-    "result": "/tmp/step2b-oracle-evidence-current.json",
-    "resultSha256": "5bc46c9f9e312b2db68202e9265f27ffa1b940aba2f785f9029a8e3f1071f02e",
+    "result": "/tmp/step2b-oracle-evidence-final.json",
+    "resultSha256": "97b948efb5349276957cfdb42dd1f515f3b7c005b323ff83b36cfcf0980d839b",
     "container": "step3b-oracle-integration",
     "service": "FREEPDB1",
     "thinDriverSelectDual": "passed",
@@ -90,15 +93,19 @@
   },
   "webDiscovery": {
     "serviceContract": "passed in automated integration tests",
+    "realBrowserWorker": "passed locally with Google Chrome 151.0.7922.174",
+    "browserSha256": "c62a6de1b6aecbcf91be770370abb7461e5a0718637962b6aa4b8d171f4de4f0",
+    "containerImage": "step2b-web-discovery-worker:test",
+    "containerImageDigest": "sha256:4ca9ce1ed8039d5857ae93f43e026734ae44ab39963b1e2076a851bfcaa717ca",
+    "containerSmoke": "passed as non-root node user with Chromium 151.0.7922.173 and read-only root filesystem",
     "covered": [
       "short-lived worker token hash verification",
       "tenant isolation and encrypted observations",
-      "same-origin request and redirect enforcement",
+      "same-origin request enforcement and fail-closed redirected traffic",
       "cookie, CSRF, and sensitive-field rejection",
       "JSON API candidate inference",
       "explicit origin, operation, and read/write confirmation"
-    ],
-    "deployedIsolatedBrowserWorker": "not evidenced"
+    ]
   },
   "feishu": {
     "providerTier": "beta",
@@ -127,9 +134,10 @@
     },
     "largeFileUpload": {
       "bytes": 10485760,
-      "durationMs": 30.24,
-      "rssDeltaBytes": 56459264,
-      "limitation": "TenantFileAdapter buffers the object for scanning and hashing; streaming file processing is not implemented or evidenced."
+      "durationMs": 39.26,
+      "rssDeltaBytes": 13090816,
+      "requestChunkBytes": 65536,
+      "path": "authenticated multipart HTTP -> disk staging -> transit store"
     },
     "pending": [
       "50 concurrent full runtime/AutoSkill invocations",
@@ -140,7 +148,7 @@
   "supplyChain": {
     "apacheLicenseSha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
     "noticeSha256": "d0890661bf25e7327808610f773b055cb87bf949ff6bba5943c7d62d94d1bf0f",
-    "packageLockSha256": "5de991a6e757343656d02fe202102ce559985b43094d75199584fe2417ade2eb",
+    "packageLockSha256": "f76b5073df60f3c531684ec3bc0a4c41cddf0ab9e4d46ff4c3371643ee61d947",
     "productionAudit": {
       "command": "npm audit --omit=dev",
       "vulnerabilities": 0
@@ -151,22 +159,38 @@
     },
     "sbom": {
       "format": "CycloneDX 1.5",
-      "components": 590,
-      "path": "/tmp/step2b-npm-sbom-current.json",
-      "sha256": "57697cbdcfee5b9d48c27a8a7426f1dd5d907280585b90c90ebe361eaaf30a90"
+      "components": 591,
+      "path": "/tmp/step2b-npm-sbom-final.json",
+      "sha256": "95e704770c07036cb5c9e250e1d86fb231553f52a753240e0fd298c96b072998"
     }
   },
+  "docker": {
+    "connectionServiceImage": "step2b-connection-service:test",
+    "connectionServiceDigest": "sha256:ad8b1765ece1ac8e11a6e5f70527903e63cb19fcb8432178a18e46199e8f0b74",
+    "connectionServiceHealth": "GET http://127.0.0.1:<published-port>/health returned the expected service/version payload",
+    "webDiscoveryWorkerImage": "step2b-web-discovery-worker:test",
+    "webDiscoveryWorkerDigest": "sha256:4ca9ce1ed8039d5857ae93f43e026734ae44ab39963b1e2076a851bfcaa717ca",
+    "runAs": "node (uid 1000)"
+  },
+  "replaceableBoundaries": {
+    "persistence": "DatabaseSync is injected into the control app and tenant stores.",
+    "objectStorage": "ITransitFileService and staged-file callbacks isolate local disk from S3-compatible implementations.",
+    "secretStorage": "ISecretCodec isolates local AES-GCM from managed KMS/secret storage.",
+    "workerDispatch": "Web Discovery capture and observation submission are separate from the control API."
+  },
   "releaseGates": {
-    "status": "NOT_FROZEN",
-    "blockers": [
-      "Connection Service-owned Feishu OAuth resource read and post-revocation denial are not evidenced.",
-      "The isolated Web Discovery browser worker is not deployed or exercised end to end.",
-      "Oracle VPC/private runner and optional SSH transport are not implemented or evidenced.",
-      "MCP reconnect and network-disconnect behavior are not evidenced with a real process.",
-      "The full wrong-credential, timeout, disconnect, and revocation provider matrix is incomplete.",
-      "Large-file scanning and hashing buffer the full file instead of streaming.",
-      "Full 50-concurrent-invocation and long-conversation stability tests with production-like telemetry are pending.",
-      "Real PDF, Parquet, and XLSX E2E fixtures are machine-local and must be provisioned by the release runner."
+    "status": "STEP2B_LOCAL_FROZEN",
+    "localBlockers": [],
+    "externalDeploymentEvidence": [
+      "Connection Service-owned Feishu OAuth resource read and post-revocation denial require external user authorization.",
+      "Enterprise VPC Oracle and optional SSH transport require customer network access.",
+      "Production credential, network-disconnect, and revocation matrices remain deployment acceptance work."
+    ],
+    "vefaasFollowUp": [
+      "Provision managed SQL and migrate the injected persistence boundary from local SQLite.",
+      "Configure managed object storage and KMS-backed secret storage.",
+      "Deploy stateless control/execution functions only; keep browser, connection-pool, long-lived MCP, and VPC workloads on dedicated workers.",
+      "Add production worker dispatch, tenant egress policy, observability, and load/stability evidence."
     ]
   }
 }
