@@ -1,5 +1,5 @@
 {
-  "recordedAt": "2026-08-28T04:59:44+08:00",
+  "recordedAt": "2026-08-28T05:01:07+08:00",
   "classification": "sanitized-local-evidence",
   "testedServiceCommit": "2af7e87c80588063cbb860f87667683597e66995",
   "service": {
@@ -78,7 +78,7 @@
   "realOracle": {
     "command": "npx --no-install tsx scripts/step2b-oracle-e2e.ts with STEP2B_ORACLE_* environment variables",
     "result": "/tmp/step2b-oracle-evidence-final.json",
-    "resultSha256": "97b948efb5349276957cfdb42dd1f515f3b7c005b323ff83b36cfcf0980d839b",
+    "resultSha256": "dda38adc79ea57ef2bf588e9c92e32aaad06d5b818acd8e93f8c4a9dfaa27eb8",
     "container": "step3b-oracle-integration",
     "service": "FREEPDB1",
     "thinDriverSelectDual": "passed",
