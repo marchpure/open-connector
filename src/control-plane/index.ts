@@ -1,16 +1,17 @@
+import type { EnablementEntry } from "./catalog.ts";
+
 import { serve } from "@hono/node-server";
 import { mkdir } from "node:fs/promises";
-import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { loadCatalog } from "../catalog-store.ts";
 import { ProviderLoader } from "../providers/provider-loader.ts";
 import { executorModules } from "../providers/registry.generated.ts";
-import { createSecretCodec } from "../server/secrets/secret-codec.ts";
-import { TransitFileService } from "../server/files/transit-files.ts";
 import { withNodeStagedFile } from "../server/files/node-transit-file-upload.ts";
-import { createConnectionControlApp } from "./server.ts";
-import type { EnablementEntry } from "./catalog.ts";
+import { TransitFileService } from "../server/files/transit-files.ts";
+import { createSecretCodec } from "../server/secrets/secret-codec.ts";
 import { OracleThinDriver } from "./oracle-driver.ts";
+import { createConnectionControlApp } from "./server.ts";
 
 const port = positiveInteger(process.env.CONNECTION_SERVICE_PORT, 3400);
 const host = process.env.CONNECTION_SERVICE_HOST ?? "127.0.0.1";
@@ -45,13 +46,15 @@ const app = createConnectionControlApp({
 });
 
 serve({ fetch: app.fetch, hostname: host, port }, (info) => {
-  console.log(JSON.stringify({
-    service: "connection-service",
-    url: `http://${info.address}:${info.port}`,
-    catalogProviderCount: catalog.providers.length,
-    catalogActionCount: catalog.actions.length,
-    enabledServices: enablement.map((entry) => entry.service),
-  }));
+  console.log(
+    JSON.stringify({
+      service: "connection-service",
+      url: `http://${info.address}:${info.port}`,
+      catalogProviderCount: catalog.providers.length,
+      catalogActionCount: catalog.actions.length,
+      enabledServices: enablement.map((entry) => entry.service),
+    }),
+  );
 });
 
 function requiredEnv(name: string): string {

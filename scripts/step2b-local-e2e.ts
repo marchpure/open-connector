@@ -221,9 +221,7 @@ checks.files = {
     excel: excelPreview.kind === "excel" ? { sheets: excelPreview.sheets.length } : null,
     pdf: pdfPreview.kind === "pdf" ? { pages: pdfPreview.pageCount, textCharacters: pdfPreview.text.length } : null,
     parquet:
-      parquetPreview.kind === "parquet"
-        ? { columns: parquetPreview.columns, rows: parquetPreview.rows.length }
-        : null,
+      parquetPreview.kind === "parquet" ? { columns: parquetPreview.columns, rows: parquetPreview.rows.length } : null,
   },
 };
 
@@ -269,9 +267,7 @@ lifecycleFixture.get("/records/:id", (context) =>
 );
 const lifecycleFixtureServer = serve({ fetch: lifecycleFixture.fetch, hostname: "0.0.0.0", port: 0 });
 const lifecycleFixturePort = await new Promise<number>((resolve) =>
-  lifecycleFixtureServer.on("listening", () =>
-    resolve((lifecycleFixtureServer.address() as { port: number }).port),
-  ),
+  lifecycleFixtureServer.on("listening", () => resolve((lifecycleFixtureServer.address() as { port: number }).port)),
 );
 const lifecycleFixtureUrl = `http://${findFixtureHost()}:${lifecycleFixturePort}`;
 const controlDb = new DatabaseSync(":memory:");
@@ -280,9 +276,12 @@ const controlApp = createConnectionControlApp({
   providerLoader: {
     loadActionExecutor: async () => async (input, context) => {
       const credential = await context.getCredential("fixture");
-      const response = await fetch(`${lifecycleFixtureUrl}/records/${encodeURIComponent(String((input as { id: string }).id))}`, {
-        headers: { "x-fixture-secret": String(credential && "values" in credential ? credential.values.secret : "") },
-      });
+      const response = await fetch(
+        `${lifecycleFixtureUrl}/records/${encodeURIComponent(String((input as { id: string }).id))}`,
+        {
+          headers: { "x-fixture-secret": String(credential && "values" in credential ? credential.values.secret : "") },
+        },
+      );
       return response.ok
         ? { ok: true, output: await response.json() }
         : { ok: false, error: { code: "fixture_error", message: `Fixture returned ${response.status}.` } };

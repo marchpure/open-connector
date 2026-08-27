@@ -1,4 +1,5 @@
-const sensitiveKey = /(password|secret|token|api[_-]?key|cookie|authorization|credential|private[_-]?key|client_secret|refresh)/i;
+const sensitiveKey =
+  /(password|secret|token|api[_-]?key|cookie|authorization|credential|private[_-]?key|client_secret|refresh)/i;
 
 export function redactSecrets(value: unknown, depth = 0): unknown {
   if (depth > 8) {

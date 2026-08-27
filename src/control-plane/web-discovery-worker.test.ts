@@ -1,5 +1,5 @@
-import { DatabaseSync } from "node:sqlite";
 import { access } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { createCatalogStore } from "../catalog-store.ts";
 import { AesGcmSecretCodec } from "../server/secrets/secret-codec.ts";
@@ -248,9 +248,7 @@ describe("runWebDiscoveryCapture", () => {
     const { items } = (await candidatesResponse.json()) as {
       items: Array<{ id: string; origin: string; path: string; readOnly: boolean }>;
     };
-    expect(items).toMatchObject([
-      { origin: "https://app.example.test", path: "/api/orders/{id}", readOnly: true },
-    ]);
+    expect(items).toMatchObject([{ origin: "https://app.example.test", path: "/api/orders/{id}", readOnly: true }]);
     const confirmed = await app.request(`/v1/web-discovery/sessions/${session.id}/confirm`, {
       method: "POST",
       headers: authHeaders,

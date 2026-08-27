@@ -1,9 +1,9 @@
-import { DatabaseSync } from "node:sqlite";
+import { serve } from "@hono/node-server";
+import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
+import { Hono } from "hono";
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
-import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
-import { serve } from "@hono/node-server";
-import { Hono } from "hono";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { AesGcmSecretCodec } from "../server/secrets/secret-codec.ts";

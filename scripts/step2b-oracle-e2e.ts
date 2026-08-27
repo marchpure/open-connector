@@ -11,15 +11,14 @@ const schema = requiredEnv("STEP2B_ORACLE_SCHEMA").toUpperCase();
 const table = requiredEnv("STEP2B_ORACLE_TABLE").toUpperCase();
 const output = process.env.STEP2B_ORACLE_EVIDENCE;
 
-const driver = new OracleThinDriver(
-  { host, port, serviceName },
-  { user, password, poolMin: 1, poolMax: 2 },
-);
-const adapter = new OracleDatabaseAdapter(
-  { host, port, serviceName },
-  driver,
-  { maxRows: 100, maxBytes: 1024 * 1024, timeoutMs: 10_000, maxConcurrent: 2, allowedSchemas: [schema] },
-);
+const driver = new OracleThinDriver({ host, port, serviceName }, { user, password, poolMin: 1, poolMax: 2 });
+const adapter = new OracleDatabaseAdapter({ host, port, serviceName }, driver, {
+  maxRows: 100,
+  maxBytes: 1024 * 1024,
+  timeoutMs: 10_000,
+  maxConcurrent: 2,
+  allowedSchemas: [schema],
+});
 
 try {
   const query = await adapter.query("select 1 as value from dual");

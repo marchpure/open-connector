@@ -134,20 +134,17 @@ describe("TenantFileAdapter", () => {
     const path = join(root, "upload.tmp");
     await writeFile(path, "name,amount\nAda,42\n");
     const transit = createTransit();
-    const createFromPath = vi.fn(async (staged: { path: string; sizeBytes: number; name: string; mimeType: string }) => ({
-      fileId: "streamed.csv",
-      downloadUrl: "/files/streamed.csv",
-      sizeBytes: staged.sizeBytes,
-      name: staged.name,
-      mimeType: staged.mimeType,
-    }));
-    const stagedTransit = Object.assign(transit, { createFromPath });
-    const files = new TenantFileAdapter(
-      "tenant-a",
-      "workspace-a",
-      stagedTransit,
-      new DatabaseSync(":memory:"),
+    const createFromPath = vi.fn(
+      async (staged: { path: string; sizeBytes: number; name: string; mimeType: string }) => ({
+        fileId: "streamed.csv",
+        downloadUrl: "/files/streamed.csv",
+        sizeBytes: staged.sizeBytes,
+        name: staged.name,
+        mimeType: staged.mimeType,
+      }),
     );
+    const stagedTransit = Object.assign(transit, { createFromPath });
+    const files = new TenantFileAdapter("tenant-a", "workspace-a", stagedTransit, new DatabaseSync(":memory:"));
 
     await expect(
       files.uploadFromPath({ path, sizeBytes: 19, name: "people.csv", mimeType: "text/csv" }),

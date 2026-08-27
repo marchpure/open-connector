@@ -1,5 +1,5 @@
-import type { BrowserContext, Page } from "playwright-core";
 import type { WebObservation } from "./web-discovery.ts";
+import type { BrowserContext, Page } from "playwright-core";
 
 import { chromium } from "playwright-core";
 

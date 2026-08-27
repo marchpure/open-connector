@@ -267,7 +267,8 @@ async function scanCsvStream(path: string): Promise<void> {
         } else if (atCellStart && /[\t\r ]/.test(character)) {
           continue;
         } else if (atCellStart) {
-          if ("=+-@".includes(character)) throw new FileAdapterError("malicious_input", "CSV spreadsheet formulas are not allowed.");
+          if ("=+-@".includes(character))
+            throw new FileAdapterError("malicious_input", "CSV spreadsheet formulas are not allowed.");
           atCellStart = false;
         }
       }
@@ -279,7 +280,8 @@ async function scanCsvStream(path: string): Promise<void> {
         } else if (atCellStart && /[\t\r ]/.test(character)) {
           continue;
         } else if (atCellStart) {
-          if ("=+-@".includes(character)) throw new FileAdapterError("malicious_input", "CSV spreadsheet formulas are not allowed.");
+          if ("=+-@".includes(character))
+            throw new FileAdapterError("malicious_input", "CSV spreadsheet formulas are not allowed.");
           atCellStart = false;
         }
       }

@@ -1,5 +1,4 @@
 import { DatabaseSync } from "node:sqlite";
-
 import { describe, expect, it } from "vitest";
 import { ConnectionLeaseService, LeaseError } from "./lease.ts";
 import { redactSecrets } from "./redaction.ts";
@@ -39,12 +38,16 @@ describe("ConnectionLeaseService", () => {
     expect(issued.token).toMatch(/^cl_/);
     expect(issued.claims.connectionIds).toEqual(["connection-1"]);
     expect(() =>
-      leases.verify(issued.token, { ...principal, tenantId: "tenant-b" }, {
-        connectionId: "connection-1",
-        actionId: "feishu.get_document",
-        invocationId: "invocation-1",
-        audience: principal.audience,
-      }),
+      leases.verify(
+        issued.token,
+        { ...principal, tenantId: "tenant-b" },
+        {
+          connectionId: "connection-1",
+          actionId: "feishu.get_document",
+          invocationId: "invocation-1",
+          audience: principal.audience,
+        },
+      ),
     ).toThrowError(/does not grant/);
     expect(
       leases.verify(issued.token, principal, {
@@ -75,7 +78,9 @@ describe("ConnectionLeaseService", () => {
       invocationId: "invocation-1",
       audience: principal.audience,
     });
-    expect(database.prepare("select token_hash from connection_leases").get()).not.toMatchObject({ token_hash: issued.token });
+    expect(database.prepare("select token_hash from connection_leases").get()).not.toMatchObject({
+      token_hash: issued.token,
+    });
     expect(leases.revoke(issued.claims.jti, principal)).toBe(true);
     expect(() =>
       leases.verify(issued.token, principal, {

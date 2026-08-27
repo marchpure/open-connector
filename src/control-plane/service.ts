@@ -3,17 +3,22 @@ import type { ActionPolicySnapshot } from "../core/action-policy.ts";
 import type { TransitFileWriter } from "../core/types.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
 import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
-import type { DatabaseSync } from "node:sqlite";
 import type { ConnectionLeaseClaims, TenantPrincipal } from "./types.ts";
 import type { ConnectionRecord } from "./types.ts";
+import type { DatabaseSync } from "node:sqlite";
 
-import { ActionRunner } from "../server/actions/action-runner.ts";
 import { ConnectionService } from "../connection-service.ts";
 import { ActionPolicyService as PolicyService } from "../core/action-policy.ts";
-import { ConnectionLeaseService } from "./lease.ts";
-import { TenantConnectionStore as ConnectionStore, TenantOAuthClientConfigStore, TenantOAuthStateStore, TenantRunLogStore as RunStore } from "./tenant-store.ts";
 import { OAuthClientConfigService } from "../oauth/oauth-client-config-service.ts";
 import { OAuthFlowService } from "../oauth/oauth-flow-service.ts";
+import { ActionRunner } from "../server/actions/action-runner.ts";
+import { ConnectionLeaseService } from "./lease.ts";
+import {
+  TenantConnectionStore as ConnectionStore,
+  TenantOAuthClientConfigStore,
+  TenantOAuthStateStore,
+  TenantRunLogStore as RunStore,
+} from "./tenant-store.ts";
 
 export interface ControlPlaneDependencies {
   catalog: CatalogStore;
