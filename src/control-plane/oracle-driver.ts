@@ -1,8 +1,8 @@
 import "../oracledb.d.ts";
+import type { OracleConnectionConfig, OracleQueryDriver, OracleQueryResult } from "./oracle-adapter.ts";
 import type { Connection, Pool, PoolAttributes } from "oracledb";
 
 import oracledb from "oracledb";
-import type { OracleConnectionConfig, OracleQueryDriver } from "./oracle-adapter.ts";
 
 export interface OracleDriverOptions {
   user: string;
@@ -24,10 +24,12 @@ export class OracleThinDriver implements OracleQueryDriver {
       poolMax: credentials.poolMax ?? 4,
       poolIncrement: credentials.poolIncrement ?? 1,
       homogeneous: true,
-      ...(config.tls?.walletPath ? {
-        walletLocation: config.tls.walletPath,
-        sslServerDNMatch: config.tls.rejectUnauthorized,
-      } : {}),
+      ...(config.tls?.walletPath
+        ? {
+            walletLocation: config.tls.walletPath,
+            sslServerDNMatch: config.tls.rejectUnauthorized,
+          }
+        : {}),
     };
     this.poolPromise = oracledb.createPool(poolAttributes);
   }
@@ -36,18 +38,28 @@ export class OracleThinDriver implements OracleQueryDriver {
     sql: string,
     binds: Record<string, unknown>,
     options: { maxRows: number; timeoutMs: number },
-  ): Promise<{ rows: unknown[]; bytes: number }> {
+  ): Promise<OracleQueryResult> {
     const pool = await this.poolPromise;
     let connection: Connection | undefined;
     try {
       connection = await pool.getConnection();
+      await connection.execute("SET TRANSACTION READ ONLY");
       const result = await withTimeout(
         connection.execute(sql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT, maxRows: options.maxRows }),
         options.timeoutMs,
       );
       const rows = (result.rows ?? []) as unknown[];
-      return { rows, bytes: Buffer.byteLength(JSON.stringify(rows)) };
+      return {
+        rows,
+        columns: result.metaData?.map(({ name, dbTypeName, nullable }) => ({
+          name,
+          dbTypeName,
+          nullable,
+        })),
+        bytes: Buffer.byteLength(JSON.stringify(rows)),
+      };
     } finally {
+      await connection?.rollback().catch(() => undefined);
       await connection?.close().catch(() => undefined);
     }
   }

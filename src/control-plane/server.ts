@@ -1,28 +1,28 @@
 import type { CatalogStore } from "../catalog-store.ts";
 import type { TransitFileWriter } from "../core/types.ts";
-import type { ITransitFileService } from "../server/files/transit-file-store.ts";
-import type { IProviderLoader } from "../providers/provider-loader.ts";
-import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
-import type { DatabaseSync } from "node:sqlite";
-import type { Context } from "hono";
 import type { ActionDefinition } from "../core/types.ts";
+import type { IProviderLoader } from "../providers/provider-loader.ts";
+import type { ITransitFileService } from "../server/files/transit-file-store.ts";
+import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
+import type { EnablementEntry } from "./catalog.ts";
+import type { OracleConnectionConfig, OracleQueryDriver } from "./oracle-adapter.ts";
+import type { OracleDriverOptions } from "./oracle-driver.ts";
+import type { TenantPrincipal } from "./types.ts";
+import type { Context } from "hono";
+import type { DatabaseSync } from "node:sqlite";
 
 import { Hono } from "hono";
 import { ConnectionError } from "../connection-service.ts";
 import { readJsonBody, jsonError } from "../server/api/http-utils.ts";
-import { ConnectionLeaseService, LeaseError } from "./lease.ts";
 import { verifyPrincipalToken } from "./auth.ts";
 import { CatalogEnablement } from "./catalog.ts";
-import type { EnablementEntry } from "./catalog.ts";
-import { createTenantRuntime } from "./service.ts";
-import { redactSecrets, safeConnectionProfile } from "./redaction.ts";
 import { TenantFileAdapter } from "./file-adapter.ts";
-import { RestOpenApiAdapter } from "./rest-adapter.ts";
+import { ConnectionLeaseService, LeaseError } from "./lease.ts";
 import { ControlledMcpAdapter } from "./mcp-adapter.ts";
 import { OracleDatabaseAdapter } from "./oracle-adapter.ts";
-import type { OracleConnectionConfig, OracleQueryDriver } from "./oracle-adapter.ts";
-import type { OracleDriverOptions } from "./oracle-driver.ts";
-import type { TenantPrincipal } from "./types.ts";
+import { redactSecrets, safeConnectionProfile } from "./redaction.ts";
+import { RestOpenApiAdapter } from "./rest-adapter.ts";
+import { createTenantRuntime } from "./service.ts";
 
 export interface ConnectionControlAppOptions {
   catalog: CatalogStore;
@@ -191,7 +191,9 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
   });
   app.post("/v1/leases/:jti/revoke", (context) => {
     const revoked = leases.revoke(context.req.param("jti"), principalOf(context));
-    return revoked ? context.json({ revoked: true }) : jsonError(context, 404, "lease_not_found", "Lease was not found.");
+    return revoked
+      ? context.json({ revoked: true })
+      : jsonError(context, 404, "lease_not_found", "Lease was not found.");
   });
   app.post("/v1/runtime/actions/:actionId", async (context) => {
     const body = await readJsonBody(context);
@@ -203,9 +205,11 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       return jsonError(context, 401, "lease_required", "X-Connection-Lease is required.");
     }
     const actionId = context.req.param("actionId");
-    const connectionIds = await Promise.all((await runtime.records()).map((record) =>
-      record.id === body.connectionId ? Promise.resolve(record) : Promise.resolve(undefined),
-    ));
+    const connectionIds = await Promise.all(
+      (await runtime.records()).map((record) =>
+        record.id === body.connectionId ? Promise.resolve(record) : Promise.resolve(undefined),
+      ),
+    );
     const selected = connectionIds.find(Boolean);
     if (!selected) {
       return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
@@ -244,12 +248,15 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         } as never,
         signal: context.req.raw.signal,
       });
-      return context.json({
-        executionId: result?.executionId,
-        auditPersisted: result?.auditPersisted,
-        ok: result?.result.ok ?? false,
-        result: redactSecrets(result?.result),
-      }, result?.result.ok ? 200 : 502);
+      return context.json(
+        {
+          executionId: result?.executionId,
+          auditPersisted: result?.auditPersisted,
+          ok: result?.result.ok ?? false,
+          result: redactSecrets(result?.result),
+        },
+        result?.result.ok ? 200 : 502,
+      );
     } catch (error) {
       return leaseError(context, error);
     }
@@ -259,20 +266,29 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     try {
       const adapter = RestOpenApiAdapter.fromSpec(
         requiredString(body.baseUrl),
-        body.spec && typeof body.spec === "object" ? body.spec as Record<string, unknown> : undefined,
+        body.spec && typeof body.spec === "object" ? (body.spec as Record<string, unknown>) : undefined,
         parseRestAuth(body.auth),
         body.confirmed === true,
       );
-      return context.json({ result: redactSecrets(await adapter.invoke({
-        operationId: requiredString(body.operationId),
-        pathParams: recordOf(body.pathParams) as Record<string, string>,
-        query: recordOf(body.query) as Record<string, string>,
-        body: body.input,
-        confirmed: body.confirmed === true,
-        idempotencyKey: optionalString(body.idempotencyKey),
-      })) });
+      return context.json({
+        result: redactSecrets(
+          await adapter.invoke({
+            operationId: requiredString(body.operationId),
+            pathParams: recordOf(body.pathParams) as Record<string, string>,
+            query: recordOf(body.query) as Record<string, string>,
+            body: body.input,
+            confirmed: body.confirmed === true,
+            idempotencyKey: optionalString(body.idempotencyKey),
+          }),
+        ),
+      });
     } catch (error) {
-      return jsonError(context, 400, "rest_adapter_error", error instanceof Error ? error.message : "REST adapter failed.");
+      return jsonError(
+        context,
+        400,
+        "rest_adapter_error",
+        error instanceof Error ? error.message : "REST adapter failed.",
+      );
     }
   });
   app.post("/v1/adapters/mcp/discover", async (context) => {
@@ -280,16 +296,25 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     try {
       return context.json(await new ControlledMcpAdapter(parseMcpDefinition(body.definition)).discover());
     } catch (error) {
-      return jsonError(context, 400, "mcp_adapter_error", error instanceof Error ? error.message : "MCP discovery failed.");
+      return jsonError(
+        context,
+        400,
+        "mcp_adapter_error",
+        error instanceof Error ? error.message : "MCP discovery failed.",
+      );
     }
   });
   app.post("/v1/adapters/mcp/call", async (context) => {
     const body = await readJsonBody(context);
     try {
-      return context.json({ result: redactSecrets(await new ControlledMcpAdapter(parseMcpDefinition(body.definition)).callTool(
-        requiredString(body.name),
-        recordOf(body.arguments),
-      )) });
+      return context.json({
+        result: redactSecrets(
+          await new ControlledMcpAdapter(parseMcpDefinition(body.definition)).callTool(
+            requiredString(body.name),
+            recordOf(body.arguments),
+          ),
+        ),
+      });
     } catch (error) {
       return jsonError(context, 400, "mcp_adapter_error", error instanceof Error ? error.message : "MCP call failed.");
     }
@@ -297,34 +322,51 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
   app.post("/v1/adapters/oracle/query", async (context) => {
     const body = await readJsonBody(context);
     try {
-      if (!options.oracleDriverFactory) {
-        return jsonError(context, 500, "oracle_not_configured", "Oracle driver is not configured.");
-      }
-      const config = parseOracleConfig(body.config);
-      const credentials = {
-        user: requiredString(body.user),
-        password: requiredString(body.password),
-      };
-      const adapter = new OracleDatabaseAdapter(config, options.oracleDriverFactory(config, credentials), {
-        maxRows: 1000, maxBytes: 10 * 1024 * 1024, timeoutMs: 30_000, maxConcurrent: 2,
-      });
+      const adapter = oracleAdapter(options, body);
       return context.json({ result: await adapter.query(requiredString(body.sql), recordOf(body.binds)) });
     } catch (error) {
-      return jsonError(context, 400, "oracle_adapter_error", error instanceof Error ? error.message : "Oracle query failed.");
+      return jsonError(
+        context,
+        400,
+        "oracle_adapter_error",
+        error instanceof Error ? error.message : "Oracle query failed.",
+      );
+    }
+  });
+  app.post("/v1/adapters/oracle/discover", async (context) => {
+    const body = await readJsonBody(context);
+    try {
+      const adapter = oracleAdapter(options, body);
+      return context.json({
+        result: await adapter.discover({
+          schema: optionalString(body.schema),
+          table: optionalString(body.table),
+        }),
+      });
+    } catch (error) {
+      return jsonError(
+        context,
+        400,
+        "oracle_adapter_error",
+        error instanceof Error ? error.message : "Oracle discovery failed.",
+      );
     }
   });
   return app;
 }
 
 function tenantRuntime(options: ConnectionControlAppOptions, principal: TenantPrincipal) {
-  return createTenantRuntime({
-    catalog: options.catalog,
-    providerLoader: options.providerLoader,
-    controlDatabase: options.controlDatabase,
-    secretCodec: options.secretCodec,
-    publicOrigin: options.publicOrigin,
-    transitFiles: options.transitFiles,
-  }, principal);
+  return createTenantRuntime(
+    {
+      catalog: options.catalog,
+      providerLoader: options.providerLoader,
+      controlDatabase: options.controlDatabase,
+      secretCodec: options.secretCodec,
+      publicOrigin: options.publicOrigin,
+      transitFiles: options.transitFiles,
+    },
+    principal,
+  );
 }
 
 function tenantFileAdapter(options: ConnectionControlAppOptions, principal: TenantPrincipal) {
@@ -378,7 +420,9 @@ function parseMcpDefinition(value: unknown) {
     env: recordOf(definition.env) as Record<string, string>,
     headers: recordOf(definition.headers) as Record<string, string>,
     allowedCommands: Array.isArray(definition.allowedCommands) ? definition.allowedCommands.map(String) : undefined,
-    allowedHeaderNames: Array.isArray(definition.allowedHeaderNames) ? definition.allowedHeaderNames.map(String) : undefined,
+    allowedHeaderNames: Array.isArray(definition.allowedHeaderNames)
+      ? definition.allowedHeaderNames.map(String)
+      : undefined,
   };
 }
 
@@ -392,8 +436,29 @@ function parseOracleConfig(value: unknown) {
   };
 }
 
+function oracleAdapter(options: ConnectionControlAppOptions, body: Record<string, unknown>) {
+  if (!options.oracleDriverFactory) {
+    throw new Error("Oracle driver is not configured.");
+  }
+  const config = parseOracleConfig(body.config);
+  const credentials = {
+    user: requiredString(body.user),
+    password: requiredString(body.password),
+  };
+  const allowedSchemas = Array.isArray(body.allowedSchemas)
+    ? body.allowedSchemas.map((schema) => requiredString(schema))
+    : undefined;
+  return new OracleDatabaseAdapter(config, options.oracleDriverFactory(config, credentials), {
+    maxRows: 1000,
+    maxBytes: 10 * 1024 * 1024,
+    timeoutMs: 30_000,
+    maxConcurrent: 2,
+    allowedSchemas,
+  });
+}
+
 function recordOf(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function redactConnection(value: Record<string, unknown>): Record<string, unknown> {

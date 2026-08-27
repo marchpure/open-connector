@@ -13,14 +13,21 @@ declare module "oracledb" {
 
   export interface ExecuteResult {
     rows?: unknown[];
+    metaData?: Array<{
+      name: string;
+      dbTypeName?: string;
+      nullable?: boolean;
+    }>;
   }
 
   export interface Connection {
+    execute(sql: string): Promise<ExecuteResult>;
     execute(
       sql: string,
       binds: Record<string, unknown>,
       options: { outFormat: number; maxRows: number },
     ): Promise<ExecuteResult>;
+    rollback(): Promise<void>;
     close(): Promise<void>;
   }
 
