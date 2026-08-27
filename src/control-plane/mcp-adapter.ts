@@ -20,6 +20,7 @@ export interface McpDefinition {
   allowedCommands?: string[];
   allowedHeaderNames?: string[];
   allowedTools?: string[];
+  allowPrivateNetwork?: boolean;
   timeoutMs?: number;
 }
 
@@ -155,7 +156,7 @@ export class ControlledMcpAdapter {
         endpoint,
         transport: this.definition.transport,
         headers: this.definition.headers,
-        fetcher: createGuardedFetch(),
+        fetcher: createGuardedFetch({ allowPrivateNetwork: this.definition.allowPrivateNetwork }),
       },
       run,
     );

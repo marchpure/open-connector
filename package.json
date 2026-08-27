@@ -16,6 +16,7 @@
     "deploy:cloudflare": "npm run generate:catalog && npm run build:web && node scripts/copy-catalog-assets.ts && wrangler deploy --config wrangler.local.jsonc --minify",
     "start": "node scripts/ensure-generated.ts && node src/server/index.ts",
     "start:connection-service": "node scripts/ensure-generated.ts && node src/control-plane/index.ts",
+    "start:web-discovery-worker": "node src/control-plane/web-discovery-worker-cli.ts",
     "test": "vitest run",
     "typecheck": "npm run generate:registry && node scripts/typecheck.ts src scripts-all examples",
     "generate:registry": "node scripts/generate-provider-registry.ts",
@@ -63,6 +64,7 @@
     "pdfjs-dist": "^5.4.296",
     "pg": "^8.23.0",
     "pino": "^10.3.1",
+    "playwright-core": "^1.62.1",
     "rss-parser": "^3.13.0",
     "zod": "^4.4.3"
   },

@@ -238,15 +238,65 @@ const provider: ProviderDefinition = {
       fields: [{ key: "secret", label: "Secret", inputType: "password", required: true, secret: true }],
     },
   ],
-  actions: [],
+  actions: [
+    {
+      id: "fixture.read",
+      service: "fixture",
+      name: "read",
+      description: "Read a record from the real local fixture.",
+      requiredScopes: [],
+      providerPermissions: [],
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "string" } },
+        required: ["id"],
+        additionalProperties: false,
+      },
+      outputSchema: { type: "object" },
+    },
+  ],
 };
+const lifecycleFixture = new Hono();
+lifecycleFixture.get("/validate", (context) =>
+  ["never-return-this", "benchmark-secret"].includes(context.req.header("x-fixture-secret") ?? "")
+    ? context.json({ accountId: "fixture-local", displayName: "Local fixture" })
+    : context.json({ error: "unauthorized" }, 401),
+);
+lifecycleFixture.get("/records/:id", (context) =>
+  context.req.header("x-fixture-secret") === "never-return-this"
+    ? context.json({ id: context.req.param("id"), source: "tcp-fixture" })
+    : context.json({ error: "unauthorized" }, 401),
+);
+const lifecycleFixtureServer = serve({ fetch: lifecycleFixture.fetch, hostname: "0.0.0.0", port: 0 });
+const lifecycleFixturePort = await new Promise<number>((resolve) =>
+  lifecycleFixtureServer.on("listening", () =>
+    resolve((lifecycleFixtureServer.address() as { port: number }).port),
+  ),
+);
+const lifecycleFixtureUrl = `http://${findFixtureHost()}:${lifecycleFixturePort}`;
 const controlDb = new DatabaseSync(":memory:");
 const controlApp = createConnectionControlApp({
-  catalog: createCatalogStore([provider]),
+  catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
   providerLoader: {
-    loadActionExecutor: async () => undefined,
+    loadActionExecutor: async () => async (input, context) => {
+      const credential = await context.getCredential("fixture");
+      const response = await fetch(`${lifecycleFixtureUrl}/records/${encodeURIComponent(String((input as { id: string }).id))}`, {
+        headers: { "x-fixture-secret": String(credential && "values" in credential ? credential.values.secret : "") },
+      });
+      return response.ok
+        ? { ok: true, output: await response.json() }
+        : { ok: false, error: { code: "fixture_error", message: `Fixture returned ${response.status}.` } };
+    },
     loadProxyExecutor: async () => undefined,
-    loadCredentialValidators: async () => undefined,
+    loadCredentialValidators: async () => ({
+      customCredential: async ({ values }) => {
+        const response = await fetch(`${lifecycleFixtureUrl}/validate`, {
+          headers: { "x-fixture-secret": values.secret },
+        });
+        if (!response.ok) throw new Error(`Fixture returned ${response.status}.`);
+        return { profile: await response.json() };
+      },
+    }),
   },
   controlDatabase: controlDb,
   secretCodec: new AesGcmSecretCodec("e2e-encryption-key"),
@@ -271,10 +321,103 @@ const created = await controlApp.request("/v1/connections", {
   body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "never-return-this" } }),
 });
 const createdBody = (await created.json()) as Record<string, unknown>;
+const connectionId = String((createdBody.connection as { id: string }).id);
 const listed = await controlApp.request("/v1/connections", { headers: { authorization: `Bearer ${token}` } });
+const validated = await controlApp.request(`/v1/connections/${connectionId}/validate`, {
+  method: "POST",
+  headers: { authorization: `Bearer ${token}` },
+});
+const discovered = await controlApp.request(`/v1/connections/${connectionId}/discover`, {
+  method: "POST",
+  headers: { authorization: `Bearer ${token}` },
+});
+const updated = await controlApp.request(`/v1/connections/${connectionId}`, {
+  method: "PATCH",
+  headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+  body: JSON.stringify({ connectionName: "updated-local" }),
+});
+const otherToken = createPrincipalToken(
+  { ...tenant, tenantId: "tenant-b", workspaceId: "workspace-b" },
+  "e2e-auth-secret",
+);
+const otherTenantList = await controlApp.request("/v1/connections", {
+  headers: { authorization: `Bearer ${otherToken}` },
+});
+const issued = await controlApp.request(`/v1/connections/${connectionId}/lease`, {
+  method: "POST",
+  headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+  body: JSON.stringify({
+    allowedActions: ["fixture.read"],
+    invocationId: "local-e2e-invocation",
+    audience: "runtime",
+  }),
+});
+const lease = (await issued.json()) as { token: string; claims: { jti: string } };
+const invoked = await controlApp.request("/v1/runtime/actions/fixture.read", {
+  method: "POST",
+  headers: {
+    authorization: `Bearer ${token}`,
+    "content-type": "application/json",
+    "x-connection-lease": lease.token,
+  },
+  body: JSON.stringify({
+    connectionId,
+    invocationId: "local-e2e-invocation",
+    audience: "runtime",
+    input: { id: "record-42" },
+  }),
+});
+const invokedBody = await invoked.json();
+const revoked = await controlApp.request(`/v1/leases/${lease.claims.jti}/revoke`, {
+  method: "POST",
+  headers: { authorization: `Bearer ${token}` },
+});
+const rejectedAfterRevocation = await controlApp.request("/v1/runtime/actions/fixture.read", {
+  method: "POST",
+  headers: {
+    authorization: `Bearer ${token}`,
+    "content-type": "application/json",
+    "x-connection-lease": lease.token,
+  },
+  body: JSON.stringify({
+    connectionId,
+    invocationId: "local-e2e-invocation",
+    audience: "runtime",
+    input: { id: "record-42" },
+  }),
+});
+const deleted = await controlApp.request(`/v1/connections/${connectionId}`, {
+  method: "DELETE",
+  headers: { authorization: `Bearer ${token}` },
+});
+const afterDelete = await controlApp.request("/v1/connections", {
+  headers: { authorization: `Bearer ${token}` },
+});
 checks.controlPlane = {
+  status:
+    created.status === 201 &&
+    listed.status === 200 &&
+    validated.status === 202 &&
+    discovered.status === 202 &&
+    updated.status === 200 &&
+    issued.status === 201 &&
+    invoked.status === 200 &&
+    revoked.status === 200 &&
+    rejectedAfterRevocation.status === 400 &&
+    deleted.status === 204,
   createStatus: created.status,
   listStatus: listed.status,
+  validateStatus: validated.status,
+  discoverStatus: discovered.status,
+  updateStatus: updated.status,
+  leaseIssueStatus: issued.status,
+  invocationStatus: invoked.status,
+  invocationResult: invokedBody,
+  leaseRevokeStatus: revoked.status,
+  revokedLeaseInvocationStatus: rejectedAfterRevocation.status,
+  deleteStatus: deleted.status,
+  deletedFromList: ((await afterDelete.json()) as { items: unknown[] }).items.length === 0,
+  otherTenantHasNoConnections: ((await otherTenantList.json()) as { items: unknown[] }).items.length === 0,
   credentialRedacted: !JSON.stringify(createdBody).includes("never-return-this"),
   ciphertextStored: Boolean(
     (
@@ -368,6 +511,7 @@ benchmark.largeFileUpload = {
   storagePath: "authenticated multipart HTTP -> disk staging -> transit file service",
 };
 
+lifecycleFixtureServer.close();
 await writeFile(join(evidenceDir, "results.json"), JSON.stringify(results, null, 2));
 console.log(JSON.stringify(results, null, 2));
 
