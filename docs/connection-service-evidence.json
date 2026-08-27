@@ -1,5 +1,5 @@
 {
-  "recordedAt": "2026-08-28T05:01:07+08:00",
+  "recordedAt": "2026-08-28T05:05:36+08:00",
   "classification": "sanitized-local-evidence",
   "testedServiceCommit": "2af7e87c80588063cbb860f87667683597e66995",
   "service": {
@@ -75,6 +75,13 @@
     "credentialRedaction": "passed",
     "credentialCiphertextAtRest": "passed"
   },
+  "evidenceIndex": {
+    "requestAndResponseSummary": "/tmp/step2b-local-e2e-final.json and /tmp/step2b-oracle-evidence-final.json contain sanitized status/result summaries; secrets and bearer/lease values are not recorded.",
+    "executionAudit": "The local lifecycle result includes executionId and auditPersisted=true; control_execution_audit is tenant/workspace scoped and stores redacted input/output/error summaries.",
+    "logs": "Connection Service startup/health and worker failure output were inspected during Docker smoke; no credential-bearing logs are retained in this manifest.",
+    "trace": "Local V1 correlation uses invocationId and executionId; distributed trace export is not configured and remains production deployment evidence.",
+    "recovery": "Restart recovery is covered by automated SQLite persistence tests; browser capture recovery is to destroy the worker and revoke the discovery session as documented in docs/connection-service.md."
+  },
   "realOracle": {
     "command": "npx --no-install tsx scripts/step2b-oracle-e2e.ts with STEP2B_ORACLE_* environment variables",
     "result": "/tmp/step2b-oracle-evidence-final.json",
@@ -92,8 +99,8 @@
     "serviceContract": "passed in automated integration tests",
     "realBrowserWorker": "passed locally with Google Chrome 151.0.7922.174",
     "browserSha256": "c62a6de1b6aecbcf91be770370abb7461e5a0718637962b6aa4b8d171f4de4f0",
-    "containerImage": "step2b-web-discovery-worker:test",
-    "containerImageDigest": "sha256:99db71076a06207749ebc703046a6d155685a6e36a616023558fd6587b872d41",
+    "containerImage": "step2b-web-discovery-worker:final",
+    "containerImageDigest": "sha256:e879c19a55862f58bdac4258ba56dbcbec18cc21c15697167572c14b0362c555",
     "containerSmoke": "passed as non-root node user with Chromium 151.0.7922.173 and read-only root filesystem",
     "covered": [
       "short-lived worker token hash verification",
@@ -158,10 +165,10 @@
     }
   },
   "docker": {
-    "connectionServiceImage": "step2b-connection-service:test",
+    "connectionServiceImage": "step2b-connection-service:final",
     "connectionServiceDigest": "sha256:f3720e2f3cf396904657a420cb69b7d725b7a41cf4a16f01fe9f41585c97fe24",
     "connectionServiceHealth": "GET http://127.0.0.1:<published-port>/health returned the expected service/version payload",
-    "webDiscoveryWorkerImage": "step2b-web-discovery-worker:test",
+    "webDiscoveryWorkerImage": "step2b-web-discovery-worker:final",
     "webDiscoveryWorkerDigest": "sha256:e879c19a55862f58bdac4258ba56dbcbec18cc21c15697167572c14b0362c555",
     "runAs": "node (uid 1000)"
   },
