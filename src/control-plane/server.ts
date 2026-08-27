@@ -82,6 +82,15 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       return jsonError(context, 404, "file_not_found", error instanceof Error ? error.message : "File not found.");
     }
   });
+  app.get("/v1/files/:fileId/preview", async (context) => {
+    if (!options.fileStore) return jsonError(context, 500, "files_not_configured", "File storage is not configured.");
+    try {
+      const preview = await tenantFileAdapter(options, principalOf(context)).preview(context.req.param("fileId"));
+      return context.json({ preview });
+    } catch (error) {
+      return jsonError(context, 404, "file_not_found", error instanceof Error ? error.message : "File not found.");
+    }
+  });
   app.delete("/v1/files/:fileId", async (context) => {
     if (!options.fileStore) return jsonError(context, 500, "files_not_configured", "File storage is not configured.");
     const deleted = await tenantFileAdapter(options, principalOf(context)).delete(context.req.param("fileId"));
