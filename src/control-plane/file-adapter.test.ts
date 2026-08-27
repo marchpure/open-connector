@@ -1,7 +1,16 @@
 import { strToU8, zipSync } from "fflate";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TenantFileAdapter, FileAdapterError } from "./file-adapter.ts";
+
+const tempRoots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
 
 function createTransit() {
   const stored = new Map<string, File>();
@@ -117,5 +126,37 @@ describe("TenantFileAdapter", () => {
     await expect(files.upload(new File([workbook("WEBSERVICE(A1)")], "formula.xlsx"))).rejects.toMatchObject({
       code: "malicious_input",
     });
+  });
+
+  it("imports a staged upload without materializing it as a File", async () => {
+    const root = await mkdtemp(join(tmpdir(), "connection-file-adapter-"));
+    tempRoots.push(root);
+    const path = join(root, "upload.tmp");
+    await writeFile(path, "name,amount\nAda,42\n");
+    const transit = createTransit();
+    const createFromPath = vi.fn(async (staged: { path: string; sizeBytes: number; name: string; mimeType: string }) => ({
+      fileId: "streamed.csv",
+      downloadUrl: "/files/streamed.csv",
+      sizeBytes: staged.sizeBytes,
+      name: staged.name,
+      mimeType: staged.mimeType,
+    }));
+    const stagedTransit = Object.assign(transit, { createFromPath });
+    const files = new TenantFileAdapter(
+      "tenant-a",
+      "workspace-a",
+      stagedTransit,
+      new DatabaseSync(":memory:"),
+    );
+
+    await expect(
+      files.uploadFromPath({ path, sizeBytes: 19, name: "people.csv", mimeType: "text/csv" }),
+    ).resolves.toMatchObject({
+      fileId: "streamed.csv",
+      kind: "csv",
+      scanStatus: "clean",
+    });
+    expect(createFromPath).toHaveBeenCalledOnce();
+    expect(transit.create).not.toHaveBeenCalled();
   });
 });

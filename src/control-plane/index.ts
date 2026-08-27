@@ -7,6 +7,7 @@ import { ProviderLoader } from "../providers/provider-loader.ts";
 import { executorModules } from "../providers/registry.generated.ts";
 import { createSecretCodec } from "../server/secrets/secret-codec.ts";
 import { TransitFileService } from "../server/files/transit-files.ts";
+import { withNodeStagedFile } from "../server/files/node-transit-file-upload.ts";
 import { createConnectionControlApp } from "./server.ts";
 import type { EnablementEntry } from "./catalog.ts";
 import { OracleThinDriver } from "./oracle-driver.ts";
@@ -27,6 +28,7 @@ const transitFiles = new TransitFileService({
   ttlSeconds: positiveInteger(process.env.CONNECTION_SERVICE_TRANSIT_TTL_SECONDS, 86_400),
   maxBytes: positiveInteger(process.env.CONNECTION_SERVICE_TRANSIT_MAX_BYTES, 100 * 1024 * 1024),
 });
+const transitFileTempDir = join(dataDir, "upload-staging");
 const app = createConnectionControlApp({
   catalog,
   providerLoader: new ProviderLoader(executorModules),
@@ -37,6 +39,8 @@ const app = createConnectionControlApp({
   enablement,
   transitFiles,
   fileStore: transitFiles,
+  stageFileUpload: (request, consume) =>
+    withNodeStagedFile(request, { tempDir: transitFileTempDir, maxBytes: transitFiles.maxBytes }, consume),
   oracleDriverFactory: (config, credentials) => new OracleThinDriver(config, credentials),
 });
 

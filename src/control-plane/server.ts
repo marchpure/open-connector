@@ -3,6 +3,7 @@ import type { TransitFileWriter } from "../core/types.ts";
 import type { ActionDefinition } from "../core/types.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
 import type { ITransitFileService } from "../server/files/transit-file-store.ts";
+import type { StagedTransitFile } from "../server/files/transit-file-store.ts";
 import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
 import type { EnablementEntry } from "./catalog.ts";
 import type { OracleConnectionConfig, OracleQueryDriver } from "./oracle-adapter.ts";
@@ -36,6 +37,7 @@ export interface ConnectionControlAppOptions {
   enablement: EnablementEntry[];
   transitFiles?: TransitFileWriter;
   fileStore?: ITransitFileService;
+  stageFileUpload?: <T>(request: Request, consume: (file: StagedTransitFile) => Promise<T>) => Promise<T>;
   oracleDriverFactory?: (config: OracleConnectionConfig, credentials: OracleDriverOptions) => OracleQueryDriver;
 }
 
@@ -67,6 +69,12 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
   app.post("/v1/files", async (context) => {
     if (!options.fileStore) return jsonError(context, 500, "files_not_configured", "File storage is not configured.");
     try {
+      if (options.stageFileUpload) {
+        const file = await options.stageFileUpload(context.req.raw, (staged) =>
+          tenantFileAdapter(options, principalOf(context)).uploadFromPath(staged),
+        );
+        return context.json({ file }, 201);
+      }
       const form = await context.req.raw.formData();
       const file = form.get("file");
       if (!(file instanceof File)) return jsonError(context, 400, "invalid_input", "file is required.");

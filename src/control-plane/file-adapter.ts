@@ -1,7 +1,15 @@
-import type { ITransitFileService, TransitFileUpload } from "../server/files/transit-file-store.ts";
+import type {
+  IStagedTransitFileService,
+  ITransitFileService,
+  StagedTransitFile,
+  TransitFileUpload,
+} from "../server/files/transit-file-store.ts";
 import type { DatabaseSync } from "node:sqlite";
 
 import { strFromU8, unzipSync } from "fflate";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { open, readFile } from "node:fs/promises";
 
 export type SupportedFileKind = "csv" | "excel" | "json" | "parquet" | "pdf" | "md" | "txt";
 
@@ -86,6 +94,13 @@ export class TenantFileAdapter {
     scanBytes(kind, bytes);
     const digest = await crypto.subtle.digest("SHA-256", bytes);
     const sha256 = Buffer.from(digest).toString("hex");
+    const duplicate = this.findDuplicate(sha256);
+    if (duplicate) return duplicate;
+    const upload = await this.transitFiles.create(new File([bytes], file.name, { type: file.type }));
+    return this.persistProfile(upload, kind, sha256);
+  }
+
+  private findDuplicate(sha256: string): FileProfile | undefined {
     const duplicate = this.database
       .prepare(
         `select * from tenant_files
@@ -93,8 +108,10 @@ export class TenantFileAdapter {
           order by created_at limit 1`,
       )
       .get(this.tenantId, this.workspaceId, sha256) as Record<string, unknown> | undefined;
-    if (duplicate) return rowToFileProfile(duplicate);
-    const upload = await this.transitFiles.create(new File([bytes], file.name, { type: file.type }));
+    return duplicate ? rowToFileProfile(duplicate) : undefined;
+  }
+
+  private persistProfile(upload: TransitFileUpload, kind: SupportedFileKind, sha256: string): FileProfile {
     const profile: FileProfile = {
       ...upload,
       tenantId: this.tenantId,
@@ -122,6 +139,28 @@ export class TenantFileAdapter {
         new Date().toISOString(),
       );
     return profile;
+  }
+
+  async uploadFromPath(file: StagedTransitFile): Promise<FileProfile> {
+    const kind = detectKind(file.name);
+    if (!kind) {
+      throw new FileAdapterError(
+        "unsupported_type",
+        "Only CSV, Excel, JSON, Parquet, PDF, Markdown, and text files are supported.",
+      );
+    }
+    if (file.sizeBytes > this.transitFiles.maxBytes) {
+      throw new FileAdapterError("file_too_large", "File exceeds the configured maximum size.");
+    }
+    if (!isStagedTransitFileService(this.transitFiles)) {
+      throw new FileAdapterError("unsupported_type", "Configured file storage does not accept staged uploads.");
+    }
+    await scanPath(kind, file.path);
+    const sha256 = await hashPath(file.path);
+    const duplicate = this.findDuplicate(sha256);
+    if (duplicate) return duplicate;
+    const upload = await this.transitFiles.createFromPath(file);
+    return this.persistProfile(upload, kind, sha256);
   }
 
   list(): FileProfile[] {
@@ -175,6 +214,79 @@ export class TenantFileAdapter {
     }
     const truncated = text.length > 10_000;
     return { kind: profile.kind, text: text.slice(0, 10_000), truncated };
+  }
+}
+
+function isStagedTransitFileService(service: ITransitFileService): service is IStagedTransitFileService {
+  return "createFromPath" in service && typeof service.createFromPath === "function";
+}
+
+async function hashPath(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest("hex");
+}
+
+async function scanPath(kind: SupportedFileKind, path: string): Promise<void> {
+  if (kind === "csv") {
+    await scanCsvStream(path);
+    return;
+  }
+  if (kind === "md" || kind === "txt") return;
+  if (kind === "pdf" || kind === "parquet") {
+    const handle = await open(path, "r");
+    try {
+      const prefix = new Uint8Array(kind === "pdf" ? 5 : 4);
+      await handle.read(prefix, 0, prefix.length, 0);
+      scanBytes(kind, prefix);
+    } finally {
+      await handle.close();
+    }
+    return;
+  }
+  scanBytes(kind, new Uint8Array(await readFile(path)));
+}
+
+async function scanCsvStream(path: string): Promise<void> {
+  let atCellStart = true;
+  let quoted = false;
+  let pendingQuote = false;
+  for await (const chunk of createReadStream(path, { encoding: "utf8" })) {
+    for (const character of chunk) {
+      if (quoted) {
+        if (pendingQuote) {
+          if (character === '"') {
+            pendingQuote = false;
+            continue;
+          }
+          quoted = false;
+          pendingQuote = false;
+        } else if (character === '"') {
+          pendingQuote = true;
+          continue;
+        } else if (atCellStart && /[\t\r ]/.test(character)) {
+          continue;
+        } else if (atCellStart) {
+          if ("=+-@".includes(character)) throw new FileAdapterError("malicious_input", "CSV spreadsheet formulas are not allowed.");
+          atCellStart = false;
+        }
+      }
+      if (!quoted) {
+        if (character === '"' && atCellStart) {
+          quoted = true;
+        } else if (character === "," || character === "\n") {
+          atCellStart = true;
+        } else if (atCellStart && /[\t\r ]/.test(character)) {
+          continue;
+        } else if (atCellStart) {
+          if ("=+-@".includes(character)) throw new FileAdapterError("malicious_input", "CSV spreadsheet formulas are not allowed.");
+          atCellStart = false;
+        }
+      }
+    }
+  }
+  if (quoted && !pendingQuote) {
+    throw new FileAdapterError("malicious_input", "CSV contains an unterminated quoted field.");
   }
 }
 

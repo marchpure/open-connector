@@ -1,8 +1,12 @@
 import type { ProviderDefinition } from "../core/types.ts";
 
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCatalogStore } from "../catalog-store.ts";
+import { TransitFileService } from "../server/files/transit-files.ts";
 import { AesGcmSecretCodec } from "../server/secrets/secret-codec.ts";
 import { createPrincipalToken } from "./auth.ts";
 import { createConnectionControlApp } from "./server.ts";
@@ -29,7 +33,57 @@ const principal = {
   audience: "knowledge-runtime",
 };
 
+const tempRoots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
 describe("connection control API", () => {
+  it("streams an authenticated multipart upload through staged tenant file intake", async () => {
+    const root = await mkdtemp(join(tmpdir(), "connection-control-upload-"));
+    tempRoots.push(root);
+    const stagedPath = join(root, "request.tmp");
+    await writeFile(stagedPath, "name,amount\nAda,42\n");
+    const fileStore = new TransitFileService({
+      rootDir: join(root, "files"),
+      publicOrigin: "http://localhost:3417",
+      ttlSeconds: 60,
+      maxBytes: 1024 * 1024,
+    });
+    const stageFileUpload = vi.fn(async (_request: Request, consume) =>
+      consume({ path: stagedPath, sizeBytes: 19, name: "people.csv", mimeType: "text/csv" }),
+    );
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([provider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => undefined,
+      },
+      controlDatabase: new DatabaseSync(":memory:"),
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [],
+      fileStore,
+      stageFileUpload,
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+
+    const response = await app.request("/v1/files", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "multipart/form-data; boundary=fixture" },
+      body: "--fixture--",
+    });
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ file: { kind: "csv", scanStatus: "clean", sizeBytes: 19 } });
+    expect(stageFileUpload).toHaveBeenCalledOnce();
+    const listed = await app.request("/v1/files", { headers: { authorization: `Bearer ${auth}` } });
+    expect(await listed.json()).toMatchObject({ items: [{ kind: "csv", tenantId: "tenant-a" }] });
+  });
+
   it("isolates tenants and never returns credentials", async () => {
     const database = new DatabaseSync(":memory:");
     const app = createConnectionControlApp({

@@ -14,6 +14,7 @@ import { ControlledMcpAdapter } from "../src/control-plane/mcp-adapter.ts";
 import { RestOpenApiAdapter } from "../src/control-plane/rest-adapter.ts";
 import { createConnectionControlApp } from "../src/control-plane/server.ts";
 import { createGuardedFetch } from "../src/core/guarded-fetch.ts";
+import { withNodeStagedFile } from "../src/server/files/node-transit-file-upload.ts";
 import { TransitFileService } from "../src/server/files/transit-files.ts";
 import { AesGcmSecretCodec } from "../src/server/secrets/secret-codec.ts";
 
@@ -137,7 +138,7 @@ const transit = new TransitFileService({
   rootDir: fileRoot,
   publicOrigin: "http://127.0.0.1",
   ttlSeconds: 3600,
-  maxBytes: 10 * 1024 * 1024,
+  maxBytes: 11 * 1024 * 1024,
 });
 const files = new TenantFileAdapter("tenant-a", "workspace-a", transit, new DatabaseSync(":memory:"));
 const csv = await files.upload(new File(["a,b\n1,2\n"], "data.csv", { type: "text/csv" }));
@@ -213,6 +214,8 @@ const controlApp = createConnectionControlApp({
   publicOrigin: "http://127.0.0.1",
   enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "e2e" }],
   fileStore: transit,
+  stageFileUpload: (request, consume) =>
+    withNodeStagedFile(request, { tempDir: join(evidenceDir, "upload-staging"), maxBytes: transit.maxBytes }, consume),
 });
 const tenant = {
   tenantId: "tenant-a",
@@ -268,17 +271,61 @@ benchmark.connectionCatalog = {
   listMs: rounded(performance.now() - listStartedAt),
 };
 
-const largeFileBytes = new Uint8Array(10 * 1024 * 1024);
-largeFileBytes.fill(0x61);
 const fileRssBefore = process.memoryUsage().rss;
 const largeFileStartedAt = performance.now();
-const largeFile = await files.upload(new File([largeFileBytes], "ten-mib.txt", { type: "text/plain" }));
+const boundary = "step2b-stream-boundary";
+const prefix = new TextEncoder().encode(
+  `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="ten-mib.txt"\r\nContent-Type: text/plain\r\n\r\n`,
+);
+const suffix = new TextEncoder().encode(`\r\n--${boundary}--\r\n`);
+const chunkBytes = 64 * 1024;
+let emittedBytes = 0;
+let sentPrefix = false;
+let sentSuffix = false;
+const body = new ReadableStream<Uint8Array>({
+  pull(controller) {
+    if (!sentPrefix) {
+      sentPrefix = true;
+      controller.enqueue(prefix);
+      return;
+    }
+    if (emittedBytes < 10 * 1024 * 1024) {
+      const size = Math.min(chunkBytes, 10 * 1024 * 1024 - emittedBytes);
+      const chunk = new Uint8Array(size);
+      chunk.fill(0x61);
+      emittedBytes += size;
+      controller.enqueue(chunk);
+      return;
+    }
+    if (!sentSuffix) {
+      sentSuffix = true;
+      controller.enqueue(suffix);
+      return;
+    }
+    controller.close();
+  },
+});
+const largeFileResponse = await controlApp.fetch(
+  new Request("http://localhost/v1/files", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": `multipart/form-data; boundary=${boundary}`,
+    },
+    body,
+    duplex: "half",
+  } as RequestInit & { duplex: "half" }),
+);
+if (largeFileResponse.status !== 201) {
+  throw new Error(`Streaming file upload failed with ${largeFileResponse.status}: ${await largeFileResponse.text()}`);
+}
+const largeFile = (await largeFileResponse.json()) as { file: { sizeBytes: number } };
 benchmark.largeFileUpload = {
-  bytes: largeFile.sizeBytes,
+  bytes: largeFile.file.sizeBytes,
   durationMs: rounded(performance.now() - largeFileStartedAt),
   rssDeltaBytes: process.memoryUsage().rss - fileRssBefore,
-  storagePath: "transit file service",
-  limitation: "TenantFileAdapter currently buffers bytes for scanning and hashing; this is not streaming-parser evidence.",
+  requestChunkBytes: chunkBytes,
+  storagePath: "authenticated multipart HTTP -> disk staging -> transit file service",
 };
 
 await writeFile(join(evidenceDir, "results.json"), JSON.stringify(results, null, 2));

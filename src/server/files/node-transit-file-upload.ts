@@ -17,17 +17,24 @@ export interface NodeTransitFileUploadOptions {
 export function createNodeTransitFileUpload(
   options: NodeTransitFileUploadOptions,
 ): (request: Request) => Promise<TransitFileUpload> {
-  return async (request) => {
-    await mkdir(options.tempDir, { recursive: true });
-    const path = join(options.tempDir, `${randomBytes(16).toString("hex")}.tmp`);
-    try {
-      return await options.transitFiles.createFromPath(
-        await stageMultipartFile(request, path, options.transitFiles.maxBytes),
-      );
-    } finally {
-      await unlink(path).catch(() => undefined);
-    }
-  };
+  return (request) =>
+    withNodeStagedFile(request, { tempDir: options.tempDir, maxBytes: options.transitFiles.maxBytes }, (file) =>
+      options.transitFiles.createFromPath(file),
+    );
+}
+
+export async function withNodeStagedFile<T>(
+  request: Request,
+  options: { tempDir: string; maxBytes: number },
+  consume: (file: StagedTransitFile) => Promise<T>,
+): Promise<T> {
+  await mkdir(options.tempDir, { recursive: true });
+  const path = join(options.tempDir, `${randomBytes(16).toString("hex")}.tmp`);
+  try {
+    return await consume(await stageMultipartFile(request, path, options.maxBytes));
+  } finally {
+    await unlink(path).catch(() => undefined);
+  }
 }
 
 export async function cleanupStagedTransitFiles(tempDir: string, maxAgeMs: number): Promise<void> {
