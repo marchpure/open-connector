@@ -1,5 +1,4 @@
 import { strToU8, zipSync } from "fflate";
-import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { TenantFileAdapter, FileAdapterError } from "./file-adapter.ts";
@@ -119,26 +118,4 @@ describe("TenantFileAdapter", () => {
       code: "malicious_input",
     });
   });
-
-  it("previews real PDF and ZSTD Parquet files", async () => {
-    const transit = createTransit();
-    const files = new TenantFileAdapter("tenant-a", "workspace-a", transit, new DatabaseSync(":memory:"));
-    const pdfBytes = await readFile(
-      "/Users/bytedance/.openhands/cache/skills/public-skills/skills/theme-factory/theme-showcase.pdf",
-    );
-    const parquetBytes = await readFile("/Users/bytedance/oracle_byaan_e2e/container_parquet/d_arc_brand.parquet");
-    const pdf = await files.upload(new File([pdfBytes], "theme.pdf", { type: "application/pdf" }));
-    const parquet = await files.upload(new File([parquetBytes], "brands.parquet"));
-
-    await expect(files.preview(pdf.fileId)).resolves.toMatchObject({
-      kind: "pdf",
-      text: expect.stringContaining("Ocean Depths"),
-      pageCount: 10,
-    });
-    await expect(files.preview(parquet.fileId)).resolves.toMatchObject({
-      kind: "parquet",
-      columns: expect.arrayContaining(["BRANDID", "BRANDENAME"]),
-      rows: expect.arrayContaining([expect.objectContaining({ BRANDID: "ZP08", BRANDENAME: "ANTA" })]),
-    });
-  }, 30_000);
 });
