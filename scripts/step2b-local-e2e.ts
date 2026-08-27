@@ -92,9 +92,12 @@ try {
 }
 
 const mcpPath = join(process.cwd(), "scripts", ".step2b-fixture-mcp.mjs");
+const mcpLaunchesPath = join(evidenceDir, "mcp-launches.txt");
 await writeFile(
   mcpPath,
   `
+  import { appendFileSync } from "node:fs";
+  appendFileSync(process.argv[2], "launch\\n");
   let buffer = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => {
@@ -106,9 +109,13 @@ await writeFile(
       const request = JSON.parse(line);
       let result = {};
       if (request.method === "initialize") {
-        result = { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "fixture-mcp", version: "1.0.0" } };
+        result = { protocolVersion: "2025-06-18", capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: "fixture-mcp", version: "1.0.0" } };
       } else if (request.method === "tools/list") {
         result = { tools: [{ name: "echo", description: "echo", inputSchema: { type: "object" } }] };
+      } else if (request.method === "resources/list") {
+        result = { resources: [{ uri: "fixture://status", name: "Fixture status" }] };
+      } else if (request.method === "prompts/list") {
+        result = { prompts: [{ name: "summarize", description: "Summarize fixture data" }] };
       } else if (request.method === "tools/call") {
         result = { content: [{ type: "text", text: JSON.stringify(request.params.arguments ?? {}) }] };
       }
@@ -120,14 +127,47 @@ await writeFile(
 const mcp = new ControlledMcpAdapter({
   transport: "stdio",
   command: process.execPath,
-  args: [mcpPath],
+  args: [mcpPath, mcpLaunchesPath],
   allowedCommands: [process.execPath],
   allowedTools: ["echo"],
 });
 try {
   const discovered = await mcp.discover();
   const called = await mcp.callTool("echo", { value: "e2e" });
-  checks.mcp = { status: discovered.tools.length === 1, toolCall: JSON.stringify(called).includes("e2e") };
+  const launches = (await readFile(mcpLaunchesPath, "utf8")).trim().split("\n").length;
+  const disconnected = await rejects(
+    new ControlledMcpAdapter({
+      transport: "stdio",
+      command: process.execPath,
+      args: ["-e", "process.exit(1)"],
+      allowedCommands: [process.execPath],
+      allowedTools: ["echo"],
+      timeoutMs: 1_000,
+    }).discover(),
+  );
+  const timedOut = await rejects(
+    new ControlledMcpAdapter({
+      transport: "stdio",
+      command: process.execPath,
+      args: ["-e", "setInterval(() => {}, 1000)"],
+      allowedCommands: [process.execPath],
+      allowedTools: ["echo"],
+      timeoutMs: 50,
+    }).discover(),
+  );
+  checks.mcp = {
+    status: discovered.tools.length === 1 && discovered.resources.length === 1 && discovered.prompts.length === 1,
+    discovery: {
+      tools: discovered.tools.length,
+      resources: discovered.resources.length,
+      prompts: discovered.prompts.length,
+    },
+    toolCall: JSON.stringify(called).includes("e2e"),
+    reconnect: launches === 2,
+    independentProcessLaunches: launches,
+    disconnectRejected: disconnected,
+    timeoutRejected: timedOut,
+  };
 } catch (error) {
   checks.mcp = { status: false, error: error instanceof Error ? error.message : String(error) };
 }
@@ -339,6 +379,15 @@ function percentile(values: number[], percentileValue: number): number {
 
 function rounded(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+async function rejects(promise: Promise<unknown>): Promise<boolean> {
+  try {
+    await promise;
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 function findFixtureHost(): string {
