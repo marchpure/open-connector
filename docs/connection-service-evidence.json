@@ -1,85 +1,172 @@
 {
-  "recordedAt": "2026-08-28T00:18:15+08:00",
+  "recordedAt": "2026-08-28T01:29:04+08:00",
   "classification": "sanitized-local-evidence",
+  "testedServiceCommit": "d711fe24cf924132b4096d56867dd947c5743d06",
   "service": {
     "catalogProviderCountObserved": 1445,
     "catalogActionCountObserved": 15156,
+    "catalogClaim": "Inventory only. Provider directories are not claimed as supported or verified.",
     "enabledServices": [
       {
         "service": "feishu",
         "tier": "beta"
       }
     ],
-    "unauthorizedControlApi": {
-      "status": 401
-    }
+    "verifiedTypes": [],
+    "unauthorizedControlApiStatus": 401
   },
   "automated": {
-    "focusedControlPlane": {
-      "testFiles": 7,
-      "testsPassed": 15
-    },
-    "fullUpstreamSuite": {
-      "testFiles": 159,
-      "testsPassed": 1432,
+    "fullSuite": {
+      "command": "npm test -- --run",
+      "testFilesPassed": 162,
+      "testFilesSkipped": 1,
+      "testsPassed": 1457,
       "testsSkipped": 4
+    },
+    "focusedControlPlane": {
+      "testFiles": 10,
+      "behaviorTests": 41,
+      "scope": [
+        "tenant API and redaction",
+        "least-privilege lease and revocation",
+        "ACL lifecycle and IDOR rejection",
+        "durable validation/discovery jobs and restart recovery",
+        "Oracle AST, discovery, limits, and driver read-only transaction",
+        "durable tenant REST idempotency, OAuth bearer, pagination, and rate limit",
+        "MCP definition encryption, allowlists, schema rejection, and timeout",
+        "Web Discovery token, origin, redirect, cookie, CSRF, and confirmation controls",
+        "file scan, deduplication, parsing, and preview"
+      ]
     },
     "typecheck": "passed",
     "lint": "passed with deny-warnings",
     "gitDiffCheck": "passed",
     "security": [
       "SSRF loopback target rejected before transport",
+      "Oracle multi-statement, DML, FOR UPDATE, package calls, and database links rejected by AST gate",
+      "driver-level Oracle read-only transaction and rollback",
       "malformed PDF and Parquet rejected",
       "ZIP central-directory traversal and compression limits enforced",
+      "CSV and XLSX spreadsheet formulas rejected",
       "encrypted connection, file metadata, lease, and revocation survive SQLite restart",
-      "duplicate REST write replayed without a second transport call",
+      "ACL/visibility/revocation changes cascade to active leases",
+      "durable REST idempotency stores hashed keys and encrypted results",
       "lease token is not persisted; only SHA-256 hash is stored"
     ]
   },
   "realLocalE2e": {
+    "command": "npx --no-install tsx scripts/step2b-local-e2e.ts",
+    "result": "/var/folders/y5/s7wzkl8d44q4z4lj2ljg4lrc0000gn/T/step2b-evidence-Q3pS9S/results.json",
+    "resultSha256": "2c91aeacfb793561029dee5e02755e1be0f36689fb5d821c31c7cc525d593f47",
     "fixtureRestTcp": "passed",
     "restIdempotentWriteReplay": "passed",
     "mcpStdioInitializeToolsListCall": "passed",
-    "fileBytes": [
-      "csv",
-      "excel",
-      "json",
-      "pdf"
-    ],
-    "tenantIsolation": "passed",
+    "fileParsePreviews": {
+      "csv": "passed",
+      "json": "passed",
+      "excel": "passed with real XLSX",
+      "pdf": "passed with real 10-page PDF and 4515 extracted characters",
+      "parquet": "passed with real ZSTD Parquet and 17 preview rows"
+    },
+    "tenantIsolation": "passed in automated integration tests",
     "credentialRedaction": "passed",
     "credentialCiphertextAtRest": "passed"
   },
   "realOracle": {
+    "command": "npx --no-install tsx scripts/step2b-oracle-e2e.ts with STEP2B_ORACLE_* environment variables",
+    "result": "/tmp/step2b-oracle-evidence-current.json",
+    "resultSha256": "5bc46c9f9e312b2db68202e9265f27ffa1b940aba2f785f9029a8e3f1071f02e",
     "container": "step3b-oracle-integration",
     "service": "FREEPDB1",
     "thinDriverSelectDual": "passed",
+    "schemaDiscovery": "STEP3B",
+    "tableDiscovery": "STEP3B_ORDERS",
+    "columnDiscovery": [
+      "ORDER_ID VARCHAR2 NOT NULL",
+      "AMOUNT NUMBER NOT NULL"
+    ],
     "writeQueryRejectedBeforeExecution": "passed",
     "credentials": "not recorded"
   },
+  "webDiscovery": {
+    "serviceContract": "passed in automated integration tests",
+    "covered": [
+      "short-lived worker token hash verification",
+      "tenant isolation and encrypted observations",
+      "same-origin request and redirect enforcement",
+      "cookie, CSRF, and sensitive-field rejection",
+      "JSON API candidate inference",
+      "explicit origin, operation, and read/write confirmation"
+    ],
+    "deployedIsolatedBrowserWorker": "not evidenced"
+  },
   "feishu": {
+    "providerTier": "beta",
     "oauthClientConfigAndAuthorizationStart": "passed",
     "requestedScopes": [
       "offline_access",
       "auth:user.id:read",
       "docx:document:readonly"
     ],
-    "authorizedResourceRead": "pending_user_authorization_and_test_resource",
+    "environmentObservation": "A separate lark-cli user session successfully read the real design document, but this is not Connection Service E2E evidence and has broader scopes.",
+    "authorizedResourceReadThroughConnectionService": "not evidenced",
     "revocationAfterResourceRead": "not evidenced"
   },
-  "releaseGates": {
-    "npmAudit": {
-      "status": "blocked",
-      "moderate": 3,
-      "high": 6,
-      "critical": 0,
-      "report": "/tmp/step2b-audit.json"
+  "performance": {
+    "classification": "single-machine service-local baseline; not production capacity evidence",
+    "connectionCatalog": {
+      "connections": 100,
+      "createP95Ms": 0.71,
+      "createP99Ms": 0.78,
+      "listMs": 1.52
+    },
+    "concurrentRestAdapterInvocations": {
+      "count": 50,
+      "p95Ms": 325.05,
+      "p99Ms": 334.59
+    },
+    "largeFileUpload": {
+      "bytes": 10485760,
+      "durationMs": 30.24,
+      "rssDeltaBytes": 56459264,
+      "limitation": "TenantFileAdapter buffers the object for scanning and hashing; streaming file processing is not implemented or evidenced."
+    },
+    "pending": [
+      "50 concurrent full runtime/AutoSkill invocations",
+      "long conversation stability",
+      "production-like CPU and peak memory telemetry"
+    ]
+  },
+  "supplyChain": {
+    "apacheLicenseSha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "noticeSha256": "d0890661bf25e7327808610f773b055cb87bf949ff6bba5943c7d62d94d1bf0f",
+    "packageLockSha256": "5de991a6e757343656d02fe202102ce559985b43094d75199584fe2417ade2eb",
+    "productionAudit": {
+      "command": "npm audit --omit=dev",
+      "vulnerabilities": 0
+    },
+    "fullAudit": {
+      "command": "npm audit",
+      "vulnerabilities": 0
     },
     "sbom": {
-      "status": "generated_outside_repo",
-      "report": "/tmp/step2b-npm-sbom.json"
-    },
-    "fullNegativeProviderMatrix": "pending",
-    "status": "NOT_FROZEN"
+      "format": "CycloneDX 1.5",
+      "components": 590,
+      "path": "/tmp/step2b-npm-sbom-current.json",
+      "sha256": "57697cbdcfee5b9d48c27a8a7426f1dd5d907280585b90c90ebe361eaaf30a90"
+    }
+  },
+  "releaseGates": {
+    "status": "NOT_FROZEN",
+    "blockers": [
+      "Connection Service-owned Feishu OAuth resource read and post-revocation denial are not evidenced.",
+      "The isolated Web Discovery browser worker is not deployed or exercised end to end.",
+      "Oracle VPC/private runner and optional SSH transport are not implemented or evidenced.",
+      "MCP reconnect and network-disconnect behavior are not evidenced with a real process.",
+      "The full wrong-credential, timeout, disconnect, and revocation provider matrix is incomplete.",
+      "Large-file scanning and hashing buffer the full file instead of streaming.",
+      "Full 50-concurrent-invocation and long-conversation stability tests with production-like telemetry are pending.",
+      "Real PDF, Parquet, and XLSX E2E fixtures are machine-local and must be provisioned by the release runner."
+    ]
   }
 }
