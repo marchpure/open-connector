@@ -1,20 +1,21 @@
+import type { ProviderDefinition } from "../src/core/types.ts";
+
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { DatabaseSync } from "node:sqlite";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { unlink } from "node:fs/promises";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
-import { unlink } from "node:fs/promises";
-import { createConnectionControlApp } from "../src/control-plane/server.ts";
-import { createPrincipalToken } from "../src/control-plane/auth.ts";
+import { DatabaseSync } from "node:sqlite";
 import { createCatalogStore } from "../src/catalog-store.ts";
-import { AesGcmSecretCodec } from "../src/server/secrets/secret-codec.ts";
+import { createPrincipalToken } from "../src/control-plane/auth.ts";
 import { TenantFileAdapter } from "../src/control-plane/file-adapter.ts";
-import { RestOpenApiAdapter } from "../src/control-plane/rest-adapter.ts";
 import { ControlledMcpAdapter } from "../src/control-plane/mcp-adapter.ts";
-import type { ProviderDefinition } from "../src/core/types.ts";
-import { TransitFileService } from "../src/server/files/transit-files.ts";
+import { RestOpenApiAdapter } from "../src/control-plane/rest-adapter.ts";
+import { createConnectionControlApp } from "../src/control-plane/server.ts";
 import { createGuardedFetch } from "../src/core/guarded-fetch.ts";
+import { TransitFileService } from "../src/server/files/transit-files.ts";
+import { AesGcmSecretCodec } from "../src/server/secrets/secret-codec.ts";
 
 const evidenceDir = await mkdtemp(join(tmpdir(), "step2b-evidence-"));
 const results: Record<string, unknown> = {
@@ -28,20 +29,28 @@ const fixture = new Hono();
 fixture.get("/records", (context) => context.json({ items: [{ id: "fixture-1" }] }));
 fixture.post("/records", async (context) => context.json({ created: await context.req.json() }, 201));
 const fixtureServer = serve({ fetch: fixture.fetch, hostname: "0.0.0.0", port: 0 });
-const fixturePort = await new Promise<number>((resolve) => fixtureServer.on("listening", () => resolve((fixtureServer.address() as { port: number }).port)));
+const fixturePort = await new Promise<number>((resolve) =>
+  fixtureServer.on("listening", () => resolve((fixtureServer.address() as { port: number }).port)),
+);
 try {
   const fixtureHost = process.env.STEP2B_FIXTURE_HOST ?? findFixtureHost();
   const fixtureUrl = `http://${fixtureHost}:${fixturePort}`;
   const fixtureFetcher = createGuardedFetch({ allowPrivateNetwork: true, lookup: null });
-  const adapter = RestOpenApiAdapter.fromSpec(fixtureUrl, {
-    info: { version: "fixture-1" },
-    paths: {
-      "/records": {
-        get: { operationId: "listRecords", responses: { "200": {} } },
-        post: { operationId: "createRecord", responses: { "201": {} } },
+  const adapter = RestOpenApiAdapter.fromSpec(
+    fixtureUrl,
+    {
+      info: { version: "fixture-1" },
+      paths: {
+        "/records": {
+          get: { operationId: "listRecords", responses: { "200": {} } },
+          post: { operationId: "createRecord", responses: { "201": {} } },
+        },
       },
     },
-  }, { type: "none" }, true, fixtureFetcher);
+    { type: "none" },
+    true,
+    fixtureFetcher,
+  );
   const read = await adapter.invoke({ operationId: "listRecords" });
   const firstWrite = await adapter.invoke({
     operationId: "createRecord",
@@ -65,7 +74,9 @@ try {
 }
 
 const mcpPath = join(process.cwd(), "scripts", ".step2b-fixture-mcp.mjs");
-await writeFile(mcpPath, `
+await writeFile(
+  mcpPath,
+  `
   let buffer = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => {
@@ -86,12 +97,14 @@ await writeFile(mcpPath, `
       if (request.id !== undefined) process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) + "\\n");
     }
   });
-`);
+`,
+);
 const mcp = new ControlledMcpAdapter({
   transport: "stdio",
   command: process.execPath,
   args: [mcpPath],
   allowedCommands: [process.execPath],
+  allowedTools: ["echo"],
 });
 try {
   const discovered = await mcp.discover();
@@ -115,15 +128,26 @@ const json = await files.upload(new File(['{"ok":true}'], "data.json", { type: "
 const pdf = await files.upload(new File(["%PDF-1.7\\nfixture"], "data.pdf", { type: "application/pdf" }));
 const excelSource = "/Users/bytedance/DB-GPT/docker/examples/excel/example.xlsx";
 const excelBytes = await readFile(excelSource);
-const excel = await files.upload(new File([excelBytes], "data.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
-checks.files = { status: files.list().length === 4, kinds: files.list().map((file) => file.kind), ids: [csv.fileId, json.fileId, pdf.fileId, excel.fileId] };
+const excel = await files.upload(
+  new File([excelBytes], "data.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+);
+checks.files = {
+  status: files.list().length === 4,
+  kinds: files.list().map((file) => file.kind),
+  ids: [csv.fileId, json.fileId, pdf.fileId, excel.fileId],
+};
 
 const provider: ProviderDefinition = {
   service: "fixture",
   displayName: "Fixture",
   categories: ["test"],
   authTypes: ["custom_credential"],
-  auth: [{ type: "custom_credential", fields: [{ key: "secret", label: "Secret", inputType: "password", required: true, secret: true }] }],
+  auth: [
+    {
+      type: "custom_credential",
+      fields: [{ key: "secret", label: "Secret", inputType: "password", required: true, secret: true }],
+    },
+  ],
   actions: [],
 };
 const controlDb = new DatabaseSync(":memory:");
@@ -141,20 +165,32 @@ const controlApp = createConnectionControlApp({
   enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "e2e" }],
   fileStore: transit,
 });
-const tenant = { tenantId: "tenant-a", workspaceId: "workspace-a", subject: "user-a", ownerId: "user-a", audience: "runtime" };
+const tenant = {
+  tenantId: "tenant-a",
+  workspaceId: "workspace-a",
+  subject: "user-a",
+  ownerId: "user-a",
+  audience: "runtime",
+};
 const token = createPrincipalToken(tenant, "e2e-auth-secret");
 const created = await controlApp.request("/v1/connections", {
   method: "POST",
   headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
   body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "never-return-this" } }),
 });
-const createdBody = await created.json() as Record<string, unknown>;
+const createdBody = (await created.json()) as Record<string, unknown>;
 const listed = await controlApp.request("/v1/connections", { headers: { authorization: `Bearer ${token}` } });
 checks.controlPlane = {
   createStatus: created.status,
   listStatus: listed.status,
   credentialRedacted: !JSON.stringify(createdBody).includes("never-return-this"),
-  ciphertextStored: Boolean((controlDb.prepare("select credential_ciphertext from tenant_connections").get() as { credential_ciphertext?: string })?.credential_ciphertext?.startsWith("enc:v1:")),
+  ciphertextStored: Boolean(
+    (
+      controlDb.prepare("select credential_ciphertext from tenant_connections").get() as {
+        credential_ciphertext?: string;
+      }
+    )?.credential_ciphertext?.startsWith("enc:v1:"),
+  ),
 };
 
 await writeFile(join(evidenceDir, "results.json"), JSON.stringify(results, null, 2));

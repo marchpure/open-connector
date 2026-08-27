@@ -18,7 +18,7 @@ import { verifyPrincipalToken } from "./auth.ts";
 import { CatalogEnablement } from "./catalog.ts";
 import { TenantFileAdapter } from "./file-adapter.ts";
 import { ConnectionLeaseService, LeaseError } from "./lease.ts";
-import { ControlledMcpAdapter } from "./mcp-adapter.ts";
+import { ControlledMcpAdapter, TenantMcpDefinitionStore } from "./mcp-adapter.ts";
 import { OracleDatabaseAdapter } from "./oracle-adapter.ts";
 import { redactSecrets, safeConnectionProfile } from "./redaction.ts";
 import { RestIdempotencyStore, RestOpenApiAdapter } from "./rest-adapter.ts";
@@ -369,6 +369,53 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       );
     }
   });
+  app.post("/v1/adapters/mcp/definitions", async (context) => {
+    const body = await readJsonBody(context);
+    try {
+      const definition = parseMcpDefinition(body.definition);
+      const stored = await tenantMcpDefinitions(options, principalOf(context)).save(definition);
+      return context.json({ definition: stored }, 201);
+    } catch (error) {
+      return jsonError(
+        context,
+        400,
+        "mcp_adapter_error",
+        error instanceof Error ? error.message : "MCP definition failed.",
+      );
+    }
+  });
+  app.post("/v1/adapters/mcp/definitions/:definitionId/discover", async (context) => {
+    try {
+      const definition = await tenantMcpDefinitions(options, principalOf(context)).get(
+        context.req.param("definitionId"),
+      );
+      if (!definition) return jsonError(context, 404, "mcp_definition_not_found", "MCP definition was not found.");
+      return context.json(await new ControlledMcpAdapter(definition).discover());
+    } catch (error) {
+      return jsonError(
+        context,
+        400,
+        "mcp_adapter_error",
+        error instanceof Error ? error.message : "MCP discovery failed.",
+      );
+    }
+  });
+  app.post("/v1/adapters/mcp/definitions/:definitionId/call", async (context) => {
+    const body = await readJsonBody(context);
+    try {
+      const definition = await tenantMcpDefinitions(options, principalOf(context)).get(
+        context.req.param("definitionId"),
+      );
+      if (!definition) return jsonError(context, 404, "mcp_definition_not_found", "MCP definition was not found.");
+      return context.json({
+        result: redactSecrets(
+          await new ControlledMcpAdapter(definition).callTool(requiredString(body.name), recordOf(body.arguments)),
+        ),
+      });
+    } catch (error) {
+      return jsonError(context, 400, "mcp_adapter_error", error instanceof Error ? error.message : "MCP call failed.");
+    }
+  });
   app.post("/v1/adapters/mcp/call", async (context) => {
     const body = await readJsonBody(context);
     try {
@@ -438,6 +485,14 @@ function tenantFileAdapter(options: ConnectionControlAppOptions, principal: Tena
   return new TenantFileAdapter(principal.tenantId, principal.workspaceId, options.fileStore!, options.controlDatabase);
 }
 
+function tenantMcpDefinitions(options: ConnectionControlAppOptions, principal: TenantPrincipal) {
+  return new TenantMcpDefinitionStore(
+    options.controlDatabase,
+    { tenantId: principal.tenantId, workspaceId: principal.workspaceId },
+    options.secretCodec,
+  );
+}
+
 function principalOf(context: Context): TenantPrincipal {
   return context.get("principal") as TenantPrincipal;
 }
@@ -501,6 +556,8 @@ function parseMcpDefinition(value: unknown) {
     allowedHeaderNames: Array.isArray(definition.allowedHeaderNames)
       ? definition.allowedHeaderNames.map(String)
       : undefined,
+    allowedTools: Array.isArray(definition.allowedTools) ? definition.allowedTools.map(String) : undefined,
+    timeoutMs: definition.timeoutMs === undefined ? undefined : Number(definition.timeoutMs),
   };
 }
 
