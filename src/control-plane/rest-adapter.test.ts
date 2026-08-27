@@ -91,4 +91,56 @@ describe("RestOpenApiAdapter", () => {
     expect(JSON.stringify(database.prepare("select * from rest_idempotency").all())).not.toContain("stable-key");
     database.close();
   });
+
+  it("uses OAuth bearer auth and follows bounded rate-limited pagination", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("", { status: 429, headers: { "retry-after": "0" } }))
+      .mockResolvedValueOnce(
+        Response.json([{ id: 1 }], { headers: { link: '<https://api.example.com/records?page=2>; rel="next"' } }),
+      )
+      .mockResolvedValueOnce(Response.json([{ id: 2 }]));
+    const adapter = RestOpenApiAdapter.fromSpec(
+      "https://api.example.com",
+      spec,
+      { type: "oauth2", accessToken: "oauth-token" },
+      true,
+      fetcher as typeof fetch,
+    );
+
+    await expect(
+      adapter.invoke({
+        operationId: "listRecords",
+        pagination: { maxPages: 2 },
+      }),
+    ).resolves.toMatchObject({
+      status: 200,
+      data: [[{ id: 1 }], [{ id: 2 }]],
+      pages: 2,
+    });
+    expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get("authorization")).toBe("Bearer oauth-token");
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects cross-origin pagination before forwarding credentials", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(
+      Response.json([], {
+        headers: { link: '<https://evil.example/records?page=2>; rel="next"' },
+      }),
+    );
+    const adapter = RestOpenApiAdapter.fromSpec(
+      "https://api.example.com",
+      spec,
+      { type: "oauth2", accessToken: "oauth-token" },
+      true,
+      fetcher as typeof fetch,
+    );
+    await expect(
+      adapter.invoke({
+        operationId: "listRecords",
+        pagination: { maxPages: 2 },
+      }),
+    ).rejects.toMatchObject({ code: "request_failed" });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
 });

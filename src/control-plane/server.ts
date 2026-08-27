@@ -386,9 +386,20 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     const body = await readJsonBody(context);
     try {
       const principal = principalOf(context);
+      let spec = body.spec && typeof body.spec === "object" ? (body.spec as Record<string, unknown>) : undefined;
+      if (!spec && optionalString(body.specFileId)) {
+        if (!options.fileStore) {
+          return jsonError(context, 500, "files_not_configured", "File storage is not configured.");
+        }
+        const file = await tenantFileAdapter(options, principal).read(requiredString(body.specFileId));
+        if (!file.name.toLowerCase().endsWith(".json")) {
+          return jsonError(context, 400, "invalid_spec", "Uploaded OpenAPI specs must be JSON files.");
+        }
+        spec = JSON.parse(await file.text()) as Record<string, unknown>;
+      }
       const adapter = RestOpenApiAdapter.fromSpec(
         requiredString(body.baseUrl),
-        body.spec && typeof body.spec === "object" ? (body.spec as Record<string, unknown>) : undefined,
+        spec,
         parseRestAuth(body.auth),
         body.confirmed === true,
         undefined,
@@ -407,6 +418,10 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
             body: body.input,
             confirmed: body.confirmed === true,
             idempotencyKey: optionalString(body.idempotencyKey),
+            pagination:
+              body.pagination && typeof body.pagination === "object"
+                ? { maxPages: Number(recordOf(body.pagination).maxPages) }
+                : undefined,
           }),
         ),
       });
@@ -697,6 +712,7 @@ function parseRestAuth(value: unknown) {
     return { type: "api_key" as const, header: requiredString(auth.header), value: requiredString(auth.value) };
   }
   if (type === "bearer") return { type: "bearer" as const, token: requiredString(auth.token) };
+  if (type === "oauth2") return { type: "oauth2" as const, accessToken: requiredString(auth.accessToken) };
   return { type: "none" as const };
 }
 

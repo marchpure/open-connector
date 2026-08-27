@@ -12,7 +12,8 @@ import {
 export type RestAuth =
   | { type: "none" }
   | { type: "api_key"; header: string; value: string }
-  | { type: "bearer"; token: string };
+  | { type: "bearer"; token: string }
+  | { type: "oauth2"; accessToken: string };
 
 export interface RestOperation {
   operationId: string;
@@ -37,6 +38,7 @@ export interface RestInvokeInput {
   body?: unknown;
   confirmed?: boolean;
   idempotencyKey?: string;
+  pagination?: { maxPages: number };
 }
 
 export class RestAdapterError extends Error {
@@ -56,7 +58,7 @@ export class RestAdapterError extends Error {
   }
 }
 
-type RestResult = { status: number; data: unknown; headers: Record<string, string> };
+type RestResult = { status: number; data: unknown; headers: Record<string, string>; pages?: number };
 
 interface RestIdempotency {
   claim(
@@ -297,28 +299,42 @@ export class RestOpenApiAdapter {
       headers.set("idempotency-key", input.idempotencyKey);
     }
     applyAuth(headers, this.definition.auth);
-    const response = await this.fetcher(url, {
+    const request: RequestInit = {
       method,
       headers,
       body: input.body === undefined ? undefined : JSON.stringify(input.body),
       signal: AbortSignal.timeout(30_000),
-    });
-    const text = await response.text();
-    let data: unknown = text;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      // Preserve non-JSON response bodies as text.
+    };
+    const maxPages = input.pagination?.maxPages ?? 1;
+    if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 100) {
+      throw new RestAdapterError("request_failed", "Pagination maxPages must be between 1 and 100.");
     }
-    if (!response.ok) {
-      throw new RestAdapterError("request_failed", `REST operation returned ${response.status}.`);
+    const pageResults: unknown[] = [];
+    let response: Response | undefined;
+    let nextUrl: URL | undefined = url;
+    for (let page = 0; page < maxPages && nextUrl; page += 1) {
+      response = await fetchWithRateLimit(this.fetcher, nextUrl, request);
+      const text = await response.text();
+      let data: unknown = text;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        // Preserve non-JSON response bodies as text.
+      }
+      if (!response.ok) {
+        throw new RestAdapterError("request_failed", `REST operation returned ${response.status}.`);
+      }
+      pageResults.push(data);
+      nextUrl = operation.readOnly ? nextLink(response.headers.get("link"), nextUrl) : undefined;
     }
+    if (!response) throw new RestAdapterError("request_failed", "REST operation returned no response.");
     const result = {
       status: response.status,
-      data,
+      data: input.pagination ? pageResults : pageResults[0],
       headers: Object.fromEntries(
         [...response.headers].filter(([key]) => !/authorization|cookie|token|secret/i.test(key)),
       ),
+      ...(input.pagination ? { pages: pageResults.length } : {}),
     };
     if (input.idempotencyKey) {
       this.idempotency.set(input.idempotencyKey, result);
@@ -376,7 +392,34 @@ function parseOperations(spec: Record<string, unknown>): RestOperation[] {
 function applyAuth(headers: Headers, auth: RestAuth): void {
   if (auth.type === "api_key") {
     headers.set(auth.header, auth.value);
-  } else if (auth.type === "bearer") {
-    headers.set("authorization", `Bearer ${auth.token}`);
+  } else if (auth.type === "bearer" || auth.type === "oauth2") {
+    headers.set("authorization", `Bearer ${auth.type === "bearer" ? auth.token : auth.accessToken}`);
   }
+}
+
+async function fetchWithRateLimit(fetcher: typeof fetch, url: URL, init: RequestInit): Promise<Response> {
+  let response = await fetcher(url, init);
+  if (response.status !== 429) return response;
+  const retryAfter = Number(response.headers.get("retry-after") ?? "0");
+  if (!Number.isFinite(retryAfter) || retryAfter < 0 || retryAfter > 5) {
+    throw new RestAdapterError("request_failed", "REST rate-limit retry exceeds the allowed delay.");
+  }
+  await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000));
+  response = await fetcher(url, init);
+  return response;
+}
+
+function nextLink(header: string | null, current: URL): URL | undefined {
+  if (!header) return undefined;
+  for (const item of header.split(",")) {
+    const match = item.match(/^\s*<([^>]+)>\s*;\s*rel="?next"?/i);
+    if (match) {
+      const next = new URL(match[1], current);
+      if (next.origin !== current.origin) {
+        throw new RestAdapterError("request_failed", "Cross-origin REST pagination is not allowed.");
+      }
+      return next;
+    }
+  }
+  return undefined;
 }
