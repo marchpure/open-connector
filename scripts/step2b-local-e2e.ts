@@ -24,6 +24,8 @@ const results: Record<string, unknown> = {
   checks: {},
 };
 const checks = results.checks as Record<string, unknown>;
+const benchmark: Record<string, unknown> = {};
+results.benchmark = benchmark;
 
 const fixture = new Hono();
 fixture.get("/records", (context) => context.json({ items: [{ id: "fixture-1" }] }));
@@ -68,6 +70,21 @@ try {
     status: read.status === 200 && firstWrite.status === 201,
     idempotentReplay: JSON.stringify(firstWrite) === JSON.stringify(secondWrite),
     fixtureUrl,
+  };
+  const invocationRssBefore = process.memoryUsage().rss;
+  const invocationLatencies = await Promise.all(
+    Array.from({ length: 50 }, async (_, index) => {
+      const startedAt = performance.now();
+      const result = await adapter.invoke({ operationId: "listRecords", query: { sample: String(index) } });
+      if (result.status !== 200) throw new Error(`Concurrent REST invocation ${index} failed.`);
+      return performance.now() - startedAt;
+    }),
+  );
+  benchmark.concurrentRestInvocations = {
+    count: invocationLatencies.length,
+    p95Ms: percentile(invocationLatencies, 95),
+    p99Ms: percentile(invocationLatencies, 99),
+    rssDeltaBytes: process.memoryUsage().rss - invocationRssBefore,
   };
 } finally {
   fixtureServer.close();
@@ -225,8 +242,57 @@ checks.controlPlane = {
   ),
 };
 
+const createLatencies: number[] = [];
+for (let index = 1; index < 100; index += 1) {
+  const startedAt = performance.now();
+  const response = await controlApp.request("/v1/connections", {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      service: "fixture",
+      authType: "custom_credential",
+      connectionName: `benchmark-${index}`,
+      values: { secret: "benchmark-secret" },
+    }),
+  });
+  if (response.status !== 201) throw new Error(`Connection benchmark create ${index} failed.`);
+  createLatencies.push(performance.now() - startedAt);
+}
+const listStartedAt = performance.now();
+const benchmarkList = await controlApp.request("/v1/connections", { headers: { authorization: `Bearer ${token}` } });
+const benchmarkConnections = (await benchmarkList.json()) as { items: unknown[] };
+benchmark.connectionCatalog = {
+  count: benchmarkConnections.items.length,
+  createP95Ms: percentile(createLatencies, 95),
+  createP99Ms: percentile(createLatencies, 99),
+  listMs: rounded(performance.now() - listStartedAt),
+};
+
+const largeFileBytes = new Uint8Array(10 * 1024 * 1024);
+largeFileBytes.fill(0x61);
+const fileRssBefore = process.memoryUsage().rss;
+const largeFileStartedAt = performance.now();
+const largeFile = await files.upload(new File([largeFileBytes], "ten-mib.txt", { type: "text/plain" }));
+benchmark.largeFileUpload = {
+  bytes: largeFile.sizeBytes,
+  durationMs: rounded(performance.now() - largeFileStartedAt),
+  rssDeltaBytes: process.memoryUsage().rss - fileRssBefore,
+  storagePath: "transit file service",
+  limitation: "TenantFileAdapter currently buffers bytes for scanning and hashing; this is not streaming-parser evidence.",
+};
+
 await writeFile(join(evidenceDir, "results.json"), JSON.stringify(results, null, 2));
 console.log(JSON.stringify(results, null, 2));
+
+function percentile(values: number[], percentileValue: number): number {
+  const sorted = [...values].sort((left, right) => left - right);
+  const index = Math.ceil((percentileValue / 100) * sorted.length) - 1;
+  return rounded(sorted[Math.max(0, index)] ?? 0);
+}
+
+function rounded(value: number): number {
+  return Math.round(value * 100) / 100;
+}
 
 function findFixtureHost(): string {
   const candidates = Object.values(networkInterfaces())
