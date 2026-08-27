@@ -23,6 +23,7 @@ import { OracleDatabaseAdapter } from "./oracle-adapter.ts";
 import { redactSecrets, safeConnectionProfile } from "./redaction.ts";
 import { RestIdempotencyStore, RestOpenApiAdapter } from "./rest-adapter.ts";
 import { createTenantRuntime } from "./service.ts";
+import { TenantWebDiscoveryStore } from "./web-discovery.ts";
 
 export interface ConnectionControlAppOptions {
   catalog: CatalogStore;
@@ -356,6 +357,81 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       );
     }
   });
+  app.post("/v1/web-discovery/sessions", async (context) => {
+    const body = await readJsonBody(context);
+    try {
+      const session = await tenantWebDiscovery(options, principalOf(context)).start({
+        origin: requiredString(body.origin),
+      });
+      return context.json({ session }, 201);
+    } catch (error) {
+      return jsonError(
+        context,
+        400,
+        "web_discovery_error",
+        error instanceof Error ? error.message : "Discovery failed.",
+      );
+    }
+  });
+  app.post("/v1/web-discovery/sessions/:sessionId/observations", async (context) => {
+    const body = await readJsonBody(context);
+    try {
+      const candidate = await tenantWebDiscovery(options, principalOf(context)).observe(
+        context.req.param("sessionId"),
+        requiredString(context.req.header("x-web-discovery-token")),
+        {
+          url: requiredString(body.url),
+          method: requiredString(body.method),
+          requestHeaders: recordOf(body.requestHeaders) as Record<string, string>,
+          requestSample: body.requestSample,
+          responseStatus: Number(body.responseStatus),
+          responseContentType: requiredString(body.responseContentType),
+          responseSample: body.responseSample,
+          redirectUrl: optionalString(body.redirectUrl),
+        },
+      );
+      return context.json({ candidate }, 201);
+    } catch (error) {
+      return jsonError(
+        context,
+        400,
+        "web_discovery_error",
+        error instanceof Error ? error.message : "Discovery failed.",
+      );
+    }
+  });
+  app.get("/v1/web-discovery/sessions/:sessionId/candidates", async (context) => {
+    try {
+      const items = await tenantWebDiscovery(options, principalOf(context)).listCandidates(
+        context.req.param("sessionId"),
+      );
+      return context.json({ items });
+    } catch (error) {
+      return jsonError(context, 404, "web_discovery_not_found", error instanceof Error ? error.message : "Not found.");
+    }
+  });
+  app.post("/v1/web-discovery/sessions/:sessionId/confirm", async (context) => {
+    const body = await readJsonBody(context);
+    try {
+      const definition = await tenantWebDiscovery(options, principalOf(context)).confirm(
+        context.req.param("sessionId"),
+        {
+          candidateId: requiredString(body.candidateId),
+          origin: requiredString(body.origin),
+          operationId: requiredString(body.operationId),
+          readOnly: body.readOnly === true,
+        },
+      );
+      return context.json({ definition }, 201);
+    } catch (error) {
+      return jsonError(
+        context,
+        400,
+        "web_discovery_error",
+        error instanceof Error ? error.message : "Confirmation failed.",
+      );
+    }
+  });
   app.post("/v1/adapters/mcp/discover", async (context) => {
     const body = await readJsonBody(context);
     try {
@@ -489,6 +565,18 @@ function tenantMcpDefinitions(options: ConnectionControlAppOptions, principal: T
   return new TenantMcpDefinitionStore(
     options.controlDatabase,
     { tenantId: principal.tenantId, workspaceId: principal.workspaceId },
+    options.secretCodec,
+  );
+}
+
+function tenantWebDiscovery(options: ConnectionControlAppOptions, principal: TenantPrincipal) {
+  return new TenantWebDiscoveryStore(
+    options.controlDatabase,
+    {
+      tenantId: principal.tenantId,
+      workspaceId: principal.workspaceId,
+      subject: principal.subject,
+    },
     options.secretCodec,
   );
 }
