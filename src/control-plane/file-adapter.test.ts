@@ -1,3 +1,5 @@
+import { strToU8, zipSync } from "fflate";
+import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { TenantFileAdapter, FileAdapterError } from "./file-adapter.ts";
@@ -88,4 +90,55 @@ describe("TenantFileAdapter", () => {
       truncated: true,
     });
   });
+
+  it("previews XLSX cells and rejects formulas", async () => {
+    const transit = createTransit();
+    const files = new TenantFileAdapter("tenant-a", "workspace-a", transit, new DatabaseSync(":memory:"));
+    const workbook = (formula?: string) =>
+      zipSync({
+        "[Content_Types].xml": strToU8("<Types/>"),
+        "xl/workbook.xml": strToU8(
+          '<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>',
+        ),
+        "xl/_rels/workbook.xml.rels": strToU8(
+          '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
+        ),
+        "xl/sharedStrings.xml": strToU8("<sst><si><t>Name</t></si><si><t>Ada</t></si></sst>"),
+        "xl/worksheets/sheet1.xml": strToU8(
+          `<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row><row r="2"><c r="A2" t="s">${
+            formula ? `<f>${formula}</f>` : ""
+          }<v>1</v></c></row></sheetData></worksheet>`,
+        ),
+      });
+    const uploaded = await files.upload(new File([workbook()], "data.xlsx"));
+    await expect(files.preview(uploaded.fileId)).resolves.toMatchObject({
+      kind: "excel",
+      sheets: [{ name: "Data", rows: [["Name"], ["Ada"]] }],
+    });
+    await expect(files.upload(new File([workbook("WEBSERVICE(A1)")], "formula.xlsx"))).rejects.toMatchObject({
+      code: "malicious_input",
+    });
+  });
+
+  it("previews real PDF and ZSTD Parquet files", async () => {
+    const transit = createTransit();
+    const files = new TenantFileAdapter("tenant-a", "workspace-a", transit, new DatabaseSync(":memory:"));
+    const pdfBytes = await readFile(
+      "/Users/bytedance/.openhands/cache/skills/public-skills/skills/theme-factory/theme-showcase.pdf",
+    );
+    const parquetBytes = await readFile("/Users/bytedance/oracle_byaan_e2e/container_parquet/d_arc_brand.parquet");
+    const pdf = await files.upload(new File([pdfBytes], "theme.pdf", { type: "application/pdf" }));
+    const parquet = await files.upload(new File([parquetBytes], "brands.parquet"));
+
+    await expect(files.preview(pdf.fileId)).resolves.toMatchObject({
+      kind: "pdf",
+      text: expect.stringContaining("Ocean Depths"),
+      pageCount: 10,
+    });
+    await expect(files.preview(parquet.fileId)).resolves.toMatchObject({
+      kind: "parquet",
+      columns: expect.arrayContaining(["BRANDID", "BRANDENAME"]),
+      rows: expect.arrayContaining([expect.objectContaining({ BRANDID: "ZP08", BRANDENAME: "ANTA" })]),
+    });
+  }, 30_000);
 });

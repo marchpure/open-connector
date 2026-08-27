@@ -1,6 +1,8 @@
 import type { ITransitFileService, TransitFileUpload } from "../server/files/transit-file-store.ts";
 import type { DatabaseSync } from "node:sqlite";
 
+import { strFromU8, unzipSync } from "fflate";
+
 export type SupportedFileKind = "csv" | "excel" | "json" | "parquet" | "pdf" | "md" | "txt";
 
 const extensionKinds: Record<string, SupportedFileKind> = {
@@ -26,7 +28,9 @@ export type FilePreview =
   | { kind: "csv"; columns: string[]; rows: string[][]; truncated: boolean }
   | { kind: "json"; value: unknown; truncated: boolean }
   | { kind: "md" | "txt"; text: string; truncated: boolean }
-  | { kind: "excel" | "parquet" | "pdf"; available: false };
+  | { kind: "excel"; sheets: Array<{ name: string; rows: string[][] }>; truncated: boolean }
+  | { kind: "parquet"; columns: string[]; rows: Record<string, unknown>[]; truncated: boolean }
+  | { kind: "pdf"; text: string; pageCount: number; truncated: boolean };
 
 export class FileAdapterError extends Error {
   readonly code: "unsupported_type" | "malicious_input" | "file_too_large";
@@ -150,10 +154,11 @@ export class TenantFileAdapter {
     if (!profile) {
       throw new FileAdapterError("malicious_input", "File is not owned by this tenant.");
     }
-    if (profile.kind === "excel" || profile.kind === "parquet" || profile.kind === "pdf") {
-      return { kind: profile.kind, available: false };
-    }
     const file = (await this.transitFiles.read(profile.fileId)).file;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (profile.kind === "excel") return previewExcel(bytes);
+    if (profile.kind === "parquet") return previewParquet(bytes);
+    if (profile.kind === "pdf") return previewPdf(bytes);
     const text = await file.text();
     if (profile.kind === "csv") {
       const parsed = parseCsv(text);
@@ -217,7 +222,108 @@ function scanBytes(kind: SupportedFileKind, bytes: Uint8Array): void {
   }
   if (kind === "excel" && bytes[0] === 0x50 && bytes[1] === 0x4b) {
     scanZipEntries(bytes);
+    assertNoSpreadsheetFormulas(bytes);
   }
+}
+
+function assertNoSpreadsheetFormulas(bytes: Uint8Array): void {
+  let entries: Record<string, Uint8Array>;
+  try {
+    entries = unzipSync(bytes);
+  } catch {
+    throw new FileAdapterError("malicious_input", "Excel archive is malformed.");
+  }
+  for (const [name, content] of Object.entries(entries)) {
+    if (/^xl\/worksheets\/[^/]+\.xml$/i.test(name) && /<f(?:\s|>)/i.test(strFromU8(content))) {
+      throw new FileAdapterError("malicious_input", "Excel spreadsheet formulas are not allowed.");
+    }
+  }
+}
+
+async function previewExcel(bytes: Uint8Array): Promise<FilePreview> {
+  const entries = unzipSync(bytes);
+  const workbook = xmlText(entries["xl/workbook.xml"]);
+  const relationships = xmlText(entries["xl/_rels/workbook.xml.rels"]);
+  const sharedStrings = [...xmlText(entries["xl/sharedStrings.xml"]).matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/gi)].map(
+    (match) => decodeXml([...match[1].matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi)].map((part) => part[1]).join("")),
+  );
+  const sheets = [...workbook.matchAll(/<sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/gi)].slice(0, 5).map((match) => {
+    const target = relationships.match(
+      new RegExp(`<Relationship\\b[^>]*Id="${escapeRegExp(match[2])}"[^>]*Target="([^"]+)"`, "i"),
+    )?.[1];
+    const xml = target ? xmlText(entries[`xl/${target.replace(/^\//, "")}`]) : "";
+    return { name: decodeXml(match[1]), rows: worksheetRows(xml, sharedStrings) };
+  });
+  return { kind: "excel", sheets, truncated: sheets.length >= 5 };
+}
+
+function worksheetRows(xml: string, sharedStrings: string[]): string[][] {
+  return [...xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/gi)].slice(0, 20).map((row) =>
+    [...row[1].matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/gi)].slice(0, 50).map((cell) => {
+      const value = cell[2].match(/<v\b[^>]*>([\s\S]*?)<\/v>/i)?.[1] ?? "";
+      return /\bt="s"/i.test(cell[1]) ? (sharedStrings[Number(value)] ?? "") : decodeXml(value);
+    }),
+  );
+}
+
+async function previewParquet(bytes: Uint8Array): Promise<FilePreview> {
+  const [{ parquetReadObjects }, { compressors }] = await Promise.all([
+    import("hyparquet"),
+    import("hyparquet-compressors"),
+  ]);
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  const values = await parquetReadObjects({ file: buffer, rowEnd: 20, compressors });
+  const rows = values.slice(0, 20).map((row) => normalizePreviewValue(row) as Record<string, unknown>);
+  return { kind: "parquet", columns: Object.keys(rows[0] ?? {}), rows, truncated: values.length >= 20 };
+}
+
+async function previewPdf(bytes: Uint8Array): Promise<FilePreview> {
+  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const document = await getDocument({ data: bytes }).promise;
+  try {
+    const pages: string[] = [];
+    const pageCount = Math.min(document.numPages, 10);
+    for (let index = 1; index <= pageCount; index += 1) {
+      const content = await (await document.getPage(index)).getTextContent();
+      pages.push(content.items.map((item) => ("str" in item ? item.str : "")).join(" "));
+    }
+    const text = pages.join("\n");
+    return {
+      kind: "pdf",
+      text: text.slice(0, 10_000),
+      pageCount: document.numPages,
+      truncated: document.numPages > 10 || text.length > 10_000,
+    };
+  } finally {
+    await document.destroy();
+  }
+}
+
+function normalizePreviewValue(value: unknown): unknown {
+  if (typeof value === "bigint") return value.toString();
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map(normalizePreviewValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, normalizePreviewValue(child)]));
+  }
+  return value;
+}
+
+function xmlText(bytes: Uint8Array | undefined): string {
+  return bytes ? strFromU8(bytes) : "";
+}
+
+function decodeXml(value: string): string {
+  return value
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&amp;", "&");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function isFormulaCell(value: string): boolean {
