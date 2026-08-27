@@ -21,7 +21,7 @@ import { ConnectionLeaseService, LeaseError } from "./lease.ts";
 import { ControlledMcpAdapter } from "./mcp-adapter.ts";
 import { OracleDatabaseAdapter } from "./oracle-adapter.ts";
 import { redactSecrets, safeConnectionProfile } from "./redaction.ts";
-import { RestOpenApiAdapter } from "./rest-adapter.ts";
+import { RestIdempotencyStore, RestOpenApiAdapter } from "./rest-adapter.ts";
 import { createTenantRuntime } from "./service.ts";
 
 export interface ConnectionControlAppOptions {
@@ -313,11 +313,18 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
   app.post("/v1/adapters/rest/invoke", async (context) => {
     const body = await readJsonBody(context);
     try {
+      const principal = principalOf(context);
       const adapter = RestOpenApiAdapter.fromSpec(
         requiredString(body.baseUrl),
         body.spec && typeof body.spec === "object" ? (body.spec as Record<string, unknown>) : undefined,
         parseRestAuth(body.auth),
         body.confirmed === true,
+        undefined,
+        new RestIdempotencyStore(
+          options.controlDatabase,
+          { tenantId: principal.tenantId, workspaceId: principal.workspaceId },
+          options.secretCodec,
+        ),
       );
       return context.json({
         result: redactSecrets(
