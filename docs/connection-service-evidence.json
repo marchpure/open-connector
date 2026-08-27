@@ -96,7 +96,7 @@
     "realBrowserWorker": "passed locally with Google Chrome 151.0.7922.174",
     "browserSha256": "c62a6de1b6aecbcf91be770370abb7461e5a0718637962b6aa4b8d171f4de4f0",
     "containerImage": "step2b-web-discovery-worker:test",
-    "containerImageDigest": "sha256:4ca9ce1ed8039d5857ae93f43e026734ae44ab39963b1e2076a851bfcaa717ca",
+    "containerImageDigest": "sha256:99db71076a06207749ebc703046a6d155685a6e36a616023558fd6587b872d41",
     "containerSmoke": "passed as non-root node user with Chromium 151.0.7922.173 and read-only root filesystem",
     "covered": [
       "short-lived worker token hash verification",
@@ -166,10 +166,10 @@
   },
   "docker": {
     "connectionServiceImage": "step2b-connection-service:test",
-    "connectionServiceDigest": "sha256:ad8b1765ece1ac8e11a6e5f70527903e63cb19fcb8432178a18e46199e8f0b74",
+    "connectionServiceDigest": "sha256:a0469797bd2e51881381f9bd0812d0d8dc077ce4e559470b03bf8b7de4e41671",
     "connectionServiceHealth": "GET http://127.0.0.1:<published-port>/health returned the expected service/version payload",
     "webDiscoveryWorkerImage": "step2b-web-discovery-worker:test",
-    "webDiscoveryWorkerDigest": "sha256:4ca9ce1ed8039d5857ae93f43e026734ae44ab39963b1e2076a851bfcaa717ca",
+    "webDiscoveryWorkerDigest": "sha256:99db71076a06207749ebc703046a6d155685a6e36a616023558fd6587b872d41",
     "runAs": "node (uid 1000)"
   },
   "replaceableBoundaries": {
