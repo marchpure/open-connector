@@ -81,6 +81,9 @@ export async function readBoundedResponseBytes(
   response: Response,
   options: BoundedResponseBytesOptions,
 ): Promise<Uint8Array> {
+  if (options.signal?.aborted) {
+    throw options.createError(`${options.fieldName} was aborted`);
+  }
   const contentLength = parseContentLength(response.headers.get("content-length"));
   if (contentLength !== undefined) {
     assertMaxBytes(contentLength, options);
@@ -95,13 +98,22 @@ export async function readBoundedResponseBytes(
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
+  let aborted = false;
+  const abort = () => {
+    aborted = true;
+    void reader.cancel(options.signal?.reason).catch(() => undefined);
+  };
+  options.signal?.addEventListener("abort", abort, { once: true });
   try {
     while (true) {
-      if (options.signal?.aborted) {
-        await reader.cancel(options.signal.reason).catch(() => undefined);
+      if (aborted || options.signal?.aborted) {
+        await reader.cancel(options.signal?.reason).catch(() => undefined);
         throw options.createError(`${options.fieldName} was aborted`);
       }
       const { done, value } = await reader.read();
+      if (aborted || options.signal?.aborted) {
+        throw options.createError(`${options.fieldName} was aborted`);
+      }
       if (done) {
         break;
       }
@@ -113,6 +125,7 @@ export async function readBoundedResponseBytes(
       chunks.push(value);
     }
   } finally {
+    options.signal?.removeEventListener("abort", abort);
     reader.releaseLock();
   }
 
@@ -147,6 +160,7 @@ export function assertSafeObjectResponse(
   if (
     contentType === "text/html" ||
     contentType === "application/xhtml+xml" ||
+    contentType === "image/svg+xml" ||
     contentType === "text/javascript" ||
     contentType === "application/javascript" ||
     contentType === "application/x-javascript" ||

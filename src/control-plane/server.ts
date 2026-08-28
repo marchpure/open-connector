@@ -194,6 +194,22 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     if (!connection) {
       return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
     }
+    const leaseToken = context.req.header("x-connection-lease");
+    const invocationId = context.req.header("x-connection-invocation-id");
+    const audience = context.req.header("x-connection-audience");
+    if (!leaseToken || !invocationId || !audience) {
+      return jsonError(context, 401, "lease_required", "A discovery lease and its invocation headers are required.");
+    }
+    try {
+      runtime.leases.verify(leaseToken, principalOf(context), {
+        connectionId,
+        actionId: `${connection.service}.discover_resources`,
+        invocationId,
+        audience,
+      });
+    } catch (error) {
+      return leaseError(context, error);
+    }
     const jobs = tenantJobs(options, principalOf(context));
     const job = jobs.create(connectionId, "discover");
     jobs.start(job.id);

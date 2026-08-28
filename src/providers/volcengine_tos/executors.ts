@@ -139,7 +139,7 @@ async function listObjects(input: Record<string, unknown>, context: TosContext):
     context.fetcher,
     context.signal,
   );
-  const xml = await readBodyText(response, "TOS list_objects");
+  const xml = await readBodyText(response, "TOS list_objects", context.signal);
   if (!response.ok) throw tosErrorFromText(response, xml, "list_objects");
   return parseListObjects(xml, config);
 }
@@ -435,11 +435,12 @@ function numberOrNull(value: string | null): number | null {
   return Number.isInteger(number) ? number : null;
 }
 
-async function readBodyText(response: Response, fieldName: string): Promise<string> {
+async function readBodyText(response: Response, fieldName: string, signal?: AbortSignal): Promise<string> {
   return new TextDecoder().decode(
     await readBoundedResponseBytes(response, {
       maxBytes: 2 * 1024 * 1024,
       fieldName,
+      signal,
       createError: (message) => new ProviderRequestError(413, message),
     }),
   );

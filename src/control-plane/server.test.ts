@@ -397,8 +397,34 @@ describe("connection control API", () => {
       method: "POST",
       headers: { authorization: `Bearer ${auth}` },
     });
-    expect(discovery.status).toBe(202);
+    expect(discovery.status).toBe(401);
     expect(await discovery.json()).toMatchObject({
+      error: { code: "lease_required" },
+    });
+
+    const discoveryLeaseResponse = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["fixture.discover_resources"],
+        invocationId: "discover-invocation",
+        audience: "knowledge-runtime",
+      }),
+    });
+    expect(discoveryLeaseResponse.status).toBe(201);
+    const discoveryLease = (await discoveryLeaseResponse.json()) as { token: string };
+
+    const leasedDiscovery = await app.request(`/v1/connections/${connectionId}/discover`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${auth}`,
+        "x-connection-lease": discoveryLease.token,
+        "x-connection-invocation-id": "discover-invocation",
+        "x-connection-audience": "knowledge-runtime",
+      },
+    });
+    expect(leasedDiscovery.status).toBe(202);
+    expect(await leasedDiscovery.json()).toMatchObject({
       job: { kind: "discover", status: "succeeded", result: { service: "fixture", resources: [], actions: [] } },
     });
     database.close();
