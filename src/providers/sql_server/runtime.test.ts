@@ -109,11 +109,23 @@ describe("SQL Server runtime contract", () => {
       username: "plain-reader",
       tls: "disable",
     });
+    await createSqlServerBackend({
+      ...baseCredential,
+      username: "ca-reader",
+      caCertificate: "-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----",
+    });
 
     expect(mssql.configs.map((config) => config.options)).toEqual([
       expect.objectContaining({ encrypt: true, trustServerCertificate: false }),
       expect.objectContaining({ encrypt: true, trustServerCertificate: true }),
       expect.objectContaining({ encrypt: false, trustServerCertificate: false }),
+      expect.objectContaining({
+        encrypt: true,
+        trustServerCertificate: false,
+        cryptoCredentialsDetails: {
+          ca: "-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----",
+        },
+      }),
     ]);
 
     await expect(

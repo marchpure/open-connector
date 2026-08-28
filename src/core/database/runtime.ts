@@ -163,6 +163,15 @@ export function assertReadOnlySql(sql: string, dialect: "postgresql" | "mysql" |
     "lo_import",
     "lo_export",
     "dblink",
+    "advisory",
+    "get_lock",
+    "release_lock",
+    "openquery",
+    "openrowset",
+    "opendatasource",
+    "external",
+    "notify",
+    "set_config",
     "sleep",
     "pg_sleep",
     "benchmark",
@@ -187,8 +196,9 @@ export function assertClickhouseReadOnlySql(sql: string): void {
     rejectQuery();
   }
   const forbidden =
-    /\b(alter|attach|create|delete|detach|drop|format|insert|into|kill|move|optimize|rename|replace|set|system|truncate|update|use|file|url|remote|remotesecure|s3|hdfs|mysql|postgresql|odbc|jdbc|sleep|sleepEachRow)\b/i;
-  if (forbidden.test(tokens.join(" ")) || hasTopLevelSemicolon(normalized)) rejectQuery();
+    /\b(alter|attach|azureblobstorage|create|delete|detach|drop|file|filecluster|format|hdfs|hdfscluster|insert|into|jdbc|kafka|kill|mongodb|move|mysql|nats|odbc|optimize|postgresql|rabbitmq|redis|remote|remotesecure|rename|replace|s3|s3cluster|set|system|truncate|update|url|urlcluster|use|sleep|sleepEachRow)\b/i;
+  if (forbidden.test(tokens.join(" ")) || /\bs3(?:cluster)?\s*\(/i.test(normalized) || hasTopLevelSemicolon(normalized))
+    rejectQuery();
 }
 
 export function readParameters(value: unknown): DatabaseScalar[] {
