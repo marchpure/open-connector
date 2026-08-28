@@ -6,8 +6,13 @@ import type {
 } from "../../core/types.ts";
 import type { ProviderActionHandlers } from "../provider-runtime.ts";
 
-import { optionalBoolean, optionalString } from "../../core/cast.ts";
-import { defineProviderExecutors, ProviderRequestError, readProviderJsonBody } from "../provider-runtime.ts";
+import { optionalBoolean, optionalRecord, optionalString } from "../../core/cast.ts";
+import {
+  boundedProviderResourceSchema,
+  defineProviderExecutors,
+  ProviderRequestError,
+  readProviderJsonBody,
+} from "../provider-runtime.ts";
 
 const service = "wecom";
 interface WeComContext {
@@ -74,12 +79,50 @@ export const credentialValidators: CredentialValidators = {
 };
 
 export async function discoverResources(
-  _context: ExecutionContext,
-  _fetcher: typeof fetch,
-): Promise<Array<{ sourceType: "wecom"; resourceId: string; title?: string; schema?: Record<string, unknown> }>> {
-  // Departments are directory containers, not knowledge resources. Keep
-  // discovery empty until the provider has a document/knowledge API to query.
-  return [];
+  context: ExecutionContext,
+  fetcher: typeof fetch,
+): Promise<
+  Array<{
+    sourceType: "wecom";
+    resourceId: string;
+    title?: string;
+    mimeType?: string;
+    schema?: Record<string, unknown>;
+  }>
+> {
+  const credential = await context.getCredential(service);
+  if (credential?.authType !== "custom_credential")
+    throw new ProviderRequestError(401, "Configure WeCom credentials first.");
+  const response = await api(
+    { values: credential.values, fetcher, signal: context.signal },
+    "/cgi-bin/department/list",
+  );
+  const resources: Array<{
+    sourceType: "wecom";
+    resourceId: string;
+    title?: string;
+    mimeType?: string;
+    schema?: Record<string, unknown>;
+  }> = [];
+  const seen = new Set<string>();
+  for (const item of (Array.isArray(response.department) ? response.department : []).slice(0, 500)) {
+    const record = optionalRecord(item);
+    if (!record) continue;
+    const resourceId =
+      optionalString(record.id) ??
+      (typeof record.id === "number" && Number.isSafeInteger(record.id) ? String(record.id) : undefined) ??
+      optionalString(record.department_id);
+    if (!resourceId || seen.has(resourceId)) continue;
+    seen.add(resourceId);
+    resources.push({
+      sourceType: "wecom",
+      resourceId,
+      title: optionalString(record.name) ?? optionalString(record.name_en),
+      mimeType: "application/vnd.wecom.department",
+      schema: boundedProviderResourceSchema(record),
+    });
+  }
+  return resources;
 }
 
 async function getToken(context: WeComContext): Promise<string> {

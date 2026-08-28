@@ -10,7 +10,12 @@ import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import { createHash, createHmac } from "node:crypto";
 import { compactObject, optionalInteger, optionalString } from "../../core/cast.ts";
 import { assertGuardedEgressUrl } from "../../core/guarded-fetch.ts";
-import { assertPublicHttpUrl, assertSafeObjectResponse, readBoundedResponseBytes } from "../../core/request.ts";
+import {
+  assertPublicHttpUrl,
+  assertSafeObjectResponse,
+  hasUnsafeControlCharacter,
+  readBoundedResponseBytes,
+} from "../../core/request.ts";
 import { defineProviderExecutors, ProviderRequestError, providerUserAgent } from "../provider-runtime.ts";
 
 const service = "volcengine_tos";
@@ -353,12 +358,7 @@ function assertPrefix(value: string, allowed: string): string {
 function assertObjectKey(value: unknown, allowedPrefix: string): string {
   const key = optionalString(value);
   if (!key) throw new ProviderRequestError(400, "objectKey is required");
-  if (
-    [...key].some((character) => {
-      const code = character.codePointAt(0) ?? 0;
-      return code <= 0x1f || code === 0x7f;
-    })
-  ) {
+  if (hasUnsafeControlCharacter(key)) {
     throw new ProviderRequestError(400, "objectKey contains an unsafe control character");
   }
   if (key.split("/").some((part) => part === "." || part === ".."))

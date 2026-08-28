@@ -732,6 +732,57 @@ export async function readProviderJsonBody(response: Response, options: ReadProv
 }
 
 /**
+ * Keep provider-owned ResourceRef schema hints useful without copying
+ * credentials, bearer material, or arbitrarily large upstream records into a
+ * discovery job and then into an agent context.
+ */
+export function boundedProviderResourceSchema(
+  record: Record<string, unknown>,
+  maxCharacters = 16_384,
+): Record<string, unknown> {
+  const value = sanitizeResourceSchemaValue(record, 0);
+  const serialized = JSON.stringify(value);
+  if (serialized.length <= maxCharacters) {
+    return value;
+  }
+  return {
+    truncated: true,
+    fields: Object.keys(value).slice(0, 32),
+  };
+}
+
+const resourceSchemaSensitiveKey =
+  /(access[_-]?token|refresh[_-]?token|authorization|cookie|credential|password|secret|session[_-]?token|security[_-]?token|token)/iu;
+
+function sanitizeResourceSchemaValue(value: unknown, depth: number): Record<string, unknown> {
+  if (depth > 2 || !value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const output: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value).slice(0, 32)) {
+    if (resourceSchemaSensitiveKey.test(key)) continue;
+    if (typeof child === "string") {
+      output[key] = child.length > 1024 ? `${child.slice(0, 1024)}[truncated]` : child;
+    } else if (typeof child === "number" || typeof child === "boolean" || child === null) {
+      output[key] = child;
+    } else if (Array.isArray(child)) {
+      output[key] = child.slice(0, 16).map((item) => sanitizeResourceSchemaChild(item, depth + 1));
+    } else if (child && typeof child === "object") {
+      output[key] = sanitizeResourceSchemaValue(child, depth + 1);
+    }
+  }
+  return output;
+}
+
+function sanitizeResourceSchemaChild(value: unknown, depth: number): unknown {
+  if (typeof value === "string") return value.length > 256 ? `${value.slice(0, 256)}[truncated]` : value;
+  if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
+  if (Array.isArray(value)) return value.slice(0, 8).map((item) => sanitizeResourceSchemaChild(item, depth + 1));
+  if (value && typeof value === "object") return sanitizeResourceSchemaValue(value, depth);
+  return undefined;
+}
+
+/**
  * Parse an already-read provider response body as JSON.
  */
 export function parseProviderJsonBodyText(text: string, options: ReadProviderJsonBodyOptions): unknown {

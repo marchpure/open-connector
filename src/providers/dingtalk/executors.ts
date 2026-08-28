@@ -7,7 +7,12 @@ import type {
 import type { OAuthProviderContext, ProviderActionHandlers } from "../provider-runtime.ts";
 
 import { compactObject, optionalInteger, optionalRecord, optionalString } from "../../core/cast.ts";
-import { defineOAuthProviderExecutors, ProviderRequestError, readProviderJsonBody } from "../provider-runtime.ts";
+import {
+  boundedProviderResourceSchema,
+  defineOAuthProviderExecutors,
+  ProviderRequestError,
+  readProviderJsonBody,
+} from "../provider-runtime.ts";
 
 const service = "dingtalk";
 type DingTalkHandler = (input: Record<string, unknown>, context: OAuthProviderContext) => Promise<unknown>;
@@ -52,13 +57,64 @@ export const dingtalkActionHandlers: ProviderActionHandlers<"dingtalk", DingTalk
 export const executors: ProviderExecutors = defineOAuthProviderExecutors(service, dingtalkActionHandlers);
 
 export async function discoverResources(
-  _context: ExecutionContext,
-  _fetcher: typeof fetch,
-): Promise<Array<{ sourceType: "dingtalk"; resourceId: string; title?: string; schema?: Record<string, unknown> }>> {
-  // The current DingTalk action surface is identity and directory-only. A
-  // user or department is not a knowledge resource, so discovery stays empty
-  // until a document/knowledge API is added with an upstream visibility check.
-  return [];
+  context: ExecutionContext,
+  fetcher: typeof fetch,
+): Promise<
+  Array<{
+    sourceType: "dingtalk";
+    resourceId: string;
+    title?: string;
+    mimeType?: string;
+    schema?: Record<string, unknown>;
+  }>
+> {
+  const credential = await context.getCredential(service);
+  if (credential?.authType !== "oauth2") throw new ProviderRequestError(401, "Configure DingTalk OAuth first.");
+  const resources: Array<{
+    sourceType: "dingtalk";
+    resourceId: string;
+    title?: string;
+    mimeType?: string;
+    schema?: Record<string, unknown>;
+  }> = [];
+  let cursor: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < 3 && resources.length < 500; page += 1) {
+    const query = new URLSearchParams({
+      max_results: "100",
+      ...(cursor ? { cursor } : {}),
+    });
+    const data = optionalRecord(
+      await request(
+        { accessToken: credential.accessToken, tokenType: credential.tokenType, fetcher, signal: context.signal },
+        `/v1.0/contact/departments?${query}`,
+      ),
+    );
+    const items = Array.isArray(data?.departments) ? data.departments : Array.isArray(data?.list) ? data.list : [];
+    for (const item of items.slice(0, 100)) {
+      const record = optionalRecord(item);
+      if (!record) continue;
+      const resourceId =
+        optionalString(record.deptId) ??
+        optionalString(record.dept_id) ??
+        optionalString(record.id) ??
+        optionalString(record.departmentId);
+      if (!resourceId || seen.has(resourceId)) continue;
+      seen.add(resourceId);
+      resources.push({
+        sourceType: "dingtalk",
+        resourceId,
+        title: optionalString(record.name) ?? optionalString(record.nameEn),
+        mimeType: "application/vnd.dingtalk.department",
+        schema: boundedProviderResourceSchema(record),
+      });
+    }
+    if (data?.hasMore !== true && data?.has_more !== true) break;
+    const next = optionalString(data?.nextCursor) ?? optionalString(data?.next_cursor) ?? optionalString(data?.cursor);
+    if (!next || next === cursor) break;
+    cursor = next;
+  }
+  return resources;
 }
 
 export const credentialValidators: CredentialValidators = {

@@ -99,23 +99,45 @@ describe("office provider resource discovery", () => {
     expect(String(fetcher.mock.calls[1]?.[1]?.body)).toContain('"page_token":"page-2"');
   });
 
-  it("does not turn DingTalk identity data into knowledge resources", async () => {
-    const fetcher = vi.fn<typeof fetch>(
-      async () =>
-        new Response(JSON.stringify({ userId: "user-1", nick: "User" }), {
-          headers: { "content-type": "application/json" },
-        }),
+  it("discovers bounded DingTalk directory ResourceRefs", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      Response.json({
+        departments: [
+          {
+            deptId: "dept-1",
+            name: "Engineering",
+            description: "A".repeat(20_000),
+            access_token: "must-not-enter-resource-schema",
+          },
+        ],
+        hasMore: false,
+      }),
     );
-
-    await expect(discoverDingTalkResources(contextFor("dingtalk", oauthCredential), fetcher)).resolves.toEqual([]);
-    expect(fetcher).not.toHaveBeenCalled();
+    await expect(discoverDingTalkResources(contextFor("dingtalk", oauthCredential), fetcher)).resolves.toEqual([
+      expect.objectContaining({
+        resourceId: "dept-1",
+        title: "Engineering",
+        mimeType: "application/vnd.dingtalk.department",
+        schema: { deptId: "dept-1", name: "Engineering", description: expect.stringContaining("[truncated]") },
+      }),
+    ]);
   });
 
-  it("does not turn WeCom department data into knowledge resources", async () => {
-    const fetcher = vi.fn<typeof fetch>();
+  it("discovers WeCom directory ResourceRefs after token authorization", async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
+      if (url.pathname.endsWith("/gettoken")) return Response.json({ errcode: 0, access_token: "access-token" });
+      return Response.json({ errcode: 0, department: [{ id: 1, name: "Engineering", name_en: "Engineering" }] });
+    });
 
-    await expect(discoverWeComResources(contextFor("wecom", wecomCredential), fetcher)).resolves.toEqual([]);
-    expect(fetcher).not.toHaveBeenCalled();
+    await expect(discoverWeComResources(contextFor("wecom", wecomCredential), fetcher)).resolves.toEqual([
+      expect.objectContaining({
+        resourceId: "1",
+        title: "Engineering",
+        mimeType: "application/vnd.wecom.department",
+      }),
+    ]);
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });
 

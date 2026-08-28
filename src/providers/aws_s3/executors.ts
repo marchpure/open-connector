@@ -10,7 +10,12 @@ import type { ProviderActionHandlers } from "../provider-runtime.ts";
 
 import { createHash, createHmac } from "node:crypto";
 import { compactObject, optionalRecord, optionalString, requiredRawString } from "../../core/cast.ts";
-import { assertPublicHttpUrl, assertSafeObjectResponse, readBoundedResponseBytes } from "../../core/request.ts";
+import {
+  assertPublicHttpUrl,
+  assertSafeObjectResponse,
+  hasUnsafeControlCharacter,
+  readBoundedResponseBytes,
+} from "../../core/request.ts";
 import {
   createProviderProxyUrl,
   createProviderTimeout,
@@ -256,7 +261,7 @@ async function validateAwsCredential(
         "max-buckets": 1,
       },
     });
-    const xml = await response.text();
+    const xml = await readBoundedResponseText(response, "AWS S3 credential validation", undefined);
     const parsed = parseListBucketsXml(xml);
     const firstBucket = parsed.buckets[0];
 
@@ -805,6 +810,9 @@ function readObjectKey(input: Record<string, unknown>): string {
   if (objectKey.length === 0) {
     throw new ProviderRequestError(400, "objectKey must not be empty");
   }
+  if (hasUnsafeControlCharacter(objectKey)) {
+    throw new ProviderRequestError(400, "objectKey contains an unsafe control character");
+  }
   if (objectKey.split("/").some((segment) => segment === "." || segment === "..")) {
     throw new ProviderRequestError(400, "objectKey must not contain . or .. path segments");
   }
@@ -1090,7 +1098,7 @@ async function downloadSourceFile(sourceUrl: string, signal?: AbortSignal) {
       );
     }
 
-    const bytes = await readResponseBytesWithLimit(response, maxSourceBytes);
+    const bytes = await readResponseBytesWithLimit(response, maxSourceBytes, timeout.signal);
 
     return {
       bytes,
@@ -1133,31 +1141,14 @@ function validateSourceUrl(value: string): URL {
   }
 }
 
-async function readResponseBytesWithLimit(response: Response, limit: number) {
-  const chunks: Uint8Array[] = [];
-  let totalBytes = 0;
-
-  const reader = response.body?.getReader();
-  if (!reader) {
-    return Buffer.alloc(0);
-  }
-
-  while (true) {
-    const result = await reader.read();
-    if (result.done) {
-      break;
-    }
-    if (!result.value) {
-      continue;
-    }
-    totalBytes += result.value.byteLength;
-    if (totalBytes > limit) {
-      throw new ProviderRequestError(400, "sourceUrl payload is too large");
-    }
-    chunks.push(result.value);
-  }
-
-  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
+async function readResponseBytesWithLimit(response: Response, limit: number, signal?: AbortSignal) {
+  const bytes = await readBoundedResponseBytes(response, {
+    maxBytes: limit,
+    fieldName: "sourceUrl payload",
+    signal,
+    createError: (message) => new ProviderRequestError(400, message),
+  });
+  return Buffer.from(bytes);
 }
 
 function resolveRegion(input: Record<string, unknown>, context: AwsActionContext) {
