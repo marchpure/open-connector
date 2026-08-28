@@ -132,16 +132,18 @@ function readEnablement(value: string | undefined): EnablementEntry[] {
       typeof candidate.service !== "string" ||
       !["catalog", "beta", "verified"].includes(String(candidate.tier)) ||
       typeof candidate.connectorDefinitionVersion !== "string" ||
-      typeof candidate.owner !== "string"
+      typeof candidate.owner !== "string" ||
+      typeof candidate.evidenceRef !== "string" ||
+      candidate.evidenceRef.trim() === ""
     ) {
-      throw new Error("Enablement entries require service, tier, connectorDefinitionVersion, and owner.");
+      throw new Error("Enablement entries require service, tier, connectorDefinitionVersion, owner, and evidenceRef.");
     }
     return {
       service: candidate.service,
       tier: candidate.tier as EnablementEntry["tier"],
       connectorDefinitionVersion: candidate.connectorDefinitionVersion,
       owner: candidate.owner,
-      evidenceRef: typeof candidate.evidenceRef === "string" ? candidate.evidenceRef : undefined,
+      evidenceRef: candidate.evidenceRef,
     };
   });
 }
