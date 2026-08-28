@@ -1,11 +1,12 @@
 {
   "status": "CONNECTION_W2_FROZEN_WITH_EXTERNAL_BLOCKERS",
-  "recordedAt": "2026-08-28T06:25:00Z",
+  "recordedAt": "2026-08-28T06:38:00Z",
   "baseline": {
     "sourceCommit": "69ad6f8028eaf3a34b706012c72dc3f099a348e2",
     "branch": "feat/connection-expansion-w2-office-storage",
     "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-w2-office-storage",
-    "sourceWorktreeUnmodified": true
+    "sourceWorktreeUnmodified": true,
+    "implementationCommit": "94eadd6"
   },
   "scope": {
     "included": ["feishu", "dingtalk", "wecom", "aws_s3", "aliyun_oss", "volcengine_tos"],
@@ -27,7 +28,7 @@
     "controlPlane": "All providers are loaded by the generated lazy registry and execute through the tenant-scoped Connection Service, encrypted credential store, ACL/visibility checks, ConnectionLease, action policy, audit store, and catalog enablement.",
     "credentialHandling": "Only encrypted credential ciphertext is persisted. Profiles and action results are redacted. Runtime code does not call lark-cli, DingTalk CLI, browser sessions, or Studio-managed credentials.",
     "egress": "Provider egress uses the shared guarded fetch or explicit guarded endpoint validation. User-supplied source URLs remain public-only. Alibaba OSS SDK requests use a custom urllib adapter backed by the injected guarded fetch and bounded response reads.",
-    "boundedReads": "Object downloads and sourceUrl ingestion use transit storage/readBoundedResponseBytes with abort cleanup. Office and object listing actions expose bounded pages or cursors. Office ResourceRef schema hints and DingTalk/WeCom directory action results are depth/item/field/size bounded and redact credential-like fields. Control-plane discovery and runtime actions require a ConnectionLease bound to the current connection revision. Successful discovery replaces a tenant/workspace/connection/revision-scoped ResourceRef allowlist; bound resource actions are rejected with resource_not_discovered before executor loading or provider egress when the ID/token is absent, stale, cross-tenant, or the discovered resource kind does not match. Required bindings reject missing values; optional bindings are checked only when supplied, including every string in array-valued bindings. Callers without the tenant authorizer fail closed.",
+    "boundedReads": "Object downloads and sourceUrl ingestion use transit storage/readBoundedResponseBytes with abort cleanup. Office and object listing actions expose bounded pages or cursors. Office ResourceRef schema hints and DingTalk/WeCom directory action results are depth/item/field/size bounded and redact credential-like fields. Control-plane discovery and runtime actions require a ConnectionLease bound to the current connection revision. Successful discovery replaces a tenant/workspace/connection/revision-scoped ResourceRef allowlist; bound resource actions are rejected with resource_not_discovered before executor loading or provider egress when the ID/token is absent, stale, cross-tenant, or the discovered resource kind does not match. Required bindings reject missing values; optional bindings are checked only when supplied, including every string in array-valued bindings. Callers without the tenant authorizer fail closed. S3 and OSS discovery validates a configured bucket through the native provider path or uses bounded native bucket listing; TOS discovery validates and exposes only its configured bucket. Explicit storage bucket inputs are optional resource bindings, while omitted buckets use the connection default and remain provider-allowlist checked.",
     "writePolicy": "TOS exposes no write/delete/presign actions. Existing S3/OSS write actions remain catalog/runtime compatibility surfaces and require the existing control-plane lease to be explicitly scoped."
   },
   "connections": [
@@ -178,9 +179,10 @@
           "src/providers/aws_s3/definition.ts",
           "src/providers/aws_s3/actions.ts",
           "src/providers/aws_s3/executors.ts",
-          "src/providers/aws_s3/executors.test.ts"
+          "src/providers/aws_s3/executors.test.ts",
+          "src/providers/office-discovery.test.ts"
         ],
-        "automated": ["AWS S3 executor tests", "npm run fix-check"],
+        "automated": ["AWS S3 executor and storage discovery tests", "npm run fix-check"],
         "real": "Blocked: no real AWS account closed-loop evidence in this worktree; MinIO/S3-compatible behavior cannot be marked verified."
       },
       "revocation": "Control-plane revoke/delete and lease revocation are inherited; AWS IAM key rotation, bucket policy changes, version change, network error, and cross-tenant evidence require real account tests.",
@@ -220,9 +222,10 @@
           "src/providers/aliyun_oss/definition.ts",
           "src/providers/aliyun_oss/actions.ts",
           "src/providers/aliyun_oss/executors.ts",
-          "src/providers/aliyun_oss/executors.test.ts"
+          "src/providers/aliyun_oss/executors.test.ts",
+          "src/providers/office-discovery.test.ts"
         ],
-        "automated": ["Alibaba OSS executor tests", "npm run fix-check"],
+        "automated": ["Alibaba OSS executor and storage discovery tests", "npm run fix-check"],
         "real": "Blocked: no real Alibaba Cloud account closed-loop evidence in this worktree."
       },
       "revocation": "Control-plane revoke/delete and lease revocation are inherited; OSS STS expiry, endpoint/TLS errors, version change, policy denial, and cross-tenant evidence require real account tests.",
@@ -260,10 +263,12 @@
           "src/providers/volcengine_tos/definition.ts",
           "src/providers/volcengine_tos/actions.ts",
           "src/providers/volcengine_tos/executors.ts",
-          "src/providers/volcengine_tos/executors.test.ts"
+          "src/providers/volcengine_tos/executors.test.ts",
+          "src/providers/office-discovery.test.ts"
         ],
         "automated": [
           "Volcengine TOS allowlist, bounded-download, signature, and SSRF tests",
+          "Volcengine TOS storage discovery tests",
           "npm run fix-check",
           "npm run generate:catalog"
         ],
@@ -292,8 +297,8 @@
     "passed": [
       "npm run generate:catalog",
       "npm run fix-check",
-      "npm exec vitest run src/core/request.test.ts src/control-plane/server.test.ts src/providers/office-discovery.test.ts src/providers/aws_s3/executors.test.ts src/providers/aliyun_oss/executors.test.ts src/providers/volcengine_tos/executors.test.ts (6 files, 77 tests passed)",
-      "npm test -- --run (166 files passed, 1 skipped; 1493 tests passed, 4 skipped)",
+      "npm exec vitest run src/core/request.test.ts src/control-plane/server.test.ts src/providers/office-discovery.test.ts src/providers/aws_s3/executors.test.ts src/providers/aliyun_oss/executors.test.ts src/providers/volcengine_tos/executors.test.ts src/control-plane/resource-store.test.ts (7 files, 85 tests passed)",
+      "npm exec vitest run (166 files passed, 1 skipped; 1497 tests passed, 4 skipped)",
       "npm run build (typecheck passed)",
       "npm audit --audit-level=high (0 vulnerabilities)",
       "npm ls --all --json > artifacts/npm-sbom.json (release-time SBOM; local install reports six extraneous optional WASM packages and no vulnerabilities)",
@@ -304,6 +309,7 @@
       "TenantResourceStore persists replacement discovery allowlists and binds authorization to the current connection revision; ActionRunner rejects guessed IDs before provider executor loading and records resource_not_discovered audit failures.",
       "ResourceRef/action-binding regression tests cover exact IDs, resource kinds, revision invalidation, tenant isolation, no-provider-egress rejection, and fail-closed standalone callers.",
       "Feishu required and optional ResourceRef bindings cover scalar and array-valued IDs across discoverable document, Drive, Wiki, Sheets, Base, Minutes, Slides, and chat action families; optional selectors are checked only when supplied.",
+      "Storage discovery candidates cover AWS S3, Alibaba OSS, and Volcengine TOS buckets; explicit bucket inputs are exact-match authorized while configured default buckets remain provider-allowlist enforced.",
       "Explicit OAuth actionIds derive provider minimumScopes plus selected action scopes; existing configured requestedScopes behavior remains compatible."
     ],
     "notRunOrBlocked": [
