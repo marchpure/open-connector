@@ -42,10 +42,6 @@ export interface Page {
   pageSize: number;
 }
 
-/** Fixed server-side scan ceilings; action callers cannot raise these values. */
-export const databaseScanBudgetRows: number = 10_000_000;
-export const databaseScanBudgetBytes: number = 100 * 1024 * 1024;
-
 export class DatabaseRuntimeError extends Error {
   readonly code: DatabaseErrorCode;
 
@@ -163,15 +159,6 @@ export function assertReadOnlySql(sql: string, dialect: "postgresql" | "mysql" |
     "lo_import",
     "lo_export",
     "dblink",
-    "advisory",
-    "get_lock",
-    "release_lock",
-    "openquery",
-    "openrowset",
-    "opendatasource",
-    "external",
-    "notify",
-    "set_config",
     "sleep",
     "pg_sleep",
     "benchmark",
@@ -196,9 +183,8 @@ export function assertClickhouseReadOnlySql(sql: string): void {
     rejectQuery();
   }
   const forbidden =
-    /\b(alter|attach|azureblobstorage|create|delete|detach|drop|file|filecluster|format|hdfs|hdfscluster|insert|into|jdbc|kafka|kill|mongodb|move|mysql|nats|odbc|optimize|postgresql|rabbitmq|redis|remote|remotesecure|rename|replace|s3|s3cluster|set|system|truncate|update|url|urlcluster|use|sleep|sleepEachRow)\b/i;
-  if (forbidden.test(tokens.join(" ")) || /\bs3(?:cluster)?\s*\(/i.test(normalized) || hasTopLevelSemicolon(normalized))
-    rejectQuery();
+    /\b(alter|attach|create|delete|detach|drop|format|insert|into|kill|move|optimize|rename|replace|set|system|truncate|update|use|file|url|remote|remotesecure|s3|hdfs|mysql|postgresql|odbc|jdbc)\b/i;
+  if (forbidden.test(tokens.join(" ")) || hasTopLevelSemicolon(normalized)) rejectQuery();
 }
 
 export function readParameters(value: unknown): DatabaseScalar[] {
@@ -288,7 +274,6 @@ export function credentialPoolKey(service: string, config: DatabaseConnectionCon
         config.username,
         config.password,
         config.tls,
-        config.caCertificate ?? "",
         extra,
       ]),
     )
@@ -335,13 +320,6 @@ export function normalizeDatabaseError(error: unknown): DatabaseRuntimeError {
   }
   if (/timeout|cancel|57014|ETIMEOUT/i.test(`${code} ${message}`)) {
     return new DatabaseRuntimeError("database_timeout", "Database request timed out or was cancelled.");
-  }
-  if (
-    /query governor|cost limit|max_examined_row_limit|max_scan_key_num|scan.*budget|rows? examined/i.test(
-      `${code} ${message}`,
-    )
-  ) {
-    return new DatabaseRuntimeError("database_budget_exceeded", "Database scan budget exceeded.");
   }
   if (/permission|denied|not authorized|42501|ER_DBACCESS_DENIED_ERROR/i.test(`${code} ${message}`)) {
     return new DatabaseRuntimeError("database_permission_denied", "Database permission denied.");

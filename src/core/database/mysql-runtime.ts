@@ -8,27 +8,20 @@ import {
   assertReadOnlySql,
   boundedQueryResult,
   credentialPoolKey,
-  databaseScanBudgetBytes,
-  databaseScanBudgetRows,
   DatabaseRuntimeError,
   normalizeDatabaseError,
   quoteIdentifier,
   readDatabaseConfig,
 } from "./runtime.ts";
 
-export interface MysqlBackendOptions {
-  service: "mysql" | "doris" | "starrocks" | "tidb_sql" | "oceanbase";
-  engine: "MySQL" | "Apache Doris" | "StarRocks" | "TiDB" | "OceanBase";
+interface MysqlBackendOptions {
+  service: "mysql" | "doris" | "starrocks";
+  engine: "MySQL" | "Apache Doris" | "StarRocks";
   defaultPort: number;
   defaultDatabase: string;
   versionMatches: (version: string) => boolean;
   identityQuery?: string;
   identityVersionField?: string;
-}
-
-interface ReadSessionOptions {
-  enforceScanBudget?: boolean;
-  maxRows?: number;
 }
 
 const pools = new Map<string, { credentialKey: string; pool: Pool }>();
@@ -187,16 +180,10 @@ class MysqlWireBackend implements DatabaseBackend {
   async previewTable(database: string | undefined, schema: string | undefined, table: string, page: Page) {
     const selected = schema ?? database ?? this.config.database;
     const sql = `select * from ${quoteIdentifier(selected, "backtick")}.${quoteIdentifier(table, "backtick")} limit ${page.pageSize + 1} offset ${page.offset}`;
-    const [rows, fields] = await this.readSession(sql, [], 30_000, {
-      enforceScanBudget: true,
-      maxRows: page.pageSize + 1,
-    });
+    const [rows, fields] = await this.readSession(sql, []);
     return boundedQueryResult(
       rows as Record<string, unknown>[],
-      fields.map((field) => ({
-        name: field.name,
-        dataType: field.typeName ?? (field.type == null ? null : String(field.type)),
-      })),
+      fields.map((field) => ({ name: field.name, dataType: String(field.type) })),
       page.pageSize,
       10 * 1024 * 1024,
     );
@@ -209,16 +196,10 @@ class MysqlWireBackend implements DatabaseBackend {
   ): Promise<QueryResult> {
     assertReadOnlySql(query, "mysql");
     const bounded = `select * from (${stripFinalSemicolon(query)}) as openconnector_read limit ${limits.maxRows + 1}`;
-    const [rows, fields] = await this.readSession(bounded, parameters, limits.timeoutMs, {
-      enforceScanBudget: true,
-      maxRows: limits.maxRows + 1,
-    });
+    const [rows, fields] = await this.readSession(bounded, parameters, limits.timeoutMs);
     return boundedQueryResult(
       rows as Record<string, unknown>[],
-      fields.map((field) => ({
-        name: field.name,
-        dataType: field.typeName ?? (field.type == null ? null : String(field.type)),
-      })),
+      fields.map((field) => ({ name: field.name, dataType: String(field.type) })),
       limits.maxRows,
       limits.maxBytes,
     );
@@ -228,24 +209,17 @@ class MysqlWireBackend implements DatabaseBackend {
     sql: string,
     parameters: DatabaseScalar[],
     timeoutMs = 30_000,
-    options: ReadSessionOptions = {},
   ): Promise<Awaited<ReturnType<PoolConnection["execute"]>>> {
     let connection: PoolConnection | undefined;
     const abort = (): void => connection?.destroy();
     this.signal?.addEventListener("abort", abort, { once: true });
     try {
       connection = await this.pool.getConnection();
-      if (usesTransactionalReadOnlySession(this.options.service)) {
+      if (this.options.service === "mysql") {
         await connection.query("SET SESSION TRANSACTION READ ONLY");
         await connection.query("START TRANSACTION READ ONLY");
       } else {
         await assertMysqlWireReadOnlyPrincipal(connection, this.options.engine);
-      }
-      if (this.options.service === "doris" || this.options.service === "starrocks") {
-        await configureAnalyticalSession(connection, timeoutMs, options.maxRows);
-      }
-      if (options.enforceScanBudget) {
-        await assertMysqlScanBudget(connection, sql, parameters, timeoutMs, this.options.service);
       }
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -264,112 +238,13 @@ class MysqlWireBackend implements DatabaseBackend {
     } catch (error) {
       throw normalizeDatabaseError(error);
     } finally {
-      if (usesTransactionalReadOnlySession(this.options.service)) {
+      if (this.options.service === "mysql") {
         await connection?.query("ROLLBACK").catch(() => undefined);
       }
       connection?.release();
       this.signal?.removeEventListener("abort", abort);
     }
   }
-}
-
-async function assertMysqlScanBudget(
-  connection: PoolConnection,
-  sql: string,
-  parameters: DatabaseScalar[],
-  timeoutMs: number,
-  service: MysqlBackendOptions["service"] = "mysql",
-): Promise<void> {
-  if (service === "doris" || service === "starrocks") {
-    const [rows] = await queryWithTimeout(connection, `EXPLAIN ${sql}`, parameters, timeoutMs);
-    const explanation = (rows as RowDataPacket[])
-      .flatMap((row) => Object.values(row))
-      .filter((value): value is string => typeof value === "string")
-      .join("\n");
-    const estimates = [...explanation.matchAll(/\bcardinality\s*=\s*([0-9]+)/gi)].map((match) => Number(match[1]));
-    if (estimates.some((estimate) => estimate > databaseScanBudgetRows)) {
-      throw new DatabaseRuntimeError(
-        "database_budget_exceeded",
-        `${service === "doris" ? "Doris" : "StarRocks"} query exceeds the configured scan row budget.`,
-      );
-    }
-    return;
-  }
-  if (service === "tidb_sql" || service === "oceanbase") {
-    const [rows] = await queryWithTimeout(connection, `EXPLAIN ${sql}`, parameters, timeoutMs);
-    const estimates = (rows as RowDataPacket[]).flatMap((row) =>
-      Object.entries(row)
-        .filter(([key]) => /^(?:estRows|rows)$/i.test(key))
-        .map(([, value]) => Number(value)),
-    );
-    if (estimates.some((estimate) => Number.isFinite(estimate) && estimate > databaseScanBudgetRows)) {
-      throw new DatabaseRuntimeError(
-        "database_budget_exceeded",
-        `${service === "tidb_sql" ? "TiDB" : "OceanBase"} query exceeds the configured scan row budget.`,
-      );
-    }
-    return;
-  }
-  const [rows] = await queryWithTimeout(connection, `EXPLAIN FORMAT=JSON ${sql}`, parameters, timeoutMs);
-  const raw = Object.values((rows as RowDataPacket[])[0] ?? {})[0];
-  if (typeof raw !== "string") return;
-  let plan: unknown;
-  try {
-    plan = JSON.parse(raw) as unknown;
-  } catch {
-    return;
-  }
-  if (maximumEstimatedRows(plan) > databaseScanBudgetRows) {
-    throw new DatabaseRuntimeError("database_budget_exceeded", "MySQL query exceeds the configured scan row budget.");
-  }
-}
-
-function usesTransactionalReadOnlySession(service: MysqlBackendOptions["service"]): boolean {
-  return service === "mysql" || service === "oceanbase";
-}
-
-async function queryWithTimeout(
-  connection: PoolConnection,
-  sql: string,
-  parameters: DatabaseScalar[],
-  timeoutMs: number,
-): Promise<Awaited<ReturnType<PoolConnection["query"]>>> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      connection.query(sql, parameters),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          connection.destroy();
-          reject(new DatabaseRuntimeError("database_timeout", "Database request timed out."));
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-async function configureAnalyticalSession(
-  connection: PoolConnection,
-  timeoutMs: number,
-  maxRows: number | undefined,
-): Promise<void> {
-  const timeoutSeconds = Math.max(1, Math.ceil(Math.min(timeoutMs, 30_000) / 1000));
-  await connection.query(`SET SESSION query_timeout = ${timeoutSeconds}`);
-  await connection.query(`SET SESSION exec_mem_limit = ${databaseScanBudgetBytes}`);
-  if (maxRows !== undefined) {
-    await connection.query(`SET SESSION sql_select_limit = ${Math.max(1, Math.min(maxRows, 1000))}`);
-  }
-}
-
-function maximumEstimatedRows(value: unknown): number {
-  if (Array.isArray(value)) return Math.max(0, ...value.map(maximumEstimatedRows));
-  if (!value || typeof value !== "object") return 0;
-  const record = value as Record<string, unknown>;
-  const candidates = ["rows_examined_per_scan", "rows_produced_per_join", "rows"];
-  const own = Math.max(0, ...candidates.map((key) => (typeof record[key] === "number" ? record[key] : 0)));
-  return Math.max(own, ...Object.values(record).map(maximumEstimatedRows));
 }
 
 async function assertMysqlWireReadOnlyPrincipal(connection: PoolConnection, engine: string): Promise<void> {

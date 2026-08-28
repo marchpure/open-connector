@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "service": "postgresql",
   "engineImage": "postgres:17-alpine",
-  "capturedAt": "2026-08-28T05:51:36.485Z",
+  "capturedAt": "2026-08-28T03:04:38.867Z",
   "environment": {
     "architecture": "arm64",
     "platform": "darwin"

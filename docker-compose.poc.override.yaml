@@ -1,0 +1,4 @@
+services:
+  connector:
+    ports:
+      - "3010:3000"

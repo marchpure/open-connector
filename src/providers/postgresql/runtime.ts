@@ -8,7 +8,6 @@ import {
   assertReadOnlySql,
   boundedQueryResult,
   credentialPoolKey,
-  databaseScanBudgetRows,
   DatabaseRuntimeError,
   normalizeDatabaseError,
   quoteIdentifier,
@@ -18,45 +17,15 @@ import {
 const pools = new Map<string, { credentialKey: string; pool: Pool }>();
 let shutdownRegistered = false;
 
-export interface PostgresqlWireBackendOptions {
-  service: "postgresql" | "hologres";
-  engine: "PostgreSQL" | "Hologres";
-  defaultPort: number;
-  defaultDatabase: string;
-  versionMatches: (version: string) => boolean;
-  identityQuery?: string;
-}
-
 export async function createPostgresqlBackend(
   values: Record<string, string>,
   signal?: AbortSignal,
 ): Promise<DatabaseBackend> {
-  return createPostgresqlWireBackend(
-    values,
-    {
-      service: "postgresql",
-      engine: "PostgreSQL",
-      defaultPort: 5432,
-      defaultDatabase: "postgres",
-      versionMatches: (version) => !/hologres/i.test(version),
-    },
-    signal,
-  );
-}
-
-export async function createPostgresqlWireBackend(
-  values: Record<string, string>,
-  options: PostgresqlWireBackendOptions,
-  signal?: AbortSignal,
-): Promise<DatabaseBackend> {
-  const config = readDatabaseConfig(values, {
-    port: options.defaultPort,
-    database: options.defaultDatabase,
-  });
+  const config = readDatabaseConfig(values, { port: 5432, database: "postgres" });
   await assertDatabaseEgress(config);
   registerShutdown();
-  const endpointKey = [options.service, config.host, config.port, config.database, config.username].join("\0");
-  const credentialKey = credentialPoolKey(options.service, config);
+  const endpointKey = [config.host, config.port, config.database, config.username].join("\0");
+  const credentialKey = credentialPoolKey("postgresql", config);
   let entry = pools.get(endpointKey);
   if (entry?.credentialKey !== credentialKey) {
     await entry?.pool.end().catch(() => undefined);
@@ -88,24 +57,17 @@ export async function createPostgresqlWireBackend(
     entry = { credentialKey, pool };
     pools.set(endpointKey, entry);
   }
-  return new PostgresqlBackend(config, entry.pool, options, signal);
+  return new PostgresqlBackend(config, entry.pool, signal);
 }
 
 class PostgresqlBackend implements DatabaseBackend {
   readonly config: DatabaseConnectionConfig;
   private readonly pool: Pool;
-  private readonly options: PostgresqlWireBackendOptions;
   private readonly signal?: AbortSignal;
 
-  constructor(
-    config: DatabaseConnectionConfig,
-    pool: Pool,
-    options: PostgresqlWireBackendOptions,
-    signal?: AbortSignal,
-  ) {
+  constructor(config: DatabaseConnectionConfig, pool: Pool, signal?: AbortSignal) {
     this.config = config;
     this.pool = pool;
-    this.options = options;
     this.signal = signal;
   }
 
@@ -116,20 +78,9 @@ class PostgresqlBackend implements DatabaseBackend {
       10_000,
     );
     const row = result.rows[0] as Record<string, unknown> | undefined;
-    let version = String(row?.version ?? "");
-    if (this.options.identityQuery) {
-      const identityResult = await this.readTransaction(this.options.identityQuery, [], 10_000);
-      version = String((identityResult.rows[0] as Record<string, unknown> | undefined)?.version ?? "");
-    }
-    if (!this.options.versionMatches(version)) {
-      throw new DatabaseRuntimeError(
-        "database_query_failed",
-        `Connected server did not identify as ${this.options.engine}.`,
-      );
-    }
     return {
-      engine: this.options.engine,
-      version,
+      engine: "PostgreSQL",
+      version: String(row?.version ?? ""),
       database: String(row?.database ?? this.config.database),
     };
   }
@@ -219,32 +170,21 @@ class PostgresqlBackend implements DatabaseBackend {
   ) {
     assertReadOnlySql(query, "postgresql");
     const bounded = `select * from (${stripFinalSemicolon(query)}) as openconnector_read limit ${limits.maxRows + 1}`;
-    const result = await this.readTransaction(bounded, parameters, limits.timeoutMs, true);
+    const result = await this.readTransaction(bounded, parameters, limits.timeoutMs);
     return this.toResult(result, limits.maxRows, limits.maxBytes);
   }
 
-  private async readTransaction(
-    sql: string,
-    parameters: DatabaseScalar[],
-    timeoutMs = 30_000,
-    enforceScanBudget = false,
-  ): Promise<PgQueryResult> {
+  private async readTransaction(sql: string, parameters: DatabaseScalar[], timeoutMs = 30_000): Promise<PgQueryResult> {
     let client: PoolClient | undefined;
     const abort = (): void => client?.release(true);
     this.signal?.addEventListener("abort", abort, { once: true });
     try {
       if (this.pool.waitingCount >= 8) {
-        throw new DatabaseRuntimeError(
-          "database_budget_exceeded",
-          `${this.options.engine} connection queue limit exceeded.`,
-        );
+        throw new DatabaseRuntimeError("database_budget_exceeded", "PostgreSQL connection queue limit exceeded.");
       }
       client = await this.pool.connect();
       await client.query("begin read only");
       await client.query(`set local statement_timeout = ${Math.max(100, Math.min(timeoutMs, 30_000))}`);
-      if (enforceScanBudget) {
-        await assertPostgresqlScanBudget(client, sql, parameters);
-      }
       return await client.query(sql, parameters);
     } catch (error) {
       throw normalizeDatabaseError(error);
@@ -269,33 +209,6 @@ class PostgresqlBackend implements DatabaseBackend {
       throw normalizeDatabaseError(new Error("Cross-database discovery requires a separate PostgreSQL connection."));
     }
   }
-}
-
-async function assertPostgresqlScanBudget(
-  client: PoolClient,
-  sql: string,
-  parameters: DatabaseScalar[],
-): Promise<void> {
-  const explain = await client.query({
-    text: `EXPLAIN (FORMAT JSON) ${sql}`,
-    values: parameters,
-  });
-  const document = explain.rows[0]?.["QUERY PLAN"];
-  const plan = Array.isArray(document) ? document[0] : document;
-  if (maximumPlanRows(plan) > databaseScanBudgetRows) {
-    throw new DatabaseRuntimeError(
-      "database_budget_exceeded",
-      "PostgreSQL query exceeds the configured scan row budget.",
-    );
-  }
-}
-
-function maximumPlanRows(value: unknown): number {
-  if (Array.isArray(value)) return Math.max(0, ...value.map(maximumPlanRows));
-  if (!value || typeof value !== "object") return 0;
-  const record = value as Record<string, unknown>;
-  const own = typeof record["Plan Rows"] === "number" ? record["Plan Rows"] : 0;
-  return Math.max(own, ...Object.values(record).map(maximumPlanRows));
 }
 
 function stripFinalSemicolon(sql: string): string {

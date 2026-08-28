@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "service": "mysql",
   "engineImage": "mysql:8.4",
-  "capturedAt": "2026-08-28T06:01:22.609Z",
+  "capturedAt": "2026-08-28T03:04:40.971Z",
   "environment": {
     "architecture": "arm64",
     "platform": "darwin"

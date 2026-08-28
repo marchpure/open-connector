@@ -366,7 +366,7 @@ function timeoutQueryFor(providerService: string): string {
     return "select count_big(*) from sys.all_objects a cross join sys.all_objects b cross join sys.all_objects c";
   }
   if (providerService === "clickhouse") {
-    return "select sum(sipHash64(sipHash64(number, number+1), sipHash64(number+2, number+3), sipHash64(number+4, number+5), sipHash64(number+6, number+7))) from numbers(10000000)";
+    return "select count() from numbers(100000000000)";
   }
   return "select count(*) from information_schema.columns a cross join information_schema.columns b cross join information_schema.columns c";
 }
