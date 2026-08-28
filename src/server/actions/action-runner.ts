@@ -22,6 +22,7 @@ export interface ActionRunnerOptions {
 
 export interface RunActionInput {
   actionId: string;
+  invocationId?: string;
   input: unknown;
   caller: RunLogCaller;
   connectionName?: string;
@@ -135,6 +136,7 @@ export class ActionRunner {
     const auditError = safeRunLogError(result.error);
     const runLog: RunLog = {
       id: executionId,
+      invocationId: input.invocationId,
       service: action.service,
       actionId: input.actionId,
       caller: input.caller,

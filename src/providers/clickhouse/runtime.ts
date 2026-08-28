@@ -3,7 +3,18 @@ import type { ProviderActionHandlers } from "../provider-runtime.ts";
 
 import { Buffer } from "node:buffer";
 import { compactObject, optionalInteger, optionalNumber, optionalRecord, optionalString } from "../../core/cast.ts";
+import {
+  assertDatabaseHostAllowlisted,
+  assertClickhouseReadOnlySql,
+  boundedQueryResult,
+  DatabaseRuntimeError,
+  pageResult,
+  readLimits,
+  readPage,
+  readParameters,
+} from "../../core/database/runtime.ts";
 import { assertPublicHttpUrl, isPrivateNetworkAccessAllowed } from "../../core/request.ts";
+import { readBoundedResponseBytes } from "../../core/request.ts";
 import {
   createProviderTimeout,
   isAbortLikeError,
@@ -14,6 +25,10 @@ import {
 const clickhouseDefaultRequestTimeoutMs = 30_000;
 const clickhouseDefaultDatabase = "default";
 const clickhouseValidationQuery = "SELECT currentDatabase() AS database, version() AS version";
+const clickhouseMaxConcurrent = 4;
+const clickhouseDefaultMaxRows = 1000;
+const clickhouseMaxBytes = 10 * 1024 * 1024;
+let clickhouseActiveRequests = 0;
 
 type ClickhouseQueryParameter = string | number | boolean;
 type ClickhouseActionHandler = (input: Record<string, unknown>, context: ClickhouseActionContext) => Promise<unknown>;
@@ -32,6 +47,8 @@ interface ClickhouseRequestInput {
   parameters?: Record<string, ClickhouseQueryParameter>;
   settings?: Record<string, ClickhouseQueryParameter>;
   maxExecutionTime?: number;
+  maxRows?: number;
+  maxBytes?: number;
 }
 
 interface NormalizedClickhouseTable {
@@ -61,11 +78,26 @@ export const clickhouseActionHandlers: ProviderActionHandlers<"clickhouse", Clic
   execute_query(input, context) {
     return executeQuery(input, context);
   },
+  validate_connection(_input, context) {
+    return validateConnection(context);
+  },
   list_databases(input, context) {
     return listDatabases(input, context);
   },
+  list_schemas(input, context) {
+    return listSchemas(input, context);
+  },
   list_tables(input, context) {
     return listTables(input, context);
+  },
+  describe_table(input, context) {
+    return describeTable(input, context);
+  },
+  preview_table(input, context) {
+    return previewTable(input, context);
+  },
+  execute_read_query(input, context) {
+    return executeReadQuery(input, context);
   },
   get_table_schema(input, context) {
     return getTableSchema(input, context);
@@ -74,6 +106,21 @@ export const clickhouseActionHandlers: ProviderActionHandlers<"clickhouse", Clic
     return getDatabaseSchema(input, context);
   },
 };
+
+async function validateConnection(context: ClickhouseActionContext): Promise<Record<string, unknown>> {
+  const payload = await requestClickhouseJson({
+    query: clickhouseValidationQuery,
+    context,
+    phase: "validate",
+  });
+  const row = normalizeQueryRows(payload)[0];
+  return {
+    ok: true,
+    engine: "ClickHouse",
+    version: optionalString(row?.version) ?? "",
+    database: optionalString(row?.database) ?? context.defaultDatabase,
+  };
+}
 
 export async function validateClickhouseCredential(
   input: Record<string, string>,
@@ -122,8 +169,10 @@ export function createClickhouseContext(
 }
 
 async function executeQuery(input: Record<string, unknown>, context: ClickhouseActionContext): Promise<unknown> {
+  const query = requireInputString(input.query, "query");
+  assertClickhouseReadOnlySql(query);
   const payload = await requestClickhouseJson({
-    query: requireInputString(input.query, "query"),
+    query,
     database: optionalString(input.database) ?? context.defaultDatabase,
     settings: readClickhouseSettings(input.settings),
     maxExecutionTime: optionalInteger(input.maxExecutionTime),
@@ -134,8 +183,88 @@ async function executeQuery(input: Record<string, unknown>, context: ClickhouseA
   return normalizeQueryOutput(payload);
 }
 
+async function listSchemas(input: Record<string, unknown>, context: ClickhouseActionContext): Promise<unknown> {
+  const page = readPage(input);
+  const payload = await requestClickhouseJson({
+    query: [
+      "SELECT name",
+      "FROM system.databases",
+      "ORDER BY name",
+      "LIMIT {limit:UInt64} OFFSET {offset:UInt64}",
+    ].join(" "),
+    parameters: { limit: page.pageSize + 1, offset: page.offset },
+    context,
+    phase: "execute",
+  });
+  const result = pageResult(
+    normalizeQueryRows(payload).map((row) => {
+      const name = requireResponseString(row.name, "database name");
+      return { database: name, name };
+    }),
+    page,
+  );
+  return { schemas: result.items, nextCursor: result.nextCursor, truncated: result.truncated };
+}
+
+async function previewTable(input: Record<string, unknown>, context: ClickhouseActionContext): Promise<unknown> {
+  const page = readPage(input);
+  const database = optionalString(input.database) ?? optionalString(input.schema) ?? context.defaultDatabase;
+  const table = requireInputString(input.table, "table");
+  const payload = await requestClickhouseJson({
+    query: [
+      "SELECT * FROM {database:Identifier}.{table:Identifier}",
+      "LIMIT {limit:UInt64} OFFSET {offset:UInt64}",
+    ].join(" "),
+    parameters: { database, table, limit: page.pageSize + 1, offset: page.offset },
+    context,
+    phase: "execute",
+  });
+  const rows = normalizeQueryRows(payload);
+  const result = boundedQueryResult(
+    rows,
+    readQueryMeta(payload.meta).map((column) => ({ name: column.name, dataType: column.type })),
+    page.pageSize,
+    clickhouseMaxBytes,
+  );
+  return {
+    result,
+    nextCursor: result.truncated ? Buffer.from(String(page.offset + result.rowCount)).toString("base64url") : null,
+    truncated: result.truncated,
+  };
+}
+
+async function executeReadQuery(input: Record<string, unknown>, context: ClickhouseActionContext): Promise<unknown> {
+  const query = requireInputString(input.query, "query");
+  assertClickhouseReadOnlySql(query);
+  const parameters = readParameters(input.parameters);
+  const limits = readLimits(input);
+  const payload = await requestClickhouseJson({
+    query,
+    parameters: Object.fromEntries(parameters.map((value, index) => [`p${index + 1}`, String(value ?? "")])),
+    settings: {
+      readonly: 2,
+      max_result_rows: limits.maxRows + 1,
+      max_result_bytes: limits.maxBytes,
+      result_overflow_mode: "break",
+    },
+    maxExecutionTime: Math.ceil(limits.timeoutMs / 1000),
+    maxRows: limits.maxRows + 1,
+    maxBytes: limits.maxBytes,
+    database: context.defaultDatabase,
+    context,
+    phase: "execute",
+  });
+  return boundedQueryResult(
+    normalizeQueryRows(payload),
+    readQueryMeta(payload.meta).map((column) => ({ name: column.name, dataType: column.type })),
+    limits.maxRows,
+    limits.maxBytes,
+  );
+}
+
 async function listDatabases(input: Record<string, unknown>, context: ClickhouseActionContext): Promise<unknown> {
   const includeTables = input.includeTables === true;
+  const page = readPage(input);
   const payload = await requestClickhouseJson({
     query: includeTables
       ? [
@@ -144,16 +273,18 @@ async function listDatabases(input: Record<string, unknown>, context: Clickhouse
           "LEFT JOIN system.tables AS t ON t.database = d.name",
           "WHERE ({pattern:String} = '' OR d.name LIKE {pattern:String})",
           "GROUP BY d.name, d.engine, d.uuid",
-          "ORDER BY d.name",
+          "ORDER BY d.name LIMIT {limit:UInt64} OFFSET {offset:UInt64}",
         ].join(" ")
       : [
           "SELECT name, engine, toString(uuid) AS uuid",
           "FROM system.databases",
           "WHERE ({pattern:String} = '' OR name LIKE {pattern:String})",
-          "ORDER BY name",
+          "ORDER BY name LIMIT {limit:UInt64} OFFSET {offset:UInt64}",
         ].join(" "),
     parameters: {
       pattern: optionalString(input.pattern) ?? "",
+      limit: page.pageSize + 1,
+      offset: page.offset,
     },
     context,
     phase: "execute",
@@ -166,9 +297,12 @@ async function listDatabases(input: Record<string, unknown>, context: Clickhouse
     raw: row,
   }));
 
+  const result = pageResult(databases, page);
   return {
-    databases,
-    total: databases.length,
+    databases: result.items,
+    total: result.items.length,
+    nextCursor: result.nextCursor,
+    truncated: result.truncated,
     raw: payload,
   };
 }
@@ -179,6 +313,7 @@ async function listTables(input: Record<string, unknown>, context: ClickhouseAct
   const includeViews = input.includeViews !== false;
   const includeColumns = input.includeColumns === true;
   const includePrimaryKey = input.includePrimaryKey === true;
+  const page = readPage(input);
   const payload = await requestClickhouseJson({
     query: [
       "SELECT database, name, engine, is_temporary, total_rows, total_bytes,",
@@ -189,12 +324,14 @@ async function listTables(input: Record<string, unknown>, context: ClickhouseAct
       "AND is_temporary = 0",
       "AND ({include_views:UInt8} = 1",
       "OR engine NOT IN ('View', 'MaterializedView', 'LiveView', 'WindowView'))",
-      "ORDER BY database, name",
+      "ORDER BY database, name LIMIT {limit:UInt64} OFFSET {offset:UInt64}",
     ].join(" "),
     parameters: {
       database,
       pattern,
       include_views: clickhouseFlagParameter(includeViews),
+      limit: page.pageSize + 1,
+      offset: page.offset,
     },
     context,
     phase: "execute",
@@ -212,10 +349,33 @@ async function listTables(input: Record<string, unknown>, context: ClickhouseAct
     columnsByTable,
   });
 
+  const result = pageResult(tables, page);
   return {
-    tables,
-    total: tables.length,
+    tables: result.items,
+    total: result.items.length,
+    nextCursor: result.nextCursor,
+    truncated: result.truncated,
     raw: payload,
+  };
+}
+
+async function describeTable(input: Record<string, unknown>, context: ClickhouseActionContext): Promise<unknown> {
+  const described = (await getTableSchema(input, context)) as {
+    database: string;
+    table: string;
+    columns: Array<Record<string, unknown>>;
+  };
+  return {
+    database: described.database,
+    schema: described.database,
+    table: described.table,
+    columns: described.columns.map((column, index) => ({
+      name: String(column.name ?? ""),
+      dataType: String(column.type ?? ""),
+      nullable: /^Nullable\(/.test(String(column.type ?? "")),
+      ordinal: index + 1,
+      defaultValue: column.defaultExpression == null ? null : String(column.defaultExpression),
+    })),
   };
 }
 
@@ -358,6 +518,10 @@ async function ensureDatabaseExists(database: string, context: ClickhouseActionC
 }
 
 async function requestClickhouseJson(input: ClickhouseRequestInput): Promise<ClickhouseJsonPayload> {
+  if (clickhouseActiveRequests >= clickhouseMaxConcurrent) {
+    throw new DatabaseRuntimeError("database_budget_exceeded", "ClickHouse concurrency budget exceeded.");
+  }
+  clickhouseActiveRequests += 1;
   const timeout = createProviderTimeout(input.context.signal, clickhouseDefaultRequestTimeoutMs);
   const url = new URL(input.context.baseUrl);
   url.searchParams.set("default_format", "JSON");
@@ -366,8 +530,15 @@ async function requestClickhouseJson(input: ClickhouseRequestInput): Promise<Cli
     url.searchParams.set(`param_${key}`, String(value));
   }
   for (const [key, value] of Object.entries(input.settings ?? {})) {
+    if (["readonly", "max_result_rows", "max_result_bytes", "result_overflow_mode"].includes(key)) {
+      continue;
+    }
     url.searchParams.set(key, String(value));
   }
+  url.searchParams.set("readonly", "2");
+  url.searchParams.set("max_result_rows", String(input.maxRows ?? clickhouseDefaultMaxRows));
+  url.searchParams.set("max_result_bytes", String(input.maxBytes ?? clickhouseMaxBytes));
+  url.searchParams.set("result_overflow_mode", "break");
   if (input.maxExecutionTime !== undefined) {
     url.searchParams.set("max_execution_time", String(input.maxExecutionTime));
   }
@@ -375,6 +546,7 @@ async function requestClickhouseJson(input: ClickhouseRequestInput): Promise<Cli
   try {
     const response = await input.context.fetcher(url.toString(), {
       method: "POST",
+      redirect: "error",
       headers: {
         accept: "application/json",
         authorization: buildBasicAuthorizationHeader(input.context.username, input.context.password),
@@ -384,7 +556,13 @@ async function requestClickhouseJson(input: ClickhouseRequestInput): Promise<Cli
       body: input.query,
       signal: timeout.signal,
     });
-    const text = await response.text();
+    const text = new TextDecoder().decode(
+      await readBoundedResponseBytes(response, {
+        maxBytes: clickhouseMaxBytes,
+        fieldName: "ClickHouse response",
+        createError: (message) => new DatabaseRuntimeError("database_budget_exceeded", message),
+      }),
+    );
     if (!response.ok) {
       throw createClickhouseError(response.status, text, input.phase);
     }
@@ -407,6 +585,7 @@ async function requestClickhouseJson(input: ClickhouseRequestInput): Promise<Cli
     );
   } finally {
     timeout.cleanup();
+    clickhouseActiveRequests -= 1;
   }
 }
 
@@ -470,6 +649,7 @@ export function normalizeClickhouseBaseUrl(
     createError: (message) => new ProviderRequestError(400, message),
     allowPrivateNetwork,
   });
+  assertDatabaseHostAllowlisted(url.hostname);
   url.hash = "";
   return url.toString();
 }

@@ -1,5 +1,6 @@
 import type { ActionDefinition } from "../../core/types.ts";
 
+import { createDatabaseActions } from "../../core/database/actions.ts";
 import { s } from "../../core/json-schema.ts";
 import { defineProviderAction } from "../../core/provider-definition.ts";
 
@@ -23,7 +24,7 @@ const queryInputSchema = s.object(
   {
     query: trimmedString("The SQL query to execute against ClickHouse."),
     ...optionalDatabaseField,
-    maxExecutionTime: s.integer("The maximum query execution time in seconds.", { minimum: 1 }),
+    maxExecutionTime: s.integer("The maximum query execution time in seconds.", { minimum: 1, maximum: 30 }),
     settings: s.record("Additional ClickHouse settings to send with the query.", clickhouseSettingValueSchema),
   },
   { optional: ["database", "maxExecutionTime", "settings"] },
@@ -101,12 +102,16 @@ const listDatabasesAction = defineProviderAction(service, {
     {
       pattern: trimmedString("An optional SQL LIKE pattern used to filter database names."),
       includeTables: s.boolean("Whether to include table names for each returned database."),
+      cursor: s.string("Opaque offset cursor returned by the previous page."),
+      pageSize: s.integer("Maximum databases to return.", { minimum: 1, maximum: 200, default: 100 }),
     },
-    { optional: ["pattern", "includeTables"] },
+    { optional: ["pattern", "includeTables", "cursor", "pageSize"] },
   ),
   outputSchema: s.object("The normalized output payload for listing ClickHouse databases.", {
     databases: s.array("The databases returned by ClickHouse.", databaseSchema),
     total: s.integer("The number of databases returned."),
+    nextCursor: s.nullableString("Cursor for the next page."),
+    truncated: s.boolean("Whether more databases exist."),
     raw: s.looseObject("The raw ClickHouse JSON response payload."),
   }),
 });
@@ -133,12 +138,16 @@ const listTablesAction = defineProviderAction(service, {
         description: "Whether to include primary, sorting, and partition key expressions.",
         default: false,
       }),
+      cursor: s.string("Opaque offset cursor returned by the previous page."),
+      pageSize: s.integer("Maximum tables to return.", { minimum: 1, maximum: 200, default: 100 }),
     },
-    { optional: ["database", "pattern", "includeViews", "includeColumns", "includePrimaryKey"] },
+    { optional: ["database", "pattern", "includeViews", "includeColumns", "includePrimaryKey", "cursor", "pageSize"] },
   ),
   outputSchema: s.object("The normalized output payload for listing ClickHouse tables.", {
     tables: s.array("The tables returned by ClickHouse.", tableSchema),
     total: s.integer("The number of tables returned."),
+    nextCursor: s.nullableString("Cursor for the next page."),
+    truncated: s.boolean("Whether more tables exist."),
     raw: s.looseObject("The raw ClickHouse JSON response payload."),
   }),
 });
@@ -205,10 +214,21 @@ const getDatabaseSchemaAction = defineProviderAction(service, {
 
 export type ClickhouseActionName =
   | "execute_query"
+  | "validate_connection"
   | "list_databases"
+  | "list_schemas"
   | "list_tables"
+  | "describe_table"
+  | "preview_table"
+  | "execute_read_query"
   | "get_table_schema"
   | "get_database_schema";
+
+const expansionActions = createDatabaseActions(service, "ClickHouse").filter((action) =>
+  ["validate_connection", "list_schemas", "describe_table", "preview_table", "execute_read_query"].includes(
+    action.name,
+  ),
+);
 
 export const clickhouseActions: ActionDefinition[] = [
   executeQueryAction,
@@ -216,4 +236,5 @@ export const clickhouseActions: ActionDefinition[] = [
   listTablesAction,
   getTableSchemaAction,
   getDatabaseSchemaAction,
+  ...expansionActions,
 ];

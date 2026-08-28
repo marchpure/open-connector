@@ -40,6 +40,93 @@ afterEach(async () => {
 });
 
 describe("connection control API", () => {
+  it("persists the lease invocation id in the redacted audit feed", async () => {
+    const database = new DatabaseSync(":memory:");
+    const executableProvider: ProviderDefinition = {
+      ...provider,
+      actions: [
+        {
+          id: "fixture.read",
+          service: "fixture",
+          name: "read",
+          description: "Read fixture data.",
+          requiredScopes: [],
+          providerPermissions: [],
+          inputSchema: { type: "object" },
+          outputSchema: { type: "object" },
+        },
+      ],
+    };
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([executableProvider], { executableActionIds: ["fixture.read"] }),
+      providerLoader: {
+        loadActionExecutor: async () => async () => ({ ok: true, output: { value: "safe" } }),
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          customCredential: async () => ({ profile: { displayName: "fixture" } }),
+        }),
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        service: "fixture",
+        authType: "custom_credential",
+        connectionName: "audit",
+        values: { secret: "do-not-leak" },
+      }),
+    });
+    const connectionId = ((await created.json()) as { connection: { id: string } }).connection.id;
+    const lease = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["fixture.read"],
+        invocationId: "invocation-from-lease",
+        audience: "knowledge-runtime",
+      }),
+    });
+    const leaseToken = ((await lease.json()) as { token: string }).token;
+    const invoked = await app.request("/v1/runtime/actions/fixture.read", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${auth}`,
+        "content-type": "application/json",
+        "x-connection-lease": leaseToken,
+      },
+      body: JSON.stringify({
+        connectionId,
+        invocationId: "invocation-from-lease",
+        audience: "knowledge-runtime",
+        input: {},
+      }),
+    });
+    expect(invoked.status).toBe(200);
+    const audit = await app.request("/v1/audit", { headers: { authorization: `Bearer ${auth}` } });
+    const auditBody = (await audit.json()) as { items: Array<Record<string, unknown>> };
+    expect(auditBody.items[0]).toMatchObject({
+      invocationId: "invocation-from-lease",
+      actionId: "fixture.read",
+      connectionId,
+      ok: true,
+    });
+    expect(JSON.stringify(auditBody)).not.toContain("do-not-leak");
+    const other = createPrincipalToken(
+      { ...principal, tenantId: "tenant-b", workspaceId: "workspace-b" },
+      "auth-secret",
+    );
+    const otherAudit = await app.request("/v1/audit", { headers: { authorization: `Bearer ${other}` } });
+    expect(await otherAudit.json()).toEqual({ items: [] });
+    database.close();
+  });
+
   it("streams an authenticated multipart upload through staged tenant file intake", async () => {
     const root = await mkdtemp(join(tmpdir(), "connection-control-upload-"));
     tempRoots.push(root);
