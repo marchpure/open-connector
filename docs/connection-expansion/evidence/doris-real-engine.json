@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "service": "doris",
   "engineImage": "apache/doris:all-in-one-4.1.3",
-  "capturedAt": "2026-08-28T03:04:56.022Z",
+  "capturedAt": "2026-08-28T05:49:52.565Z",
   "environment": {
     "architecture": "arm64",
     "platform": "darwin"
