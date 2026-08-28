@@ -31,7 +31,7 @@ describe("MySQL-wire analytical runtime", () => {
         }
         return [[], []];
       }),
-      execute: vi.fn(async () => [[{ id: 1 }], [{ name: "id", type: "LONG" }]]),
+      execute: vi.fn(async () => [[{ id: 1 }], [{ name: "id", type: 3, typeName: "LONG" }]]),
       release: vi.fn(),
       destroy: vi.fn(),
     };
@@ -67,5 +67,42 @@ describe("MySQL-wire analytical runtime", () => {
       { sql: "select * from (select * from `orders`) as openconnector_read limit 11", timeout: 1000 },
       [],
     );
+  });
+
+  it("preserves native MySQL-wire type names in query metadata", async () => {
+    setPrivateNetworkAccessAllowed(true);
+    process.env.CONNECTION_DATABASE_EGRESS_ALLOWLIST = "8.8.8.8";
+    const connection = {
+      query: vi.fn(async (query: string) => {
+        if (query === "SHOW GRANTS") return [[{ grants: "app: Select_priv" }], []];
+        if (query.startsWith("EXPLAIN")) return [[{ plan: "cardinality=2" }], []];
+        return [[], []];
+      }),
+      execute: vi.fn(async () => [[{ id: 1 }], [{ name: "id", type: 3, typeName: "LONG" }]]),
+      release: vi.fn(),
+      destroy: vi.fn(),
+    };
+    mysql.createPool.mockReturnValue({
+      getConnection: vi.fn(async () => connection),
+      end: vi.fn(async () => undefined),
+    });
+
+    const backend = await createMysqlWireBackend(
+      { host: "8.8.8.8", port: "3306", database: "app", username: "reader", password: "secret", tls: "disable" },
+      {
+        service: "mysql",
+        engine: "MySQL",
+        defaultPort: 3306,
+        defaultDatabase: "mysql",
+        versionMatches: () => true,
+      },
+    );
+    const result = await backend.executeReadQuery("select * from `orders`", [], {
+      maxRows: 10,
+      maxBytes: 1024,
+      timeoutMs: 1000,
+    });
+
+    expect(result.columns).toEqual([{ name: "id", dataType: "LONG" }]);
   });
 });

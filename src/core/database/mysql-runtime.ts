@@ -193,7 +193,10 @@ class MysqlWireBackend implements DatabaseBackend {
     });
     return boundedQueryResult(
       rows as Record<string, unknown>[],
-      fields.map((field) => ({ name: field.name, dataType: String(field.type) })),
+      fields.map((field) => ({
+        name: field.name,
+        dataType: field.typeName ?? (field.type == null ? null : String(field.type)),
+      })),
       page.pageSize,
       10 * 1024 * 1024,
     );
@@ -212,7 +215,10 @@ class MysqlWireBackend implements DatabaseBackend {
     });
     return boundedQueryResult(
       rows as Record<string, unknown>[],
-      fields.map((field) => ({ name: field.name, dataType: String(field.type) })),
+      fields.map((field) => ({
+        name: field.name,
+        dataType: field.typeName ?? (field.type == null ? null : String(field.type)),
+      })),
       limits.maxRows,
       limits.maxBytes,
     );
