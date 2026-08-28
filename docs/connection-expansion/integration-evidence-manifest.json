@@ -1,0 +1,299 @@
+{
+  "schemaVersion": 1,
+  "artifact": "connection-expansion-integration-evidence",
+  "redaction": {
+    "credentials": "No credential values, tokens, cookies, URLs containing secrets, or external account identifiers are included.",
+    "source": "Generated catalog counts and test outcomes only; provider evidence references remain repository-relative."
+  },
+  "baseline": {
+    "sourceWorktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-service-open-connector",
+    "sourceBaselineSha": "69ad6f8028eaf3a34b706012c72dc3f099a348e2",
+    "integrationWorktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-expansion-integration",
+    "integrationBranch": "feat/connection-expansion-integration",
+    "w1InputSha": "3772c6eb9444ed832bd468aa16d3dc328dedbf54",
+    "w2InputSha": "8cdcc712ed8686673d3a613ebeafe5f0ce80a4aa",
+    "w1Remote": "fork/feat/connection-expansion-w1-databases",
+    "w2Remote": "fork/feat/connection-expansion-w2-office-storage",
+    "sourceWorktreeUnmodified": true
+  },
+  "generatedArtifacts": {
+    "catalogProviders": 1453,
+    "catalogActions": 15209,
+    "nodeRegistryProviders": 1453,
+    "cloudflareRegistryProviders": 1445,
+    "catalogDirectory": "catalog/apps",
+    "nodeRegistry": "src/providers/registry.generated.ts",
+    "cloudflareRegistry": "src/providers/registry.cloudflare.generated.ts",
+    "actionContracts": "src/providers/action-contracts.generated.ts",
+    "serviceIdsUnique": true,
+    "lazyLoaderReachability": "All generated registry entries point to provider executor modules; typecheck and full tests passed."
+  },
+  "tierMatrix": [
+    {
+      "connectorClass": "postgresql",
+      "providerId": "postgresql",
+      "tier": "verified",
+      "evidence": "docs/connection-expansion/evidence/postgresql-real-engine.json",
+      "owner": "knowledge-platform",
+      "version": "1.0.0",
+      "externalBlocker": null
+    },
+    {
+      "connectorClass": "mysql",
+      "providerId": "mysql",
+      "tier": "verified",
+      "evidence": "docs/connection-expansion/evidence/mysql-real-engine.json",
+      "owner": "knowledge-platform",
+      "version": "1.0.0",
+      "externalBlocker": null
+    },
+    {
+      "connectorClass": "sql_server",
+      "providerId": "sql_server",
+      "tier": "beta",
+      "evidence": "docs/connection-expansion/evidence/sql-server-external-blocker.json",
+      "owner": "knowledge-platform",
+      "version": "1.0.0",
+      "externalBlocker": "Official SQL Server image/platform and registry DNS prevented the real Microsoft SQL Server exit matrix."
+    },
+    {
+      "connectorClass": "clickhouse",
+      "providerId": "clickhouse",
+      "tier": "verified",
+      "evidence": "docs/connection-expansion/evidence/clickhouse-real-engine.json",
+      "owner": "knowledge-platform",
+      "version": "1.0.0",
+      "externalBlocker": null
+    },
+    {
+      "connectorClass": "doris",
+      "providerId": "doris",
+      "tier": "verified",
+      "evidence": "docs/connection-expansion/evidence/doris-real-engine.json",
+      "owner": "knowledge-platform",
+      "version": "1.0.0",
+      "externalBlocker": null
+    },
+    {
+      "connectorClass": "starrocks",
+      "providerId": "starrocks",
+      "tier": "verified",
+      "evidence": "docs/connection-expansion/evidence/starrocks-real-engine.json",
+      "owner": "knowledge-platform",
+      "version": "1.0.0",
+      "externalBlocker": null
+    },
+    {
+      "connectorClass": "feishu",
+      "providerId": "feishu",
+      "tier": "beta",
+      "evidence": "docs/connection-expansion/w2-office-storage-handoff.json#/connections/0",
+      "owner": "knowledge-platform",
+      "version": "1.0.0",
+      "externalBlocker": "No Connection Service-owned real Feishu enterprise/user authorization and revocation evidence."
+    },
+    {
+      "connectorClass": "dingtalk",
+      "providerId": "dingtalk",
+      "tier": "beta",
+      "evidence": "docs/connection-expansion/w2-office-storage-handoff.json#/connections/1",
+      "owner": "knowledge-platform",
+      "version": "1.0.0",
+      "externalBlocker": "No real DingTalk enterprise/application/user credentials and upstream lifecycle evidence."
+    },
+    {
+      "connectorClass": "wecom",
+      "providerId": "wecom",
+      "tier": "beta",
+      "evidence": "docs/connection-expansion/w2-office-storage-handoff.json#/connections/2",
+      "owner": "knowledge-platform",
+      "version": "1.0.0",
+      "externalBlocker": "No real WeCom enterprise/application credentials and upstream lifecycle evidence."
+    },
+    {
+      "connectorClass": "aws_s3",
+      "providerId": "aws_s3",
+      "tier": "beta",
+      "evidence": "docs/connection-expansion/w2-office-storage-handoff.json#/connections/3",
+      "owner": "knowledge-platform",
+      "version": "1.0.0",
+      "externalBlocker": "No real AWS account, IAM policy, bucket/object, and revocation matrix."
+    },
+    {
+      "connectorClass": "aliyun_oss",
+      "providerId": "aliyun_oss",
+      "tier": "beta",
+      "evidence": "docs/connection-expansion/w2-office-storage-handoff.json#/connections/4",
+      "owner": "knowledge-platform",
+      "version": "1.0.0",
+      "externalBlocker": "No real Alibaba Cloud account, RAM policy, bucket/object, and STS lifecycle matrix."
+    },
+    {
+      "connectorClass": "volcengine_tos",
+      "providerId": "volcengine_tos",
+      "tier": "beta",
+      "evidence": "docs/connection-expansion/w2-office-storage-handoff.json#/connections/5",
+      "owner": "knowledge-platform",
+      "version": "1.0.0",
+      "externalBlocker": "No real Volcengine account, IAM policy, TOS bucket/object, and STS lifecycle matrix."
+    }
+  ],
+  "enablement": {
+    "defaultServices": [
+      "feishu",
+      "dingtalk",
+      "wecom",
+      "aws_s3",
+      "aliyun_oss",
+      "volcengine_tos"
+    ],
+    "defaultTier": "beta",
+    "requiredFields": [
+      "service",
+      "tier",
+      "connectorDefinitionVersion",
+      "owner",
+      "evidenceRef"
+    ],
+    "verifiedServicesAreNotAutomaticallyEnabled": true,
+    "policySource": "src/control-plane/index.ts"
+  },
+  "scope": {
+    "incrementalIncluded": [
+      "postgresql",
+      "mysql",
+      "sql_server",
+      "clickhouse",
+      "doris",
+      "starrocks",
+      "feishu",
+      "dingtalk",
+      "wecom",
+      "aws_s3",
+      "aliyun_oss",
+      "volcengine_tos"
+    ],
+    "regressionRequired": [
+      "oracle",
+      "files",
+      "rest_openapi",
+      "custom_mcp",
+      "web_api_discovery"
+    ],
+    "explicitlyNotEnabledOrClaimedAsThisRound": [
+      "bigquery",
+      "snowflake",
+      "graphql",
+      "webhook",
+      "kafka",
+      "octopus_web_collection",
+      "tencent_docs",
+      "wps",
+      "baidu_netdisk",
+      "cos",
+      "obs",
+      "oceanbase",
+      "tidb_sql",
+      "maxcompute",
+      "hologres",
+      "hive",
+      "trino",
+      "elasticsearch",
+      "opensearch",
+      "log_platforms",
+      "other_vertical_providers"
+    ],
+    "compatibilityOnly": [
+      "dingtalk_bot",
+      "wecom_bot",
+      "wecom_mcp"
+    ]
+  },
+  "conflictResolution": [
+    "Cherry-picked all W1 commits in source order, then all W2 commits in source order.",
+    "Preserved W1 database package dependencies and W2 office/storage shared Control Plane changes.",
+    "Regenerated provider registry, Cloudflare registry, action contracts, and catalog after both ranges.",
+    "Removed only duplicate invocationId declarations/assignments introduced by the shared audit-log merge; retained the final redacted audit value and invocation ID propagation.",
+    "Required explicit enablement JSON entries to include non-empty evidenceRef; no provider is silently promoted by integration."
+  ],
+  "verification": {
+    "commands": {
+      "npmCi": "passed; 656 packages added; 0 vulnerabilities",
+      "npmRunGenerateCatalog": "passed; 1453 providers and 15209 actions",
+      "npmRunGenerateRegistry": "passed; 1453 node / 1445 Cloudflare providers",
+      "npmRunFixCheck": "passed; lint/format/typecheck",
+      "npmTest": "passed; 170 files passed, 1 skipped; 1545 tests passed, 4 skipped",
+      "npmRunBuild": "passed; typechecked src, scripts-all, examples",
+      "npmAuditOmitDev": "passed; 0 vulnerabilities",
+      "npmAudit": "passed; 0 vulnerabilities",
+      "gitDiffCheck": "passed"
+    },
+    "focusedCoverage": [
+      "Provider catalog definitions and generated lazy-loader entries",
+      "Connection create/update/credential redaction and encrypted credential persistence",
+      "Connection validation jobs and provider error mapping",
+      "Discovery leases, revision binding, bounded ResourceRefs, and resource authorization",
+      "Lease allowlists, tenant isolation, owner checks, IDOR rejection, and audit invocationId retention",
+      "SSRF/egress guards, object-key/prefix allowlists, bounded reads, and secret redaction",
+      "Database parser-first read-only gates, native parameter binding, TLS, scan budgets, pool replacement, and result metadata"
+    ],
+    "runtimeSmoke": {
+      "singleService": true,
+      "health": "passed on localhost",
+      "v1Health": "passed",
+      "unauthenticatedCatalog": "401 unauthorized",
+      "catalogEnablement": "passed with one explicit beta service",
+      "realExternalCredentialLifecycle": "blocked for Feishu/WeCom/DingTalk and cloud storage because required external accounts/credentials were unavailable",
+      "noAuthCompatibilityHarness": "Hacker News no-auth provider returned a virtual connection as designed; it is not used as expansion evidence",
+      "providerExpansionClaims": "No beta connector is claimed verified without the referenced real evidence."
+    },
+    "regressionEvidence": [
+      "docs/connection-service-evidence.json",
+      "docs/connection-service.md",
+      "src/control-plane/server.test.ts",
+      "src/server/connect-server.test.ts",
+      "src/server/cloudflare.test.ts",
+      "src/server/actions/action-runner.test.ts",
+      "src/providers/office-discovery.test.ts",
+      "src/core/database/actions.test.ts",
+      "src/core/database/runtime.test.ts"
+    ]
+  },
+  "supplyChain": {
+    "sbom": "artifacts/npm-sbom-cyclonedx.json",
+    "sbomFormat": "CycloneDX 1.5",
+    "sbomSha256": "c035a5babcc5ce01acfc4b4da509a5a881105cb8d024be04f58ea08288e013a0",
+    "sbomComponentCount": 656,
+    "npmLsInventory": "artifacts/npm-sbom.json",
+    "licenseNotice": "LICENSE.txt and NOTICE.md remain the upstream Apache-2.0 notices.",
+    "npmCiLockfileAuthoritative": true
+  },
+  "deployment": {
+    "entrypoint": "npm run start:connection-service",
+    "dockerfile": "Dockerfile.connection-service",
+    "requiredSecrets": [
+      "CONNECTION_SERVICE_AUTH_SECRET",
+      "CONNECTION_SERVICE_ENCRYPTION_KEY"
+    ],
+    "importantConfig": [
+      "CONNECTION_SERVICE_DATA_DIR",
+      "CONNECTION_SERVICE_HOST",
+      "CONNECTION_SERVICE_PORT",
+      "CONNECTION_SERVICE_ENABLEMENT_JSON",
+      "OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK",
+      "CONNECTION_DATABASE_EGRESS_ALLOWLIST"
+    ],
+    "defaultEnablement": "src/control-plane/index.ts",
+    "webDiscoveryIsolation": "Separate worker/session described in docs/connection-service.md"
+  },
+  "rollback": {
+    "method": "Redeploy the source baseline 69ad6f8028eaf3a34b706012c72dc3f099a348e2 or remove the integration deployment and restore the previous immutable image.",
+    "dataHandling": "Preserve the control database backup; do not reuse expansion credentials after rollback.",
+    "sourceBaselineUntouched": true
+  },
+  "metadataWarnings": [
+    "W1 handoff implementationCommits omits the final audit-redaction commit; Git frozen HEAD and fork remote are authoritative.",
+    "W2 handoff records implementationCommit 13f18d7 in abbreviated form; Git frozen HEAD and fork remote are authoritative.",
+    "The terminal freeze output records the exact final integration commit after this evidence artifact is committed."
+  ]
+}

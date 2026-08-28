@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "status": "CONNECTION_EXPANSION_INTEGRATION_CANDIDATE_FROZEN_WITH_EXTERNAL_BLOCKERS",
+  "sourceBaselineSha": "69ad6f8028eaf3a34b706012c72dc3f099a348e2",
+  "w1InputSha": "3772c6eb9444ed832bd468aa16d3dc328dedbf54",
+  "w2InputSha": "8cdcc712ed8686673d3a613ebeafe5f0ce80a4aa",
+  "integrationBranch": "feat/connection-expansion-integration",
+  "integrationWorktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-expansion-integration",
+  "evidenceManifest": "docs/connection-expansion/integration-evidence-manifest.json",
+  "tierMatrix": "docs/connection-expansion/integration-evidence-manifest.json#/tierMatrix",
+  "defaultEnablement": "docs/connection-expansion/integration-evidence-manifest.json#/enablement",
+  "rollback": "docs/connection-expansion/integration-evidence-manifest.json#/rollback",
+  "finalSha": "5302d0d6d128bd14d04f859e5130da9ee6494ba5",
+  "finalShaMeaning": "Last verified code commit before this handoff artifact commit; terminal freeze output records the immutable branch tip.",
+  "conflictResolution": "docs/connection-expansion/integration-evidence-manifest.json#/conflictResolution",
+  "verification": "docs/connection-expansion/integration-evidence-manifest.json#/verification",
+  "externalBlockers": [
+    "SQL Server real-engine exit matrix unavailable.",
+    "Feishu, DingTalk, and WeCom enterprise credentials and user authorization unavailable.",
+    "AWS, Alibaba Cloud, and Volcengine real account/bucket/object lifecycle credentials unavailable."
+  ],
+  "scopeGuard": "Only six database classes, three office platforms, and three object-storage classes are incremental results; all other listed vertical providers remain outside this round."
+}
