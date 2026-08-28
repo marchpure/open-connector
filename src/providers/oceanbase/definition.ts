@@ -17,8 +17,8 @@ export const provider: ProviderDefinition = createDatabaseProviderDefinition({
       inputType: "text",
       required: true,
       secret: false,
-      placeholder: "mysql",
-      description: "OceanBase tenant compatibility mode. This runtime currently supports mysql.",
+      placeholder: "mysql or oracle",
+      description: "OceanBase tenant compatibility mode. The runtime validates the selected mode and its identity.",
     },
   ],
 });
