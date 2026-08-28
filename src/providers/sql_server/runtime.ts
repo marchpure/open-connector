@@ -295,7 +295,7 @@ class SqlServerBackend implements DatabaseBackend {
   private toResult(result: IResult<Record<string, unknown>>, maxRows: number, maxBytes: number): QueryResult {
     const columns = Object.values(result.recordset.columns ?? {}).map((column) => ({
       name: column.name,
-      dataType: null,
+      dataType: readSqlServerTypeName(column.type),
     }));
     return boundedQueryResult(result.recordset, columns, maxRows, maxBytes);
   }
@@ -308,6 +308,16 @@ class SqlServerBackend implements DatabaseBackend {
       );
     }
   }
+}
+
+function readSqlServerTypeName(value: unknown): string | null {
+  if (value && typeof value === "object" && "name" in value && typeof value.name === "string") {
+    return value.name;
+  }
+  if (typeof value === "function" && value.name) {
+    return value.name;
+  }
+  return null;
 }
 
 function stripFinalSemicolon(query: string): string {
