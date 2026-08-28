@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "status": "CONNECTION_INCREMENTAL_P1_FROZEN_WITH_EXTERNAL_BLOCKERS",
   "baseSha": "3bbd44624933300487a54ee3acba23190b66ee98",
-  "implementationSha": "11a24c3bc70c2d61abcd2d366d00a32556917cdf",
+  "implementationSha": "c7386b0e02dac55222c2d00119077dd0b07ad2a2",
   "branch": "feat/connection-expansion-p1-data-platforms",
   "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms",
   "scope": [
@@ -35,7 +35,7 @@
         "preview_table",
         "execute_read_query"
       ],
-      "evidence": "Contract, generated catalog, typecheck, shared database security tests, and Oracle adapter/driver tests.",
+      "evidence": "Contract, generated catalog, typecheck, shared database security tests, and Oracle adapter/driver tests. Oracle validation uses the OceanBase-supported V$VERSION identity query; Trino cancellation and bounded query cleanup are covered by runtime behavior.",
       "blocker": "No real OceanBase MySQL-mode or Oracle-mode service was available for the required end-to-end matrix."
     },
     "tidb_sql": {
@@ -59,8 +59,8 @@
       "tier": "beta",
       "boundary": "New provider using @alicloud/maxcompute20220104 for project, table, and column/partition-column metadata. AK/SK and optional STS token remain encrypted server-side.",
       "actions": ["validate_connection", "list_projects", "list_tables", "describe_table"],
-      "evidence": "Official SDK contract, generated catalog, typecheck, endpoint SSRF checks, and Control Plane regression tests.",
-      "blocker": "No Alibaba Cloud account was available. The official Node SDK exposes metadata/control APIs but no suitable bounded SQL result data-plane API, so preview/query are not claimed."
+      "evidence": "Official SDK contract, generated catalog, typecheck, endpoint SSRF checks, bounded credential validation, and Control Plane regression tests.",
+      "blocker": "No Alibaba Cloud account was available. The installed official Node SDK exposes metadata/control APIs but no supported SQL execution/result or Tunnel row-fetch API; preview/query remain intentionally absent and are not claimed."
     },
     "hologres": {
       "result": "BLOCKED",
@@ -172,7 +172,7 @@
     "npmAuditOmitDev": "0 vulnerabilities",
     "npmAudit": "0 vulnerabilities",
     "gitDiffCheck": "passed",
-    "realEngines": [
+      "realEngines": [
       "TiDB 8.5.3",
       "Apache Hive 4.0.1",
       "Trino 477",
