@@ -7,6 +7,8 @@ import {
   assertDatabaseHostAllowlisted,
   assertClickhouseReadOnlySql,
   boundedQueryResult,
+  databaseScanBudgetBytes,
+  databaseScanBudgetRows,
   DatabaseRuntimeError,
   pageResult,
   readLimits,
@@ -49,6 +51,8 @@ interface ClickhouseRequestInput {
   maxExecutionTime?: number;
   maxRows?: number;
   maxBytes?: number;
+  maxScanRows?: number;
+  maxScanBytes?: number;
 }
 
 interface NormalizedClickhouseTable {
@@ -250,6 +254,8 @@ async function executeReadQuery(input: Record<string, unknown>, context: Clickho
     maxExecutionTime: Math.ceil(limits.timeoutMs / 1000),
     maxRows: limits.maxRows + 1,
     maxBytes: limits.maxBytes,
+    maxScanRows: databaseScanBudgetRows,
+    maxScanBytes: databaseScanBudgetBytes,
     database: context.defaultDatabase,
     context,
     phase: "execute",
@@ -530,7 +536,17 @@ async function requestClickhouseJson(input: ClickhouseRequestInput): Promise<Cli
     url.searchParams.set(`param_${key}`, String(value));
   }
   for (const [key, value] of Object.entries(input.settings ?? {})) {
-    if (["readonly", "max_result_rows", "max_result_bytes", "result_overflow_mode"].includes(key)) {
+    if (
+      [
+        "readonly",
+        "max_result_rows",
+        "max_result_bytes",
+        "result_overflow_mode",
+        "max_rows_to_read",
+        "max_bytes_to_read",
+        "read_overflow_mode",
+      ].includes(key)
+    ) {
       continue;
     }
     url.searchParams.set(key, String(value));
@@ -539,6 +555,9 @@ async function requestClickhouseJson(input: ClickhouseRequestInput): Promise<Cli
   url.searchParams.set("max_result_rows", String(input.maxRows ?? clickhouseDefaultMaxRows));
   url.searchParams.set("max_result_bytes", String(input.maxBytes ?? clickhouseMaxBytes));
   url.searchParams.set("result_overflow_mode", "break");
+  url.searchParams.set("max_rows_to_read", String(input.maxScanRows ?? databaseScanBudgetRows));
+  url.searchParams.set("max_bytes_to_read", String(input.maxScanBytes ?? databaseScanBudgetBytes));
+  url.searchParams.set("read_overflow_mode", "throw");
   if (input.maxExecutionTime !== undefined) {
     url.searchParams.set("max_execution_time", String(input.maxExecutionTime));
   }
@@ -574,7 +593,7 @@ async function requestClickhouseJson(input: ClickhouseRequestInput): Promise<Cli
     if (isAbortLikeError(error) && timeout.didTimeout()) {
       throw new ProviderRequestError(504, "ClickHouse request timed out after 30 seconds");
     }
-    if (error instanceof ProviderRequestError) {
+    if (error instanceof DatabaseRuntimeError || error instanceof ProviderRequestError) {
       throw error;
     }
     throw new ProviderRequestError(
@@ -621,12 +640,14 @@ function parseClickhouseJson(text: string): ClickhouseJsonPayload {
   }
 }
 
-function createClickhouseError(
-  status: number,
-  responseText: string,
-  phase: "validate" | "execute",
-): ProviderRequestError {
+function createClickhouseError(status: number, responseText: string, phase: "validate" | "execute"): Error {
   const message = responseText.trim() || `ClickHouse request failed with ${status}`;
+  if (/timeout exceeded|time limit exceeded|maximum execution time/i.test(message)) {
+    return new DatabaseRuntimeError("database_timeout", "ClickHouse query timed out.");
+  }
+  if (/too_many_rows|max_rows_to_read|too_many_bytes|max_bytes_to_read|read overflow/i.test(message)) {
+    return new DatabaseRuntimeError("database_budget_exceeded", "ClickHouse scan budget exceeded.");
+  }
   if (phase === "validate" && [400, 401, 403].includes(status)) {
     return new ProviderRequestError(400, message);
   }

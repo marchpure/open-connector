@@ -8,6 +8,7 @@ import {
   assertReadOnlySql,
   boundedQueryResult,
   credentialPoolKey,
+  databaseScanBudgetBytes,
   DatabaseRuntimeError,
   normalizeDatabaseError,
   quoteIdentifier,
@@ -205,7 +206,7 @@ class SqlServerBackend implements DatabaseBackend {
     const selectedSchema = schema ?? "dbo";
     const query = `select * from ${quoteIdentifier(selectedSchema, "bracket")}.${quoteIdentifier(table, "bracket")}
       order by (select null) offset @p1 rows fetch next @p2 rows only`;
-    const result = await this.query(query, [page.offset, page.pageSize + 1]);
+    const result = await this.query(query, [page.offset, page.pageSize + 1], 30_000, true);
     return this.toResult(result, page.pageSize, 10 * 1024 * 1024);
   }
 
@@ -216,7 +217,11 @@ class SqlServerBackend implements DatabaseBackend {
   ): Promise<QueryResult> {
     assertReadOnlySql(query, "transactsql");
     const bounded = `select top (${limits.maxRows + 1}) * from (${stripFinalSemicolon(query)}) as openconnector_read`;
-    return this.toResult(await this.query(bounded, parameters, limits.timeoutMs), limits.maxRows, limits.maxBytes);
+    return this.toResult(
+      await this.query(bounded, parameters, limits.timeoutMs, true),
+      limits.maxRows,
+      limits.maxBytes,
+    );
   }
 
   async assertReadOnlyPrincipal(): Promise<void> {
@@ -258,6 +263,7 @@ class SqlServerBackend implements DatabaseBackend {
     text: string,
     parameters: DatabaseScalar[],
     timeoutMs = 30_000,
+    enforceScanBudget = false,
   ): Promise<IResult<Record<string, unknown>>> {
     const active = activeQueries.get(this.pool) ?? 0;
     if (active >= 12) {
@@ -270,7 +276,10 @@ class SqlServerBackend implements DatabaseBackend {
     const timer = setTimeout(abort, timeoutMs);
     this.signal?.addEventListener("abort", abort, { once: true });
     try {
-      return (await request.query(text)) as IResult<Record<string, unknown>>;
+      const boundedText = enforceScanBudget
+        ? `SET QUERY_GOVERNOR_COST_LIMIT ${Math.max(1, Math.floor(databaseScanBudgetBytes / 1024 / 1024))}; ${text}`
+        : text;
+      return (await request.query(boundedText)) as IResult<Record<string, unknown>>;
     } catch (error) {
       throw normalizeDatabaseError(error);
     } finally {

@@ -42,6 +42,8 @@ describe("database query safety", () => {
   it("applies ClickHouse-specific read syntax and dangerous table-function blocks", () => {
     expect(() => assertClickhouseReadOnlySql("SELECT * FROM events WHERE id = {p1:String}")).not.toThrow();
     expect(() => assertClickhouseReadOnlySql("SELECT * FROM url('https://example.com')")).toThrowError(/read-only/i);
+    expect(() => assertClickhouseReadOnlySql("SELECT sleep(5)")).toThrowError(/read-only/i);
+    expect(() => assertClickhouseReadOnlySql("SELECT sleepEachRow(5) FROM events")).toThrowError(/read-only/i);
     expect(() => assertClickhouseReadOnlySql("SELECT 1; DROP TABLE events")).toThrowError(/read-only/i);
   });
 
