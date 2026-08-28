@@ -21,6 +21,7 @@ const rawResultSchema = s.object(
     optional: [],
   },
 );
+const maxSheetReadCharacters = 2_000_000;
 const sheetSelectorProperties = {
   sheetId: sheetIdField,
   sheetName: sheetNameField,
@@ -255,7 +256,9 @@ export function createFeishuSheetsActions(service: string): readonly ActionDefin
         includeStyles: s.boolean("Whether to include cell styles."),
         renderFormulas: s.boolean("Whether values should be rendered as formulas."),
         skipHidden: s.boolean("Whether hidden rows and columns should be skipped."),
-        maxCharacters: s.positiveInteger("The maximum response character count."),
+        maxCharacters: s.positiveInteger("The maximum response character count.", {
+          maximum: maxSheetReadCharacters,
+        }),
       }),
       outputSchema: rawResultSchema,
     }),

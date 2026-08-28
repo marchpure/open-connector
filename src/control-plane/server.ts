@@ -5,6 +5,7 @@ import type { IProviderLoader, ProviderResourceCandidate } from "../providers/pr
 import type { ITransitFileService } from "../server/files/transit-file-store.ts";
 import type { StagedTransitFile } from "../server/files/transit-file-store.ts";
 import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
+import type { IRunLogStore, RunLog } from "../server/storage/runtime-store.ts";
 import type { EnablementEntry } from "./catalog.ts";
 import type { OracleConnectionConfig, OracleQueryDriver } from "./oracle-adapter.ts";
 import type { OracleDriverOptions } from "./oracle-driver.ts";
@@ -198,6 +199,13 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     const invocationId = context.req.header("x-connection-invocation-id");
     const audience = context.req.header("x-connection-audience");
     if (!leaseToken || !invocationId || !audience) {
+      await recordControlPlaneFailure(runtime.runs, {
+        service: connection.service,
+        actionId: `${connection.service}.discover_resources`,
+        connectionId,
+        invocationId: invocationId ?? undefined,
+        errorCode: "lease_required",
+      });
       return jsonError(context, 401, "lease_required", "A discovery lease and its invocation headers are required.");
     }
     try {
@@ -208,6 +216,13 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         audience,
       });
     } catch (error) {
+      await recordControlPlaneFailure(runtime.runs, {
+        service: connection.service,
+        actionId: `${connection.service}.discover_resources`,
+        connectionId,
+        invocationId,
+        errorCode: error instanceof LeaseError ? error.code : "invalid_lease",
+      });
       return leaseError(context, error);
     }
     const jobs = tenantJobs(options, principalOf(context));
@@ -250,9 +265,17 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
           })),
         });
       } catch (error) {
+        const code = error instanceof ConnectionError ? error.code : "discovery_failed";
         jobs.fail(job.id, {
-          code: error instanceof ConnectionError ? error.code : "discovery_failed",
+          code,
           message: error instanceof Error ? error.message : "Connection resource discovery failed.",
+        });
+        await recordControlPlaneFailure(runtime.runs, {
+          service: connection.service,
+          actionId: `${connection.service}.discover_resources`,
+          connectionId,
+          invocationId,
+          errorCode: code,
         });
       }
     }
@@ -380,11 +403,18 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     const runtime = tenantRuntime(options, principalOf(context));
     const invocationId = requiredString(body.invocationId);
     const audience = requiredString(body.audience);
+    const actionId = context.req.param("actionId");
     const leaseToken = context.req.header("x-connection-lease");
     if (!leaseToken) {
+      await recordControlPlaneFailure(runtime.runs, {
+        service: "connection-control",
+        actionId,
+        connectionId: optionalString(body.connectionId),
+        invocationId,
+        errorCode: "lease_required",
+      });
       return jsonError(context, 401, "lease_required", "X-Connection-Lease is required.");
     }
-    const actionId = context.req.param("actionId");
     const connectionIds = await Promise.all(
       (await runtime.records()).map((record) =>
         record.id === body.connectionId ? Promise.resolve(record) : Promise.resolve(undefined),
@@ -392,6 +422,13 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     );
     const selected = connectionIds.find(Boolean);
     if (!selected) {
+      await recordControlPlaneFailure(runtime.runs, {
+        service: "connection-control",
+        actionId,
+        connectionId: optionalString(body.connectionId),
+        invocationId,
+        errorCode: "connection_not_found",
+      });
       return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
     }
     try {
@@ -405,6 +442,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         actionId,
         input: body.input,
         caller: "http",
+        invocationId,
         connectionName: selected.connectionName,
         policy: {
           evaluate: (action: ActionDefinition) =>
@@ -438,6 +476,13 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         result?.result.ok ? 200 : 502,
       );
     } catch (error) {
+      await recordControlPlaneFailure(runtime.runs, {
+        service: selected.service,
+        actionId,
+        connectionId: selected.id,
+        invocationId,
+        errorCode: error instanceof LeaseError ? error.code : "invalid_lease",
+      });
       return leaseError(context, error);
     }
   });
@@ -872,4 +917,36 @@ function leaseError(context: Context, error: unknown) {
     return jsonError(context, status, error.code, error.message);
   }
   return jsonError(context, 400, "invalid_lease", error instanceof Error ? error.message : "Lease operation failed.");
+}
+
+async function recordControlPlaneFailure(
+  runs: IRunLogStore,
+  input: {
+    service: string;
+    actionId: string;
+    connectionId?: string;
+    invocationId?: string;
+    errorCode: string;
+  },
+): Promise<void> {
+  const now = new Date().toISOString();
+  const run: RunLog = {
+    id: crypto.randomUUID(),
+    service: input.service,
+    actionId: input.actionId,
+    caller: "http",
+    invocationId: input.invocationId,
+    startedAt: now,
+    completedAt: now,
+    durationMs: 0,
+    ok: false,
+    connectionId: input.connectionId,
+    errorCode: input.errorCode,
+    errorMessage: "Connection control request failed.",
+  };
+  try {
+    await runs.add(run);
+  } catch {
+    // Authorization failure must not be hidden by an audit-store outage.
+  }
 }

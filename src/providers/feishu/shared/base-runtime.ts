@@ -12,6 +12,8 @@ interface PaginationInput {
 }
 
 const defaultPageLimit = 100;
+const maxReadItems = 2_000;
+const maxReadPages = 20;
 
 export function createFeishuBaseActionHandlers(
   request: FeishuJsonRequest,
@@ -350,7 +352,7 @@ async function getTable(request: FeishuJsonRequest, input: Record<string, unknow
 async function listEveryResource(request: FeishuJsonRequest, path: string, itemKeys: readonly string[]) {
   const items: unknown[] = [];
   let offset = 0;
-  while (true) {
+  for (let page = 0; page < maxReadPages; page += 1) {
     const data = requireObject(
       await request({
         method: "GET",
@@ -361,6 +363,9 @@ async function listEveryResource(request: FeishuJsonRequest, path: string, itemK
     );
     const batch = extractItems(data, itemKeys);
     items.push(...batch);
+    if (items.length > maxReadItems) {
+      throw new ProviderRequestError(413, "Base resource read exceeds the bounded item limit");
+    }
     const total = optionalNumber(data.total);
     const reportedHasMore = optionalBoolean(data.has_more) ?? optionalBoolean(data.hasMore);
     const complete =
@@ -372,6 +377,7 @@ async function listEveryResource(request: FeishuJsonRequest, path: string, itemK
     }
     offset += batch.length;
   }
+  throw new ProviderRequestError(413, "Base resource read exceeds the bounded page limit");
 }
 
 function findTableId(value: Record<string, unknown>): string | undefined {

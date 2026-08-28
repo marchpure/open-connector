@@ -1,6 +1,6 @@
 {
   "status": "CONNECTION_W2_FROZEN_WITH_EXTERNAL_BLOCKERS",
-  "recordedAt": "2026-08-28T02:39:32Z",
+  "recordedAt": "2026-08-28T03:06:29Z",
   "baseline": {
     "sourceCommit": "69ad6f8028eaf3a34b706012c72dc3f099a348e2",
     "branch": "feat/connection-expansion-w2-office-storage",
@@ -235,7 +235,9 @@
       "npm test -- --run (165 files passed, 1 skipped; 1482 tests passed, 4 skipped)",
       "npm run build (typecheck passed)",
       "npm audit --audit-level=high (0 vulnerabilities)",
-      "npm ls --all --json > artifacts/npm-sbom.json (artifacts/npm-sbom.json)"
+      "npm ls --all --json > artifacts/npm-sbom.json (artifacts/npm-sbom.json)",
+      "git diff --check",
+      "Control-plane lease rejection and discovery failure audit records are redacted and retain invocationId."
     ],
     "notRunOrBlocked": [
       "Real Feishu connection create-authorize-validate-discover-lease-read-audit-revoke-delete",

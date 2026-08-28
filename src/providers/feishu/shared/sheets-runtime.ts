@@ -28,7 +28,8 @@ interface TypedTable {
   readonly allowOverwrite?: boolean;
 }
 
-const unboundedReadLimit = 1_000_000_000;
+const maxSheetReadCells = 100_000;
+const maxSheetReadRows = 100_000;
 const excelEpochMilliseconds = Date.UTC(1899, 11, 30);
 const millisecondsPerDay = 86_400_000;
 
@@ -107,7 +108,7 @@ export function createFeishuSheetsActionHandlers(
             include_styles: input.includeStyles,
             value_render_option: input.renderFormulas ? "formula" : undefined,
             skip_hidden: input.skipHidden,
-            cell_limit: unboundedReadLimit,
+            cell_limit: maxSheetReadCells,
             max_chars: input.maxCharacters,
           }),
         ),
@@ -330,7 +331,7 @@ async function getTypedTable(
       withReference(selected, {
         excel_id: token,
         range: `A1:${lastColumn}${lastRow}`,
-        max_rows: unboundedReadLimit,
+        max_rows: maxSheetReadRows,
       }),
     );
     range = optionalString(currentRegion.current_region) ?? optionalString(currentRegion.actual_range);
@@ -357,7 +358,7 @@ async function getTypedTable(
       ranges: [range],
       include_styles: true,
       value_render_option: "raw_value",
-      cell_limit: unboundedReadLimit,
+      cell_limit: maxSheetReadCells,
     }),
   );
   return {

@@ -401,6 +401,14 @@ describe("connection control API", () => {
     expect(await discovery.json()).toMatchObject({
       error: { code: "lease_required" },
     });
+    expect(
+      database.prepare("select invocation_id, ok, error_code, detail_json from control_execution_audit").get(),
+    ).toMatchObject({
+      invocation_id: expect.any(String),
+      ok: 0,
+      error_code: "lease_required",
+      detail_json: expect.not.stringContaining("secret"),
+    });
 
     const discoveryLeaseResponse = await app.request(`/v1/connections/${connectionId}/lease`, {
       method: "POST",

@@ -13,6 +13,7 @@ export interface RunLog {
   service: string;
   actionId: string;
   caller: RunLogCaller;
+  invocationId?: string;
   startedAt: string;
   completedAt: string;
   durationMs: number;

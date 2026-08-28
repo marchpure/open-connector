@@ -17,7 +17,7 @@ import {
   TenantConnectionStore as ConnectionStore,
   TenantOAuthClientConfigStore,
   TenantOAuthStateStore,
-  TenantRunLogStore as RunStore,
+  TenantRunLogStore,
 } from "./tenant-store.ts";
 
 export interface ControlPlaneDependencies {
@@ -34,6 +34,7 @@ export interface TenantRuntime {
   connections: ConnectionStore;
   connectionService: ConnectionService;
   actions: ActionRunner;
+  runs: TenantRunLogStore;
   leases: ConnectionLeaseService;
   records: () => Promise<ConnectionRecord[]>;
   oauthFlow: OAuthFlowService;
@@ -53,11 +54,12 @@ export function createTenantRuntime(deps: ControlPlaneDependencies, principal: T
     providerLoader: deps.providerLoader,
     store: connections,
   });
+  const runs = new TenantRunLogStore(deps.controlDatabase, principal);
   const actions = new ActionRunner({
     catalog: deps.catalog,
     providerLoader: deps.providerLoader,
     connections: connectionService,
-    runs: new RunStore(deps.controlDatabase, principal),
+    runs,
     transitFiles: deps.transitFiles,
   });
   return {
@@ -72,6 +74,7 @@ export function createTenantRuntime(deps: ControlPlaneDependencies, principal: T
     }),
     connectionService,
     actions,
+    runs,
     leases: new ConnectionLeaseService(deps.controlDatabase),
     records: () => connections.listRecords(),
     oauthClientConfigs,

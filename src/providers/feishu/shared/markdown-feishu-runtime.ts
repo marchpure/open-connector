@@ -2,6 +2,7 @@ import type { FeishuActionRuntimeContext, FeishuJsonRequest } from "./client.ts"
 import type { FeishuMarkdownRuntimeContext } from "./markdown-runtime.ts";
 
 import { optionalRecord, optionalString } from "../../../core/cast.ts";
+import { readBoundedResponseBytes } from "../../../core/request.ts";
 import { ProviderRequestError } from "../../provider-runtime.ts";
 import { requestFeishuMultipart, withFeishuRawResponse } from "./client.ts";
 
@@ -20,7 +21,12 @@ export function createFeishuMarkdownRuntimeContext(input: {
           query: { version },
         },
         async (response) => {
-          const bytes = new Uint8Array(await response.arrayBuffer());
+          const bytes = await readBoundedResponseBytes(response, {
+            maxBytes: input.context.transitFiles?.maxBytes ?? 2 * 1024 * 1024,
+            fieldName: "Feishu Markdown download",
+            signal: input.context.signal,
+            createError: (message) => new ProviderRequestError(413, message),
+          });
           let markdown: string;
           try {
             markdown = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
