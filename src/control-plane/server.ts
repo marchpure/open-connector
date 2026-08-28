@@ -25,6 +25,10 @@ import { ControlledMcpAdapter, TenantMcpDefinitionStore } from "./mcp-adapter.ts
 import { OracleDatabaseAdapter } from "./oracle-adapter.ts";
 import { redactSecrets, safeConnectionProfile } from "./redaction.ts";
 import { RestIdempotencyStore, RestOpenApiAdapter } from "./rest-adapter.ts";
+import {
+  TenantAdapterResourceStore,
+  type AdapterResourceKind,
+} from "./adapter-resource-store.ts";
 import { createTenantRuntime } from "./service.ts";
 import { TenantWebDiscoveryStore } from "./web-discovery.ts";
 
@@ -140,6 +144,9 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
               command: { type: "string", title: "Local command" },
               args: { type: "array", items: { type: "string" }, title: "Arguments" },
               allowedTools: { type: "array", items: { type: "string" }, title: "Allowed tools" },
+              allowLocalhostDev: { type: "boolean", title: "Allow localhost development" },
+              allowedLocalhostPorts: { type: "array", items: { type: "integer" }, title: "Allowed localhost ports" },
+              allowPrivateNetwork: { type: "boolean", title: "Allow private network in dev" },
             },
           },
           authSchema: { type: "object", properties: {} },
@@ -163,6 +170,50 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       ],
     }),
   );
+  app.get("/v1/adapter-resources", (context) => {
+    const resources = new TenantAdapterResourceStore(
+      options.controlDatabase,
+      principalOf(context),
+      options.secretCodec,
+    );
+    return context.json({ items: resources.list() });
+  });
+  app.post("/v1/adapter-resources", async (context) => {
+    try {
+      const body = await readJsonBody(context);
+      const kind = requiredString(body.kind) as AdapterResourceKind;
+      if (!["oracle_database", "rest_openapi", "mcp", "files"].includes(kind)) {
+        return jsonError(context, 400, "invalid_resource_kind", "Unsupported adapter resource kind.");
+      }
+      const resources = new TenantAdapterResourceStore(
+        options.controlDatabase,
+        principalOf(context),
+        options.secretCodec,
+      );
+      const resource = await resources.save({
+        kind,
+        displayName: requiredString(body.displayName),
+        visibility: optionalVisibility(body.visibility) ?? "personal",
+        sourceId: requiredString(body.sourceId),
+        metadata: recordOf(body.metadata),
+        definition: recordOf(body.definition),
+      });
+      return context.json({ resource }, 201);
+    } catch (error) {
+      return jsonError(context, 400, "adapter_resource_error", error instanceof Error ? error.message : "Adapter resource could not be saved.");
+    }
+  });
+  app.get("/v1/adapter-resources/:resourceId", async (context) => {
+    const resources = new TenantAdapterResourceStore(
+      options.controlDatabase,
+      principalOf(context),
+      options.secretCodec,
+    );
+    const resource = await resources.get(context.req.param("resourceId"));
+    return resource
+      ? context.json({ resource: { ...resource, definition: undefined } })
+      : jsonError(context, 404, "adapter_resource_not_found", "Adapter resource was not found.");
+  });
   app.get("/v1/files", async (context) => {
     if (!options.fileStore) return context.json({ items: [] });
     const files = tenantFileAdapter(options, principalOf(context)).list();
@@ -1005,6 +1056,11 @@ function parseMcpDefinition(value: unknown) {
       ? definition.allowedHeaderNames.map(String)
       : undefined,
     allowedTools: Array.isArray(definition.allowedTools) ? definition.allowedTools.map(String) : undefined,
+    allowLocalhostDev: definition.allowLocalhostDev === true,
+    allowedLocalhostPorts: Array.isArray(definition.allowedLocalhostPorts)
+      ? definition.allowedLocalhostPorts.map(Number).filter((port) => Number.isInteger(port) && port > 0 && port < 65536)
+      : undefined,
+    allowPrivateNetwork: definition.allowPrivateNetwork === true,
     timeoutMs: definition.timeoutMs === undefined ? undefined : Number(definition.timeoutMs),
   };
 }

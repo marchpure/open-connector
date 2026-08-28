@@ -21,6 +21,8 @@ export interface McpDefinition {
   allowedHeaderNames?: string[];
   allowedTools?: string[];
   allowPrivateNetwork?: boolean;
+  allowLocalhostDev?: boolean;
+  allowedLocalhostPorts?: number[];
   timeoutMs?: number;
 }
 
@@ -156,7 +158,11 @@ export class ControlledMcpAdapter {
         endpoint,
         transport: this.definition.transport,
         headers: this.definition.headers,
-        fetcher: createGuardedFetch({ allowPrivateNetwork: this.definition.allowPrivateNetwork }),
+        fetcher: createGuardedFetch({
+          allowPrivateNetwork: this.definition.allowPrivateNetwork,
+          allowLocalhostDev: this.definition.allowLocalhostDev,
+          allowedLocalhostPorts: this.definition.allowedLocalhostPorts,
+        }),
       },
       run,
     );
@@ -199,6 +205,19 @@ function validateDefinition(definition: McpDefinition): void {
   } else {
     if (!definition.endpoint || !/^https?:\/\//.test(definition.endpoint)) {
       throw new McpAdapterError("invalid_definition", "MCP endpoint must be HTTP(S).");
+    }
+  }
+  if (definition.transport !== "stdio" && definition.endpoint) {
+    const endpoint = new URL(definition.endpoint);
+    const local = ["localhost", "127.0.0.1", "::1"].includes(endpoint.hostname.toLowerCase());
+    if (local) {
+      if (!definition.allowLocalhostDev) {
+        throw new McpAdapterError("invalid_definition", "Local MCP endpoints require explicit dev allowlist confirmation.");
+      }
+      const port = Number(endpoint.port || (endpoint.protocol === "https:" ? 443 : 80));
+      if (!definition.allowedLocalhostPorts?.includes(port)) {
+        throw new McpAdapterError("invalid_definition", "Local MCP endpoint port is not in the explicit dev allowlist.");
+      }
     }
   }
   for (const name of Object.keys(definition.headers ?? {})) {
