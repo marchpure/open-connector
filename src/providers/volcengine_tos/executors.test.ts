@@ -25,11 +25,32 @@ const credential: Extract<ResolvedCredential, { authType: "custom_credential" }>
 
 beforeEach(() => setDefaultGuardedFetchDnsLookup(null));
 afterEach(() => {
+  vi.useRealTimers();
   setDefaultGuardedFetchDnsLookup(undefined);
   vi.unstubAllGlobals();
 });
 
 describe("Volcengine TOS", () => {
+  it("matches the deterministic official-style Signature V4 request vector", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T00:00:00.000Z"));
+    const requests: Request[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(input instanceof Request ? input : new Request(input, init));
+      return new Response(null, { status: 200 });
+    });
+
+    const result = await run("volcengine_tos.validate_connection", {});
+
+    expect(result).toMatchObject({ ok: true });
+    expect(requests[0]?.headers.get("authorization")).toBe(
+      "TOS4-HMAC-SHA256 Credential=AKLTEXAMPLE/20240101/cn-beijing/tos/request, " +
+        "SignedHeaders=host;user-agent;x-tos-content-sha256;x-tos-date, " +
+        "Signature=5c48694940064c84aa89191502176484c92104af8b115ca4425ac4054010c383",
+    );
+    vi.useRealTimers();
+  });
+
   it("rejects a bucket outside the connection allowlist before egress", async () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
@@ -52,6 +73,24 @@ describe("Volcengine TOS", () => {
     expect(result).toMatchObject({
       ok: false,
       error: { code: "authorization_failed", message: "objectKey is outside the TOS connection allowlist" },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed bucket and key values before egress", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+
+    const invalidBucket = await run("volcengine_tos.list_objects", { bucket: "bucket.example#" });
+    const invalidKey = await run("volcengine_tos.head_object", { objectKey: "knowledge/\u0000secret" });
+
+    expect(invalidBucket).toMatchObject({
+      ok: false,
+      error: { code: "invalid_input", message: "bucket must be a valid TOS bucket name" },
+    });
+    expect(invalidKey).toMatchObject({
+      ok: false,
+      error: { code: "invalid_input", message: "objectKey contains an unsafe control character" },
     });
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -117,7 +156,11 @@ describe("Volcengine TOS", () => {
 });
 
 async function run(
-  action: "volcengine_tos.list_objects" | "volcengine_tos.head_object" | "volcengine_tos.download_object",
+  action:
+    | "volcengine_tos.validate_connection"
+    | "volcengine_tos.list_objects"
+    | "volcengine_tos.head_object"
+    | "volcengine_tos.download_object",
   input: Record<string, unknown>,
   transitFiles?: TransitFileStore,
 ) {

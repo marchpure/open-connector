@@ -42,6 +42,16 @@ afterEach(() => {
 });
 
 describe("Alibaba Cloud OSS download_object", () => {
+  it("sends an ETag precondition on object downloads", async () => {
+    const requests = stubResponses([new Response("ok")]);
+    const { store } = createTransitFileStore(1024);
+
+    const result = await executeDownload({ bucket: "documents", objectKey: "report.txt", ifMatch: '"etag-1"' }, store);
+
+    expect(result).toMatchObject({ ok: true });
+    expect(requests[0]?.headers["if-match"]).toBe('"etag-1"');
+  });
+
   it("downloads an object byte-for-byte into transit storage", async () => {
     const content = new Uint8Array([79, 83, 83, 0, 255]);
     const requests = stubResponses([

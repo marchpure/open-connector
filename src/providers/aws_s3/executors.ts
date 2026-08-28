@@ -10,7 +10,7 @@ import type { ProviderActionHandlers } from "../provider-runtime.ts";
 
 import { createHash, createHmac } from "node:crypto";
 import { compactObject, optionalRecord, optionalString, requiredRawString } from "../../core/cast.ts";
-import { assertPublicHttpUrl, readBoundedResponseBytes } from "../../core/request.ts";
+import { assertPublicHttpUrl, assertSafeObjectResponse, readBoundedResponseBytes } from "../../core/request.ts";
 import {
   createProviderProxyUrl,
   createProviderTimeout,
@@ -359,6 +359,7 @@ async function awsHeadObject(input: Record<string, unknown>, context: AwsActionC
     query: compactObject({
       versionId: optionalString(input.versionId),
     }),
+    headers: { "if-match": optionalString(input.ifMatch) },
     signal: context.signal,
   });
   const headers = normalizeHeaderRecord(response.headers);
@@ -400,15 +401,21 @@ async function awsDownloadObject(input: Record<string, unknown>, context: AwsAct
       query: compactObject({
         versionId: optionalString(input.versionId),
       }),
+      headers: { "if-match": optionalString(input.ifMatch) },
       signal: context.signal,
     });
 
     const name = optionalString(input.fileName) ?? defaultObjectFileName(objectKey);
     const mimeType = optionalString(response.headers.get("content-type")) ?? "application/octet-stream";
+    assertSafeObjectResponse(response, {
+      fieldName: "AWS S3 download",
+      createError: (message) => new ProviderRequestError(415, message),
+    });
     const bytes = await readBoundedResponseBytes(response, {
       maxBytes: context.transitFiles.maxBytes,
       fieldName: "AWS S3 download",
       createError: (message) => new ProviderRequestError(413, message),
+      signal: context.signal,
     });
     const file = await context.transitFiles.create(new File([Uint8Array.from(bytes)], name, { type: mimeType }));
 

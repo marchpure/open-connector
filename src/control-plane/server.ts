@@ -331,10 +331,19 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     if (!owned) {
       return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
     }
+    const requestedActions = requiredStringArray(body.allowedActions);
+    if (requestedActions.some(isOwnerControlledStorageAction) && !runtime.connections.ownerRecord(connectionId)) {
+      return jsonError(
+        context,
+        403,
+        "connection_forbidden",
+        "Storage write, delete, and presign actions require the connection owner.",
+      );
+    }
     try {
       const issued = leases.issue(principalOf(context), {
         connectionIds: [connectionId],
-        allowedActions: requiredStringArray(body.allowedActions),
+        allowedActions: requestedActions,
         invocationId: requiredString(body.invocationId),
         audience: requiredString(body.audience),
         ttlSeconds: body.ttlSeconds === undefined ? undefined : Number(body.ttlSeconds),
@@ -737,6 +746,10 @@ function requiredString(value: unknown): string {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function isOwnerControlledStorageAction(actionId: string): boolean {
+  return /^(?:aws_s3|aliyun_oss)\.(?:put_object|delete_object|generate_presigned_url)$/u.test(actionId);
 }
 
 function optionalVisibility(value: unknown): "personal" | "team" | undefined {

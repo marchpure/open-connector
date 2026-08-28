@@ -404,6 +404,57 @@ describe("connection control API", () => {
     database.close();
   });
 
+  it("does not let a shared-connection teammate lease storage mutation or presign capabilities", async () => {
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([provider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          customCredential: async () => ({ profile: { accountId: "validated" } }),
+        }),
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const ownerToken = createPrincipalToken(principal, "auth-secret");
+    const teammateToken = createPrincipalToken({ ...principal, subject: "user-b", ownerId: "user-b" }, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "secret" } }),
+    });
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+    await app.request(`/v1/connections/${connectionId}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ visibility: "team" }),
+    });
+
+    const lease = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${teammateToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["aws_s3.put_object", "aws_s3.generate_presigned_url"],
+        invocationId: "inv-owner-gate",
+        audience: "knowledge-runtime",
+      }),
+    });
+
+    expect(lease.status).toBe(403);
+    expect(await lease.json()).toMatchObject({
+      error: {
+        code: "connection_forbidden",
+        message: "Storage write, delete, and presign actions require the connection owner.",
+      },
+    });
+    database.close();
+  });
+
   it("persists failed validation and marks the connection error", async () => {
     const database = new DatabaseSync(":memory:");
     const validateCredential = vi

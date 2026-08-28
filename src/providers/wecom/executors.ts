@@ -74,22 +74,12 @@ export const credentialValidators: CredentialValidators = {
 };
 
 export async function discoverResources(
-  context: ExecutionContext,
-  fetcher: typeof fetch,
+  _context: ExecutionContext,
+  _fetcher: typeof fetch,
 ): Promise<Array<{ sourceType: "wecom"; resourceId: string; title?: string; schema?: Record<string, unknown> }>> {
-  const credential = await context.getCredential(service);
-  if (credential?.authType !== "custom_credential")
-    throw new ProviderRequestError(401, "Configure wecom credentials first.");
-  const payload = await api({ values: credential.values, fetcher, signal: context.signal }, "/cgi-bin/department/list");
-  const departments = Array.isArray(payload.department) ? payload.department : [];
-  return departments.flatMap((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    const record = item as Record<string, unknown>;
-    const resourceId = optionalString(record.id);
-    return resourceId
-      ? [{ sourceType: "wecom" as const, resourceId, title: optionalString(record.name), schema: record }]
-      : [];
-  });
+  // Departments are directory containers, not knowledge resources. Keep
+  // discovery empty until the provider has a document/knowledge API to query.
+  return [];
 }
 
 async function getToken(context: WeComContext): Promise<string> {

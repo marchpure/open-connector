@@ -52,20 +52,13 @@ export const dingtalkActionHandlers: ProviderActionHandlers<"dingtalk", DingTalk
 export const executors: ProviderExecutors = defineOAuthProviderExecutors(service, dingtalkActionHandlers);
 
 export async function discoverResources(
-  context: ExecutionContext,
-  fetcher: typeof fetch,
+  _context: ExecutionContext,
+  _fetcher: typeof fetch,
 ): Promise<Array<{ sourceType: "dingtalk"; resourceId: string; title?: string; schema?: Record<string, unknown> }>> {
-  const credential = await context.getCredential(service);
-  if (credential?.authType !== "oauth2") throw new ProviderRequestError(401, "Configure dingtalk OAuth first.");
-  const payload = optionalRecord(
-    await request(
-      { accessToken: credential.accessToken, tokenType: credential.tokenType, fetcher, signal: context.signal },
-      "/v1.0/contact/users/me",
-    ),
-  );
-  const resourceId = optionalString(payload?.userId) ?? optionalString(payload?.unionId);
-  if (!resourceId) return [];
-  return [{ sourceType: "dingtalk", resourceId, title: optionalString(payload?.nick), schema: payload }];
+  // The current DingTalk action surface is identity and directory-only. A
+  // user or department is not a knowledge resource, so discovery stays empty
+  // until a document/knowledge API is added with an upstream visibility check.
+  return [];
 }
 
 export const credentialValidators: CredentialValidators = {

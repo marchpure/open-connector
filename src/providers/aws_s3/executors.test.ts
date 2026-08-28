@@ -8,6 +8,7 @@ interface CapturedRequest {
   url: URL;
   authorization: string | null;
   amzContentSha256: string | null;
+  headers: Headers;
 }
 
 const credential: Extract<ResolvedCredential, { authType: "custom_credential" }> = {
@@ -164,6 +165,22 @@ describe("AWS S3 download_object", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("sends an ETag precondition and rejects active content before storage", async () => {
+    const requests = stubResponses([
+      new Response("<script>alert(1)</script>", { headers: { "content-type": "text/html" } }),
+    ]);
+    const { store, create } = createTransitFileStore(1024);
+
+    const result = await executeDownload({ bucket: "documents", objectKey: "report.html", ifMatch: '"etag-1"' }, store);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "invalid_input", message: "AWS S3 download has a disallowed content type" },
+    });
+    expect(requests[0]?.headers.get("if-match")).toBe('"etag-1"');
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("returns a clear error when transit file storage is unavailable", async () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
@@ -211,6 +228,7 @@ function stubResponses(responses: Response[]): CapturedRequest[] {
       url: new URL(request.url),
       authorization: request.headers.get("authorization"),
       amzContentSha256: request.headers.get("x-amz-content-sha256"),
+      headers: request.headers,
     });
     const response = responses.shift();
     if (!response) {

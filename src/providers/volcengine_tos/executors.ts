@@ -10,7 +10,7 @@ import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import { createHash, createHmac } from "node:crypto";
 import { compactObject, optionalInteger, optionalString } from "../../core/cast.ts";
 import { assertGuardedEgressUrl } from "../../core/guarded-fetch.ts";
-import { assertPublicHttpUrl, readBoundedResponseBytes } from "../../core/request.ts";
+import { assertPublicHttpUrl, assertSafeObjectResponse, readBoundedResponseBytes } from "../../core/request.ts";
 import { defineProviderExecutors, ProviderRequestError, providerUserAgent } from "../provider-runtime.ts";
 
 const service = "volcengine_tos";
@@ -91,6 +91,7 @@ interface TosConfig {
 function readConfig(values: Record<string, string>): TosConfig {
   const endpoint = normalizeEndpoint(requireField(values.endpoint, "endpoint"));
   const bucket = requireField(values.bucket, "bucket");
+  assertValidBucketName(bucket);
   const prefix = optionalString(values.prefix) ?? "";
   return {
     accessKeyId: requireField(values.accessKeyId, "accessKeyId"),
@@ -184,10 +185,15 @@ async function downloadObject(input: Record<string, unknown>, context: TosContex
   if (!response.ok) throw await tosError(response, "download_object");
   const name = optionalString(input.fileName) ?? key.split("/").findLast(Boolean) ?? "tos-object";
   const mimeType = response.headers.get("content-type")?.split(";", 1)[0]?.trim() || "application/octet-stream";
+  assertSafeObjectResponse(response, {
+    fieldName: "Volcengine TOS download",
+    createError: (message) => new ProviderRequestError(415, message),
+  });
   const bytes = await readBoundedResponseBytes(response, {
     maxBytes: context.transitFiles.maxBytes,
     fieldName: "Volcengine TOS download",
     createError: (message) => new ProviderRequestError(413, message),
+    signal: context.signal,
   });
   const file = await context.transitFiles.create(new File([Uint8Array.from(bytes)], name, { type: mimeType }));
   return {
@@ -327,8 +333,15 @@ function normalizeMetadata(bucket: string, key: string, headers: Headers): Recor
 
 function assertBucket(value: unknown, config: TosConfig): string {
   const bucket = optionalString(value) ?? config.bucket;
+  assertValidBucketName(bucket);
   if (bucket !== config.bucket) throw new ProviderRequestError(403, "bucket is outside the TOS connection allowlist");
   return bucket;
+}
+
+function assertValidBucketName(bucket: string): void {
+  if (!/^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$/u.test(bucket) || bucket.includes("..")) {
+    throw new ProviderRequestError(400, "bucket must be a valid TOS bucket name");
+  }
 }
 
 function assertPrefix(value: string, allowed: string): string {
@@ -340,6 +353,14 @@ function assertPrefix(value: string, allowed: string): string {
 function assertObjectKey(value: unknown, allowedPrefix: string): string {
   const key = optionalString(value);
   if (!key) throw new ProviderRequestError(400, "objectKey is required");
+  if (
+    [...key].some((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return code <= 0x1f || code === 0x7f;
+    })
+  ) {
+    throw new ProviderRequestError(400, "objectKey contains an unsafe control character");
+  }
   if (key.split("/").some((part) => part === "." || part === ".."))
     throw new ProviderRequestError(400, "objectKey must not contain dot segments");
   if (allowedPrefix && !key.startsWith(allowedPrefix))
