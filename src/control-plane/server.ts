@@ -457,7 +457,6 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         invocationId,
         input: body.input,
         caller: "http",
-        invocationId,
         connectionName: selected.connectionName,
         policy: {
           evaluate: (action: ActionDefinition) =>
