@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "status": "CONNECTION_INCREMENTAL_P1_FROZEN_WITH_EXTERNAL_BLOCKERS",
   "baseSha": "3bbd44624933300487a54ee3acba23190b66ee98",
-  "implementationSha": "ea9a6110f195b9e71787410eb3549e745267d781",
+  "implementationSha": "11a24c3bc70c2d61abcd2d366d00a32556917cdf",
   "branch": "feat/connection-expansion-p1-data-platforms",
   "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms",
   "scope": [
