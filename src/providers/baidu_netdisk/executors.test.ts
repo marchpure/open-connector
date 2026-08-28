@@ -198,6 +198,37 @@ describe("Baidu Netdisk download_file", () => {
     });
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("does not expose an arbitrary provider body from a failed download", async () => {
+    stubResponses([
+      Response.json({
+        errno: 0,
+        list: [
+          {
+            fs_id: 123,
+            filename: "secret.bin",
+            size: 1,
+            isdir: 0,
+            dlink: "https://d.pcs.baidu.com/file/secret",
+          },
+        ],
+      }),
+      new Response("access_token=secret-provider-value", { status: 403 }),
+    ]);
+    const { store } = createTransitFileStore(1024);
+
+    const result = await executeDownload("123", store);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "authorization_failed",
+        message: "baidu_netdisk authorization failed",
+        details: { status: 403 },
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("secret-provider-value");
+  });
 });
 
 function stubResponses(responses: Response[]): CapturedRequest[] {

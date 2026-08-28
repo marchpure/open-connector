@@ -85,7 +85,12 @@ export function createNativeObjectStorageRuntime(profile: NativeStorageProfile):
             "max-keys": maxKeys,
           }),
         });
-        const text = await boundedText(response, `${profile.displayName} object listing`, 4 * 1024 * 1024);
+        const text = await boundedText(
+          response,
+          `${profile.displayName} object listing`,
+          4 * 1024 * 1024,
+          context.signal,
+        );
         return (profile.parseList ?? parseS3List)(text, bucket, context.values.region);
       },
       async head_object(input, context) {
@@ -115,10 +120,15 @@ export function createNativeObjectStorageRuntime(profile: NativeStorageProfile):
           query: compactObject({ versionId: optionalString(input.versionId) }),
           headers: compactObject({ "if-match": optionalString(input.ifMatch) }),
         });
-        assertSafeObjectResponse(response, {
-          fieldName: `${profile.displayName} download`,
-          createError: (message) => new ProviderRequestError(415, message),
-        });
+        try {
+          assertSafeObjectResponse(response, {
+            fieldName: `${profile.displayName} download`,
+            createError: (message) => new ProviderRequestError(415, message),
+          });
+        } catch (error) {
+          await response.body?.cancel().catch(() => undefined);
+          throw error;
+        }
         const bytes = await readBoundedResponseBytes(response, {
           maxBytes: context.transitFiles.maxBytes,
           fieldName: `${profile.displayName} download`,
@@ -276,7 +286,9 @@ async function nativeRequest(
   profile.sign(request, context.values);
   const response = await context.fetcher(request);
   if (!response.ok) {
-    const body = await boundedText(response, `${profile.displayName} error`, 1024 * 1024).catch(() => "");
+    const body = await boundedText(response, `${profile.displayName} error`, 1024 * 1024, context.signal).catch(
+      () => "",
+    );
     throw profile.mapError?.(response.status, body) ?? defaultStorageError(profile, response.status, body);
   }
   return response;
@@ -483,17 +495,23 @@ function integerHeader(headers: Headers, name: string): number | null {
   return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
-async function boundedText(response: Response, fieldName: string, maxBytes: number): Promise<string> {
+async function boundedText(
+  response: Response,
+  fieldName: string,
+  maxBytes: number,
+  signal?: AbortSignal,
+): Promise<string> {
   const bytes = await readBoundedResponseBytes(response, {
     maxBytes,
     fieldName,
     createError: (message) => new ProviderRequestError(413, message),
+    signal,
   });
   return new TextDecoder().decode(bytes);
 }
 
 function defaultStorageError(profile: NativeStorageProfile, status: number, body: string): ProviderRequestError {
-  const code =
+  const rawCode =
     body.match(/<(?:Code|code)>([^<]+)</u)?.[1] ??
     optionalString(
       (() => {
@@ -504,6 +522,7 @@ function defaultStorageError(profile: NativeStorageProfile, status: number, body
         }
       })(),
     );
+  const code = rawCode && /^[A-Za-z0-9_.-]{1,128}$/u.test(rawCode) ? rawCode : undefined;
   if (status === 401 || status === 403) {
     return new ProviderRequestError(status, `${profile.displayName} authorization failed${code ? `: ${code}` : ""}`);
   }

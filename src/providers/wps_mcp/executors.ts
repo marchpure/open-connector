@@ -18,6 +18,7 @@ import { wpsMcpActions } from "./actions.ts";
 
 export const wpsMcpEndpoint = "https://mcp-center.wps.cn/skill_hub/mcp";
 const requestTimeoutMs = 55_000;
+const requiredReadTools = ["search_files", "list_my_files", "list_files", "get_file_info", "read_file"];
 
 const handlers: ProviderActionHandlers<
   "wps_mcp",
@@ -47,12 +48,31 @@ export const credentialValidators: CredentialValidators = {
   async apiKey(input, { fetcher, signal }) {
     const tools = await listTools(input.apiKey, fetcher, signal);
     if (tools.length === 0) throw new ProviderRequestError(400, "WPS MCP did not expose any tools for this token");
+    const toolNames = new Set(tools.map((tool) => tool.name));
+    const missingReadTool = requiredReadTools.find((toolName) => !toolNames.has(toolName));
+    if (missingReadTool) {
+      throw new ProviderRequestError(403, `WPS MCP token is missing required read capability: ${missingReadTool}`);
+    }
+    const grantedScopes = [
+      ...(wpsMcpActions.some(
+        (action) => action.requiredScopes.includes("wps_mcp.files.read") && toolNames.has(action.name),
+      )
+        ? ["wps_mcp.files.read"]
+        : []),
+      ...(wpsMcpActions.some(
+        (action) => action.requiredScopes.includes("wps_mcp.files.write") && toolNames.has(action.name),
+      )
+        ? ["wps_mcp.files.write"]
+        : []),
+      "wps_mcp.tools.inspect",
+      "wps_mcp.tools.invoke",
+    ];
     const tokenHash = createHash("sha256").update(input.apiKey).digest("hex").slice(0, 16);
     return {
       profile: {
         accountId: `wps-mcp:${tokenHash}`,
         displayName: `WPS MCP ${tokenHash.slice(-6)}`,
-        grantedScopes: ["wps_mcp.files.read", "wps_mcp.files.write", "wps_mcp.tools.inspect", "wps_mcp.tools.invoke"],
+        grantedScopes,
       },
       metadata: { mcpEndpoint: wpsMcpEndpoint, discoveredToolCount: tools.length },
     };
@@ -158,7 +178,7 @@ export async function discoverResources(
           mimeType: `application/vnd.wps.${fileType.replace(/[^a-z0-9-]/giu, "") || "file"}`,
           version: readFirstString(record, ["version", "etag", "mtime"]),
           schema: boundedProviderResourceSchema(record),
-          url: readFirstString(record, ["url", "web_url", "link"]),
+          url: safeWpsTraceUrl(readFirstString(record, ["url", "web_url", "link"])),
         },
       ];
     });
@@ -186,4 +206,30 @@ function readFirstString(record: Record<string, unknown>, keys: string[]): strin
     if (typeof value === "number" && Number.isFinite(value)) return String(value);
   }
   return undefined;
+}
+
+function safeWpsTraceUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    if (
+      url.protocol !== "https:" ||
+      url.username ||
+      url.password ||
+      !(
+        hostname === "wps.cn" ||
+        hostname.endsWith(".wps.cn") ||
+        hostname === "kdocs.cn" ||
+        hostname.endsWith(".kdocs.cn")
+      )
+    ) {
+      return undefined;
+    }
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return undefined;
+  }
 }

@@ -47,11 +47,12 @@ export function parseBaiduNetdiskJson(
 export async function fetchBaiduNetdiskAccount(
   accessToken: string,
   fetcher: typeof fetch,
+  signal?: AbortSignal,
 ): Promise<BaiduNetdiskAccount> {
   const url = new URL("/rest/2.0/xpan/nas", baiduPanBaseUrl);
   url.searchParams.set("method", "uinfo");
   url.searchParams.set("vip_version", "v2");
-  const payload = await requestBaiduNetdiskApi(url, accessToken, fetcher, "read");
+  const payload = await requestBaiduNetdiskApi(url, accessToken, fetcher, "read", { signal });
   const accountId = requireLosslessId(payload.uk, "uk");
   const netdiskName = optionalString(payload.netdisk_name);
   const baiduName = optionalString(payload.baidu_name);
@@ -158,18 +159,20 @@ export async function downloadBaiduNetdiskFile(
     signal: context.signal,
   });
   if (!response.ok) {
-    const message = await readProviderTextBody(response, "Baidu Netdisk download error", 1024 * 1024).catch(() => "");
-    throw new ProviderRequestError(
-      response.status >= 500 ? 502 : response.status,
-      message || `baidu_netdisk download failed with HTTP ${response.status}`,
-    );
+    await response.body?.cancel().catch(() => undefined);
+    throw normalizeBaiduNetdiskError(undefined, response.status, undefined, "read");
   }
 
   const mimeType = optionalString(response.headers.get("content-type")) ?? "application/octet-stream";
-  assertSafeObjectResponse(response, {
-    fieldName: "Baidu Netdisk download",
-    createError: (message) => new ProviderRequestError(415, message),
-  });
+  try {
+    assertSafeObjectResponse(response, {
+      fieldName: "Baidu Netdisk download",
+      createError: (message) => new ProviderRequestError(415, message),
+    });
+  } catch (error) {
+    await response.body?.cancel().catch(() => undefined);
+    throw error;
+  }
   const bytes = await readBoundedResponseBytes(response, {
     maxBytes: context.transitFiles.maxBytes,
     fieldName: "Baidu Netdisk download",
@@ -253,6 +256,8 @@ export function normalizeBaiduNetdiskError(
   });
   if (status === 429 || errno === 20012 || errno === 31034)
     return new ProviderRequestError(429, "baidu_netdisk rate limit exceeded", details);
+  if (status === 401 || status === 403)
+    return new ProviderRequestError(status, "baidu_netdisk authorization failed", details);
   if (errno === -6 || errno === 31045)
     return new ProviderRequestError(401, "baidu_netdisk credential expired", details);
   if (errno === 31024 || (errno === -7 && phase === "read"))
@@ -267,6 +272,7 @@ export function normalizeBaiduNetdiskError(
     return new ProviderRequestError(409, "baidu_netdisk target already exists", details);
   if (errno === -3 || errno === -9 || errno === 31066)
     return new ProviderRequestError(404, "baidu_netdisk item was not found", details);
+  if (status === 404) return new ProviderRequestError(404, "baidu_netdisk item was not found", details);
   if (errno === -10) return new ProviderRequestError(507, "baidu_netdisk storage is full", details);
   if (errno === 111)
     return new ProviderRequestError(409, "baidu_netdisk has a conflicting file management task", details);
@@ -294,7 +300,13 @@ async function requestBaiduNetdiskApi(
   } catch {
     throw new ProviderRequestError(502, "baidu_netdisk request failed");
   }
-  const payload = parseBaiduNetdiskJson(await response.text());
+  const text = await readProviderTextBody(
+    response,
+    "Baidu Netdisk response",
+    4 * 1024 * 1024,
+    init.signal ?? undefined,
+  );
+  const payload = parseBaiduNetdiskJson(text);
   const errno = optionalInteger(payload.errno ?? payload.error_no ?? payload.error_code);
   if (!response.ok || (errno != null && errno !== 0)) {
     throw normalizeBaiduNetdiskError(errno, response.status, payload.request_id, phase);

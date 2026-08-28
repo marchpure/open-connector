@@ -450,7 +450,7 @@ async function requestTencentDocsOpenApi(
     ...(body ? { body } : {}),
     signal: context.signal,
   });
-  const envelope = await parseTencentDocsJson<TencentDocsEnvelope>(response, "openapi");
+  const envelope = await parseTencentDocsJson<TencentDocsEnvelope>(response, "openapi", context.signal);
   assertTencentDocsEnvelopeSuccess(envelope, response.status);
   return envelope;
 }
@@ -463,21 +463,20 @@ async function requestTencentDocsOAuthEnvelope(url: URL, fetcher: typeof fetch, 
     },
     signal,
   });
-  const envelope = await parseTencentDocsJson<TencentDocsEnvelope>(response, "oauth");
+  const envelope = await parseTencentDocsJson<TencentDocsEnvelope>(response, "oauth", signal);
   assertTencentDocsEnvelopeSuccess(envelope, response.status);
   return envelope;
 }
 
-async function parseTencentDocsJson<T>(response: Response, context: string) {
+async function parseTencentDocsJson<T>(response: Response, context: string, signal?: AbortSignal) {
   const payload = await readProviderJsonBody(response, {
     emptyBody: {},
     invalidJsonMessage: `tencent_docs ${context} returned invalid JSON`,
     maxBytes: 4 * 1024 * 1024,
+    signal,
   });
 
-  if (!response.ok) {
-    throw mapTencentDocsHttpError(response.status, extractTencentDocsErrorMessage(payload));
-  }
+  if (!response.ok) throw mapTencentDocsHttpError(response.status);
 
   return payload as T;
 }
@@ -499,43 +498,31 @@ function assertTencentDocsEnvelopeSuccess(envelope: TencentDocsEnvelope, status:
     return;
   }
 
-  const message =
-    normalizeTencentDocsMsg(envelope.msg ?? envelopeRecord?.message) || `tencent_docs API returned ret ${ret}`;
-  throw mapTencentDocsBusinessError(ret, message, status);
+  throw mapTencentDocsBusinessError(ret, status);
 }
 
-function mapTencentDocsBusinessError(ret: number, message: string, status: number) {
+function mapTencentDocsBusinessError(ret: number, status: number) {
+  const details = Number.isSafeInteger(ret) ? { providerCode: ret } : undefined;
   if (ret === 37019 || ret === 10313 || ret === 10303 || ret === 10302) {
-    return new ProviderRequestError(401, message);
+    return new ProviderRequestError(401, "tencent_docs credential is invalid or expired", details);
   }
   if (ret === 429) {
-    return new ProviderRequestError(429, message);
+    return new ProviderRequestError(429, "tencent_docs rate limit exceeded", details);
   }
-  return new ProviderRequestError(status || 502, message);
+  return new ProviderRequestError(status >= 400 && status < 500 ? status : 502, "tencent_docs request failed", details);
 }
 
-function mapTencentDocsHttpError(status: number, message: string) {
+function mapTencentDocsHttpError(status: number) {
   if (status === 400) {
-    return new ProviderRequestError(400, message);
+    return new ProviderRequestError(400, "tencent_docs rejected the request");
   }
   if (status === 401 || status === 403) {
-    return new ProviderRequestError(status, message);
+    return new ProviderRequestError(status, "tencent_docs authorization failed");
   }
   if (status === 429) {
-    return new ProviderRequestError(429, message);
+    return new ProviderRequestError(429, "tencent_docs rate limit exceeded");
   }
-  return new ProviderRequestError(status || 502, message);
-}
-
-function extractTencentDocsErrorMessage(payload: unknown) {
-  const record = optionalRecord(payload);
-  return (
-    optionalString(record?.message) ??
-    optionalString(record?.msg) ??
-    optionalString(record?.error_description) ??
-    optionalString(record?.error) ??
-    "tencent_docs request failed"
-  );
+  return new ProviderRequestError(status >= 500 ? 502 : status || 502, "tencent_docs request failed");
 }
 
 function normalizeTencentDocsUser(input: Record<string, unknown>) {

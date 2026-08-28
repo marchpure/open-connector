@@ -34,7 +34,7 @@ const handlers: ProviderActionHandlers<"baidu_netdisk", BaiduNetdiskHandler> = m
     switch (name) {
       case "get_current_account":
         return async (_input, context) => {
-          const account = await fetchBaiduNetdiskAccount(context.accessToken, context.fetcher);
+          const account = await fetchBaiduNetdiskAccount(context.accessToken, context.fetcher, context.signal);
           return {
             accountId: account.accountId,
             accountLabel: account.accountLabel,
@@ -71,10 +71,10 @@ export const executors: ProviderExecutors = defineProviderExecutors({
 });
 
 export const credentialValidators: CredentialValidators = {
-  async oauth2(input, { fetcher }) {
+  async oauth2(input, { fetcher, signal }) {
     const [account] = await Promise.all([
-      fetchBaiduNetdiskAccount(input.accessToken, fetcher),
-      verifyBaiduNetdiskMcpConnection(input.accessToken, fetcher),
+      fetchBaiduNetdiskAccount(input.accessToken, fetcher, signal),
+      verifyBaiduNetdiskMcpConnection(input.accessToken, fetcher, signal),
     ]);
     return {
       profile: {

@@ -16,8 +16,10 @@ import { executors as qiniuKodoExecutors } from "./qiniu_kodo/executors.ts";
 import { qiniuAuthorization } from "./qiniu_kodo/executors.ts";
 import { actions as tencentCosActions } from "./tencent_cos/actions.ts";
 import { discoverResources as discoverTencentCosResources } from "./tencent_cos/executors.ts";
+import { credentialValidators as tencentDocsValidators } from "./tencent_docs/executors.ts";
 import { discoverResources as discoverTencentDocsResources } from "./tencent_docs/executors.ts";
 import { wpsMcpActions } from "./wps_mcp/actions.ts";
+import { credentialValidators as wpsMcpValidators } from "./wps_mcp/executors.ts";
 import { discoverResources as discoverWpsResources } from "./wps_mcp/executors.ts";
 
 afterEach(() => {
@@ -54,11 +56,11 @@ describe("P2 CN office and storage discovery", () => {
               ID: "doc-1",
               title: "Quarterly plan",
               type: "doc",
-              url: "https://docs.qq.com/doc/doc-1",
               ownerID: "owner-1",
               ownerName: "Ada",
               isOwner: false,
               lastModifyTime: 123,
+              url: "https://docs.qq.com/doc/doc-1?access_token=must-not-leak#fragment",
               access_token: "must-not-leak",
             },
           ],
@@ -75,9 +77,25 @@ describe("P2 CN office and storage discovery", () => {
         version: "123",
         owner: { id: "owner-1", displayName: "Ada" },
         aclSummary: { visibility: "shared" },
+        url: "https://docs.qq.com/doc/doc-1",
       }),
     ]);
     expect(JSON.stringify(resources)).not.toContain("must-not-leak");
+  });
+
+  it("bounds Tencent Docs credential validation and propagates cancellation", async () => {
+    const controller = new AbortController();
+    const fetcher = vi.fn<typeof fetch>(async (_input, init) => {
+      expect(init?.signal).toBe(controller.signal);
+      return new Response(`{"ret":0,"data":{"openID":"${"x".repeat(4 * 1024 * 1024)}"}}`);
+    });
+
+    await expect(
+      tencentDocsValidators.oauth2!(tencentDocsCredential, {
+        fetcher,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ status: 413 });
   });
 
   it("keeps WPS on the canonical MCP identity and binds content reads to discovery", () => {
@@ -90,6 +108,36 @@ describe("P2 CN office and storage discovery", () => {
     expect(read?.inputSchema).not.toHaveProperty("properties.url");
     expect(read?.inputSchema).not.toHaveProperty("properties.link_id");
     expect(read?.inputSchema).not.toHaveProperty("properties.enable_upload_medias");
+  });
+
+  it("rejects a WPS MCP token that is missing a required read tool", async () => {
+    const fetcher = wpsToolListFetcher(["search_files", "list_my_files", "list_files", "get_file_info"]);
+
+    await expect(
+      wpsMcpValidators.apiKey!({ apiKey: "wps-token", values: { apiKey: "wps-token" } }, { fetcher }),
+    ).rejects.toMatchObject({
+      status: 403,
+      message: "WPS MCP token is missing required read capability: read_file",
+    });
+  });
+
+  it("grants WPS write capability only when a write tool is present", async () => {
+    const readTools = ["search_files", "list_my_files", "list_files", "get_file_info", "read_file"];
+    const readOnly = await wpsMcpValidators.apiKey!(
+      { apiKey: "wps-token", values: { apiKey: "wps-token" } },
+      { fetcher: wpsToolListFetcher(readTools) },
+    );
+    const withWrite = await wpsMcpValidators.apiKey!(
+      { apiKey: "wps-token", values: { apiKey: "wps-token" } },
+      { fetcher: wpsToolListFetcher([...readTools, "create_folder"]) },
+    );
+
+    expect(readOnly?.profile?.grantedScopes).toEqual([
+      "wps_mcp.files.read",
+      "wps_mcp.tools.inspect",
+      "wps_mcp.tools.invoke",
+    ]);
+    expect(withWrite?.profile?.grantedScopes).toContain("wps_mcp.files.write");
   });
 
   it("discovers WPS files through an actual MCP initialize and tool-call exchange", async () => {
@@ -116,6 +164,7 @@ describe("P2 CN office and storage discovery", () => {
                     name: "Plan.docx",
                     file_type: "document",
                     version: "v3",
+                    url: "https://www.kdocs.cn/l/file-1?token=must-not-leak#fragment",
                   },
                 ],
               },
@@ -132,8 +181,10 @@ describe("P2 CN office and storage discovery", () => {
         resourceId: "wps-file-1",
         title: "Plan.docx",
         version: "v3",
+        url: "https://www.kdocs.cn/l/file-1",
       }),
     ]);
+    expect(JSON.stringify(resources)).not.toContain("must-not-leak");
   });
 
   for (const profile of [
@@ -334,7 +385,7 @@ describe("P2 CN office and storage discovery", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("rejects a Qiniu download when the object changes between stat and download", async () => {
+  it("rejects a Qiniu download when the object changes after stat even without caller ifMatch", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ hash: "etag-before", fsize: 4, mimeType: "text/plain" }))
@@ -342,7 +393,7 @@ describe("P2 CN office and storage discovery", () => {
     vi.stubGlobal("fetch", fetcher);
     const create = vi.fn<TransitFileStore["create"]>();
     const result = await qiniuKodoExecutors["qiniu_kodo.download_object"]!(
-      { bucket: "documents", objectKey: "knowledge/file.txt", ifMatch: "etag-before" },
+      { bucket: "documents", objectKey: "knowledge/file.txt" },
       {
         ...contextFor("qiniu_kodo", storageCredential("https://rsf.qiniu.com", true)),
         transitFiles: transitFiles(1024, create),
@@ -405,7 +456,9 @@ describe("P2 CN office and storage discovery", () => {
   it("maps Qiniu errors without returning provider secrets", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn<typeof fetch>(async () => Response.json({ error: "invalid token secret-detail" }, { status: 401 })),
+      vi.fn<typeof fetch>(async () =>
+        Response.json({ code: "secret-detail-in-code", error: "invalid token secret-detail" }, { status: 401 }),
+      ),
     );
     const result = await qiniuKodoExecutors["qiniu_kodo.list_objects"]!(
       { bucket: "documents", prefix: "knowledge/" },
@@ -416,6 +469,22 @@ describe("P2 CN office and storage discovery", () => {
       error: { code: "authorization_failed", details: { status: 401 } },
     });
     expect(JSON.stringify(result)).not.toContain("secret-detail");
+  });
+
+  it("keeps safe numeric Qiniu provider codes", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => Response.json({ code: 631, error: "bucket missing" }, { status: 404 })),
+    );
+    const result = await qiniuKodoExecutors["qiniu_kodo.list_objects"]!(
+      { bucket: "documents", prefix: "knowledge/" },
+      contextFor("qiniu_kodo", storageCredential("https://rsf.qiniu.com", true)),
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { message: "Qiniu Kodo request failed (631)", details: { status: 404 } },
+    });
+    expect(JSON.stringify(result)).not.toContain("bucket missing");
   });
 
   it("rejects invalid MinIO custom CA material", async () => {
@@ -508,6 +577,29 @@ function contextFor(service: string, credential: ResolvedCredential): ExecutionC
       return credential;
     },
   };
+}
+
+function wpsToolListFetcher(toolNames: string[]): typeof fetch {
+  return vi.fn<typeof fetch>(async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const message = JSON.parse(await request.clone().text()) as { id?: string | number; method: string };
+    if (message.method === "notifications/initialized") return new Response(null, { status: 202 });
+    const result =
+      message.method === "initialize"
+        ? {
+            protocolVersion: "2024-11-05",
+            capabilities: { tools: {} },
+            serverInfo: { name: "wps-fixture", version: "1" },
+          }
+        : {
+            tools: toolNames.map((name) => ({
+              name,
+              description: `${name} fixture`,
+              inputSchema: { type: "object", properties: {} },
+            })),
+          };
+    return Response.json({ jsonrpc: "2.0", id: message.id, result });
+  });
 }
 
 function transitFiles(maxBytes: number, create: TransitFileStore["create"]): TransitFileStore {

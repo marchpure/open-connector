@@ -677,10 +677,15 @@ async function awsDownloadObject(input: Record<string, unknown>, context: AwsAct
 
     const name = optionalString(input.fileName) ?? defaultObjectFileName(objectKey);
     const mimeType = optionalString(response.headers.get("content-type")) ?? "application/octet-stream";
-    assertSafeObjectResponse(response, {
-      fieldName: "AWS S3 download",
-      createError: (message) => new ProviderRequestError(415, message),
-    });
+    try {
+      assertSafeObjectResponse(response, {
+        fieldName: "AWS S3 download",
+        createError: (message) => new ProviderRequestError(415, message),
+      });
+    } catch (error) {
+      await response.body?.cancel().catch(() => undefined);
+      throw error;
+    }
     const bytes = await readBoundedResponseBytes(response, {
       maxBytes: context.transitFiles.maxBytes,
       fieldName: "AWS S3 download",

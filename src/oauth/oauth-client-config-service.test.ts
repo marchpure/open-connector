@@ -97,6 +97,41 @@ describe("OAuthClientConfigService", () => {
       }),
     ).toThrow("requestedScopes must contain at least one scope.");
   });
+
+  it("uses provider-native permissions for action-scoped OAuth authorization", () => {
+    const provider = oauthProvider("example");
+    provider.actions = [
+      {
+        id: "example.read",
+        service: "example",
+        name: "read",
+        description: "Read provider data.",
+        requiredScopes: ["example.internal.read"],
+        providerPermissions: ["read"],
+        inputSchema: { type: "object" },
+        outputSchema: { type: "object" },
+      },
+    ];
+    const service = new OAuthClientConfigService({
+      catalog: createCatalogStore([provider]),
+      origin: "http://localhost:3000",
+      store: new MemoryOAuthClientConfigStore(),
+    });
+
+    expect(
+      service.getEffectiveScopes(
+        "example",
+        {
+          service: "example",
+          clientId: "client-id",
+          clientSecret: "client-secret",
+          extra: {},
+          secretExtra: {},
+        },
+        ["example.read"],
+      ),
+    ).toEqual(["read"]);
+  });
 });
 
 function oauthProvider(service: string): ProviderDefinition {

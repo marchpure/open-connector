@@ -16,6 +16,7 @@ import {
   normalizeProviderProxyHeaders,
   ProviderRequestError,
   providerUserAgent,
+  readProviderJsonBody,
   readProviderProxyErrorMessage,
   readProviderProxyResponse,
   requireOAuthCredential,
@@ -110,28 +111,40 @@ export const proxy: ProviderProxyExecutor = async (input, context) => {
 
     const response = await tencentDocsFetch(url, init);
     if (!response.ok) {
-      const text = await readProviderProxyErrorMessage(response, "");
+      await readProviderProxyErrorMessage(response, "", context.signal);
       throw new ProviderRequestError(
-        response.status,
-        text || `tencent_docs request failed with HTTP ${response.status}`,
+        response.status >= 500 ? 502 : response.status,
+        response.status === 401 || response.status === 403
+          ? "tencent_docs authorization failed"
+          : "tencent_docs request failed",
       );
     }
-    return { ok: true, response: await readProviderProxyResponse(response) };
+    return { ok: true, response: await readProviderProxyResponse(response, { signal: context.signal }) };
   } catch (error) {
     return toProviderProxyError(error, "tencent_docs request failed");
   }
 };
 
 export const credentialValidators: CredentialValidators = {
-  async oauth2(input, { fetcher }): Promise<CredentialValidationResult> {
+  async oauth2(input, { fetcher, signal }): Promise<CredentialValidationResult> {
     const url = new URL("https://docs.qq.com/oauth/v2/userinfo");
     url.searchParams.set("access_token", input.accessToken);
-    const response = await fetcher(url.toString());
-    const envelope = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    const response = await fetcher(url.toString(), { signal });
+    const envelope = (await readProviderJsonBody(response, {
+      emptyBody: {},
+      invalidJsonMessage: "tencent_docs userinfo returned invalid JSON",
+      maxBytes: 4 * 1024 * 1024,
+      signal,
+    })) as Record<string, unknown>;
     if (!response.ok || envelope.ret !== 0) {
+      const providerCode =
+        typeof envelope.ret === "number" && Number.isSafeInteger(envelope.ret) ? envelope.ret : undefined;
       throw new ProviderRequestError(
-        response.status || 502,
-        optionalString(envelope.msg) ?? "Tencent Docs userinfo failed.",
+        response.status === 401 || response.status === 403 ? response.status : response.status >= 500 ? 502 : 400,
+        response.status === 401 || response.status === 403
+          ? "Tencent Docs userinfo authorization failed."
+          : "Tencent Docs userinfo failed.",
+        providerCode === undefined ? undefined : { providerCode },
       );
     }
 
@@ -208,7 +221,7 @@ export async function discoverResources(
         schema: boundedProviderResourceSchema(item),
         owner: ownerId ? { id: ownerId, displayName: optionalString(item.ownerName) } : undefined,
         aclSummary: { visibility: item.isOwner === true ? ("private" as const) : ("shared" as const) },
-        url: optionalString(item.url),
+        url: safeTencentDocsTraceUrl(item.url),
       },
     ];
   });
@@ -220,4 +233,18 @@ function tencentDocsMimeType(type: string): string {
   if (type === "smartsheet") return "application/vnd.tencent-docs.smartsheet";
   if (type === "folder") return "application/vnd.tencent-docs.folder";
   return `application/vnd.tencent-docs.${type.replace(/[^a-z0-9-]/giu, "") || "file"}`;
+}
+
+function safeTencentDocsTraceUrl(value: unknown): string | undefined {
+  const raw = optionalString(value);
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:" || url.username || url.password || url.hostname !== "docs.qq.com") return undefined;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return undefined;
+  }
 }

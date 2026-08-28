@@ -64,6 +64,9 @@ const handlers: Record<string, (input: Record<string, unknown>, context: KodoCon
     const objectKey = allowedObjectKey(input, context);
     const expected = await managementJson(context, "rs", `/stat/${urlSafeBase64(`${bucket}:${objectKey}`)}`);
     const expectedEtag = optionalString(expected.hash);
+    if (!expectedEtag) {
+      throw new ProviderRequestError(502, "Qiniu Kodo stat response is missing the object hash");
+    }
     const ifMatch = optionalString(input.ifMatch);
     if (ifMatch && expectedEtag !== ifMatch.replace(/^"|"$/gu, "")) {
       throw new ProviderRequestError(412, "Qiniu Kodo object ETag no longer matches");
@@ -77,16 +80,21 @@ const handlers: Record<string, (input: Record<string, unknown>, context: KodoCon
       redirect: "error",
       signal: context.signal,
     });
-    if (!response.ok) throw await kodoError(response);
+    if (!response.ok) throw await kodoError(response, context.signal);
     const downloadedEtag = response.headers.get("etag")?.replace(/^"|"$/gu, "");
-    if (ifMatch && downloadedEtag !== expectedEtag) {
+    if (expectedEtag && downloadedEtag !== expectedEtag) {
       await response.body?.cancel().catch(() => undefined);
-      throw new ProviderRequestError(412, "Qiniu Kodo download did not preserve the requested ETag");
+      throw new ProviderRequestError(412, "Qiniu Kodo object changed between metadata and download");
     }
-    assertSafeObjectResponse(response, {
-      fieldName: "Qiniu Kodo download",
-      createError: (message) => new ProviderRequestError(415, message),
-    });
+    try {
+      assertSafeObjectResponse(response, {
+        fieldName: "Qiniu Kodo download",
+        createError: (message) => new ProviderRequestError(415, message),
+      });
+    } catch (error) {
+      await response.body?.cancel().catch(() => undefined);
+      throw error;
+    }
     const bytes = await readBoundedResponseBytes(response, {
       maxBytes: context.transitFiles.maxBytes,
       fieldName: "Qiniu Kodo download",
@@ -275,7 +283,7 @@ async function signedJson(
   });
   headers.set("authorization", qiniuAuthorization(url, method, headers, context.values));
   const response = await context.fetcher(url, { method, headers, redirect: "error", signal: context.signal });
-  if (!response.ok) throw await kodoError(response);
+  if (!response.ok) throw await kodoError(response, context.signal);
   const bytes = await readBoundedResponseBytes(response, {
     maxBytes: maxMetadataBytes,
     fieldName: "Qiniu Kodo response",
@@ -355,17 +363,18 @@ function metadata(item: Record<string, unknown>, bucket: string, objectKey: stri
   };
 }
 
-async function kodoError(response: Response): Promise<ProviderRequestError> {
+async function kodoError(response: Response, signal?: AbortSignal): Promise<ProviderRequestError> {
   const bytes = await readBoundedResponseBytes(response, {
     maxBytes: 1024 * 1024,
     fieldName: "Qiniu Kodo error",
     createError: (message) => new ProviderRequestError(413, message),
+    signal,
   }).catch(() => new Uint8Array());
   let providerCode: string | undefined;
   try {
     const payload = optionalRecord(JSON.parse(new TextDecoder().decode(bytes)));
-    providerCode =
-      typeof payload?.code === "number" || typeof payload?.code === "string" ? String(payload.code) : undefined;
+    const rawCode = typeof payload?.code === "number" || typeof payload?.code === "string" ? String(payload.code) : "";
+    providerCode = /^-?\d{1,12}$/u.test(rawCode) ? rawCode : undefined;
   } catch {}
   const status =
     response.status === 401 || response.status === 403 || response.status === 404 || response.status === 429

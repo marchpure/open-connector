@@ -22,7 +22,18 @@ const provider: ProviderDefinition = {
       fields: [{ key: "secret", label: "Secret", inputType: "password", required: true, secret: true }],
     },
   ],
-  actions: [],
+  actions: [
+    {
+      id: "fixture.read",
+      service: "fixture",
+      name: "read",
+      description: "Read fixture data.",
+      requiredScopes: [],
+      providerPermissions: [],
+      inputSchema: { type: "object" },
+      outputSchema: { type: "object" },
+    },
+  ],
 };
 
 const principal = {
@@ -42,23 +53,8 @@ afterEach(async () => {
 describe("connection control API", () => {
   it("persists the lease invocation id in the redacted audit feed", async () => {
     const database = new DatabaseSync(":memory:");
-    const executableProvider: ProviderDefinition = {
-      ...provider,
-      actions: [
-        {
-          id: "fixture.read",
-          service: "fixture",
-          name: "read",
-          description: "Read fixture data.",
-          requiredScopes: [],
-          providerPermissions: [],
-          inputSchema: { type: "object" },
-          outputSchema: { type: "object" },
-        },
-      ],
-    };
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([executableProvider], { executableActionIds: ["fixture.read"] }),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => async () => ({ ok: true, output: { value: "safe" } }),
         loadProxyExecutor: async () => undefined,
@@ -142,7 +138,7 @@ describe("connection control API", () => {
       consume({ path: stagedPath, sizeBytes: 19, name: "people.csv", mimeType: "text/csv" }),
     );
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -174,7 +170,7 @@ describe("connection control API", () => {
   it("isolates tenants and never returns credentials", async () => {
     const database = new DatabaseSync(":memory:");
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -225,7 +221,7 @@ describe("connection control API", () => {
       bytes: 25,
     });
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -264,7 +260,7 @@ describe("connection control API", () => {
   it("enforces personal/team visibility and owner-only connection management", async () => {
     const database = new DatabaseSync(":memory:");
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -333,7 +329,7 @@ describe("connection control API", () => {
   it("revokes a connection and all of its active leases", async () => {
     const database = new DatabaseSync(":memory:");
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -382,7 +378,7 @@ describe("connection control API", () => {
   it("grants and removes explicit connection use ACLs with lease revocation", async () => {
     const database = new DatabaseSync(":memory:");
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -445,7 +441,7 @@ describe("connection control API", () => {
   it("runs durable tenant-scoped validation and discovery jobs", async () => {
     const database = new DatabaseSync(":memory:");
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -520,7 +516,11 @@ describe("connection control API", () => {
     });
     expect(leasedDiscovery.status).toBe(202);
     expect(await leasedDiscovery.json()).toMatchObject({
-      job: { kind: "discover", status: "succeeded", result: { service: "fixture", resources: [], actions: [] } },
+      job: {
+        kind: "discover",
+        status: "succeeded",
+        result: { service: "fixture", resources: [], actions: [expect.objectContaining({ id: "fixture.read" })] },
+      },
     });
 
     const updated = await app.request(`/v1/connections/${connectionId}`, {
@@ -546,7 +546,7 @@ describe("connection control API", () => {
   it("does not let a shared-connection teammate lease storage mutation or presign capabilities", async () => {
     const database = new DatabaseSync(":memory:");
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -587,8 +587,8 @@ describe("connection control API", () => {
     expect(lease.status).toBe(403);
     expect(await lease.json()).toMatchObject({
       error: {
-        code: "connection_forbidden",
-        message: "Storage write, delete, and presign actions require the connection owner.",
+        code: "lease_action_forbidden",
+        message: "A connection lease may include only actions owned by that connection.",
       },
     });
     database.close();
@@ -597,7 +597,7 @@ describe("connection control API", () => {
   it("does not issue Agent leases for office mutations or generic MCP calls", async () => {
     const database = new DatabaseSync(":memory:");
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -622,11 +622,56 @@ describe("connection control API", () => {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
-        allowedActions: ["tencent_docs.batch_update_doc", "wps_mcp.call_tool", "baidu_netdisk.create_share_link"],
+        allowedActions: [
+          "tencent_docs.batch_update_doc",
+          "wps_mcp.list_tools",
+          "wps_mcp.call_tool",
+          "baidu_netdisk.create_share_link",
+        ],
         invocationId: "inv-read-only",
         audience: "knowledge-runtime",
       }),
     });
+    expect(lease.status).toBe(403);
+    expect(await lease.json()).toMatchObject({ error: { code: "lease_action_forbidden" } });
+    database.close();
+  });
+
+  it("does not issue a lease for actions owned by another provider", async () => {
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          customCredential: async () => ({ profile: { accountId: "validated" } }),
+        }),
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const token = createPrincipalToken(principal, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "secret" } }),
+    });
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+
+    const lease = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["baidu_netdisk.download_file"],
+        invocationId: "inv-cross-provider",
+        audience: "knowledge-runtime",
+      }),
+    });
+
     expect(lease.status).toBe(403);
     expect(await lease.json()).toMatchObject({ error: { code: "lease_action_forbidden" } });
     database.close();
@@ -639,7 +684,7 @@ describe("connection control API", () => {
       .mockResolvedValueOnce({ profile: { accountId: "created" } })
       .mockRejectedValueOnce(new Error("upstream rejected credential"));
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,

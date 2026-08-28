@@ -190,7 +190,9 @@ export class OAuthClientConfigService {
     const scopes = new Set(auth.minimumScopes ?? []);
     for (const action of provider?.actions ?? []) {
       if (requestedActions.includes(action.id)) {
-        for (const scope of action.requiredScopes) scopes.add(scope);
+        for (const scope of action.providerPermissions?.length ? action.providerPermissions : action.requiredScopes) {
+          scopes.add(scope);
+        }
       }
     }
     const undeclared = [...scopes].find((scope) => !auth.scopes.includes(scope));

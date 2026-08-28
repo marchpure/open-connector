@@ -10,6 +10,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { ConnectionService } from "../connection-service.ts";
 import { ActionPolicyService as PolicyService } from "../core/action-policy.ts";
 import { OAuthClientConfigService } from "../oauth/oauth-client-config-service.ts";
+import { OAuthCredentialRefreshService } from "../oauth/oauth-credential-refresh-service.ts";
 import { OAuthFlowService } from "../oauth/oauth-flow-service.ts";
 import { ActionRunner } from "../server/actions/action-runner.ts";
 import { ConnectionLeaseService } from "./lease.ts";
@@ -53,6 +54,7 @@ export function createTenantRuntime(deps: ControlPlaneDependencies, principal: T
   });
   const connectionService = new ConnectionService({
     catalog: deps.catalog,
+    oauthCredentials: new OAuthCredentialRefreshService(oauthClientConfigs),
     providerLoader: deps.providerLoader,
     store: connections,
   });
