@@ -1,14 +1,29 @@
-import type { ExecutionContext, ResolvedCredential } from "../core/types.ts";
+import type { ExecutionContext, ResolvedCredential, TransitFileStore } from "../core/types.ts";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { setDefaultGuardedFetchDnsLookup } from "../core/guarded-fetch.ts";
 import { setPrivateNetworkAccessAllowed } from "../core/request.ts";
 import { discoverResources as discoverHuaweiObsResources } from "./huawei_obs/executors.ts";
+import { credentialValidators as huaweiObsValidators } from "./huawei_obs/executors.ts";
+import { executors as huaweiObsExecutors } from "./huawei_obs/executors.ts";
 import { executors as minioExecutors } from "./minio/executors.ts";
+import { credentialValidators as minioValidators } from "./minio/executors.ts";
 import { discoverResources as discoverMinioResources } from "./minio/executors.ts";
+import { createMinioTlsFetch } from "./minio/tls-fetch.ts";
+import { cosSign, obsSign } from "./native-object-storage-runtime.ts";
 import { discoverResources as discoverQiniuKodoResources } from "./qiniu_kodo/executors.ts";
+import { executors as qiniuKodoExecutors } from "./qiniu_kodo/executors.ts";
+import { qiniuAuthorization } from "./qiniu_kodo/executors.ts";
+import { actions as tencentCosActions } from "./tencent_cos/actions.ts";
 import { discoverResources as discoverTencentCosResources } from "./tencent_cos/executors.ts";
 import { discoverResources as discoverTencentDocsResources } from "./tencent_docs/executors.ts";
 import { wpsMcpActions } from "./wps_mcp/actions.ts";
+import { discoverResources as discoverWpsResources } from "./wps_mcp/executors.ts";
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 const tencentDocsCredential: Extract<ResolvedCredential, { authType: "oauth2" }> = {
   authType: "oauth2",
@@ -16,6 +31,13 @@ const tencentDocsCredential: Extract<ResolvedCredential, { authType: "oauth2" }>
   tokenType: "Bearer",
   profile: { accountId: "open-user", displayName: "User", grantedScopes: [] },
   metadata: { clientId: "client-id", openID: "open-user" },
+};
+const wpsCredential: Extract<ResolvedCredential, { authType: "api_key" }> = {
+  authType: "api_key",
+  apiKey: "wps-token",
+  values: { apiKey: "wps-token" },
+  profile: { accountId: "wps-user", displayName: "WPS User", grantedScopes: [] },
+  metadata: {},
 };
 
 describe("P2 CN office and storage discovery", () => {
@@ -70,6 +92,50 @@ describe("P2 CN office and storage discovery", () => {
     expect(read?.inputSchema).not.toHaveProperty("properties.enable_upload_medias");
   });
 
+  it("discovers WPS files through an actual MCP initialize and tool-call exchange", async () => {
+    const methods: string[] = [];
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(request.headers.get("authorization")).toBe("Bearer wps-token");
+      const message = JSON.parse(await request.clone().text()) as { id?: string | number; method: string };
+      methods.push(message.method);
+      if (message.method === "notifications/initialized") return new Response(null, { status: 202 });
+      const result =
+        message.method === "initialize"
+          ? {
+              protocolVersion: "2024-11-05",
+              capabilities: { tools: {} },
+              serverInfo: { name: "wps-fixture", version: "1" },
+            }
+          : {
+              content: [],
+              structuredContent: {
+                items: [
+                  {
+                    file_id: "wps-file-1",
+                    name: "Plan.docx",
+                    file_type: "document",
+                    version: "v3",
+                  },
+                ],
+              },
+            };
+      return Response.json({ jsonrpc: "2.0", id: message.id, result });
+    });
+
+    const resources = await discoverWpsResources(contextFor("wps_mcp", wpsCredential), fetcher);
+
+    expect(methods).toEqual(["initialize", "notifications/initialized", "tools/call"]);
+    expect(resources).toEqual([
+      expect.objectContaining({
+        sourceType: "wps_mcp",
+        resourceId: "wps-file-1",
+        title: "Plan.docx",
+        version: "v3",
+      }),
+    ]);
+  });
+
   for (const profile of [
     {
       service: "tencent_cos",
@@ -107,6 +173,7 @@ describe("P2 CN office and storage discovery", () => {
       const headers = request instanceof Request ? request.headers : new Headers(fetcher.mock.calls[0]?.[1]?.headers);
       if (profile.service === "qiniu_kodo") {
         expect(url).toMatchObject({ hostname: "rsf.qiniu.com", pathname: "/list" });
+        expect(fetcher.mock.calls[0]?.[1]?.method).toBe("POST");
         expect(headers.get("authorization")).toMatch(/^Qiniu ACCESS_KEY:/u);
       } else {
         expect(url.hostname).toBe(`documents.${new URL(profile.endpoint).host}`);
@@ -155,6 +222,263 @@ describe("P2 CN office and storage discovery", () => {
       "minio.list_objects",
     ]);
   });
+
+  it("requires discovered bucket bindings for every object read", () => {
+    expect(
+      tencentCosActions
+        .filter((action) => action.name !== "list_buckets")
+        .map((action) => ({
+          name: action.name,
+          required: action.resourceBindings,
+          optional: action.resourceBindingsOptional,
+        })),
+    ).toEqual([
+      {
+        name: "list_objects",
+        required: { bucket: ["application/vnd.tencent.cos.bucket"] },
+        optional: undefined,
+      },
+      {
+        name: "head_object",
+        required: { bucket: ["application/vnd.tencent.cos.bucket"] },
+        optional: undefined,
+      },
+      {
+        name: "download_object",
+        required: { bucket: ["application/vnd.tencent.cos.bucket"] },
+        optional: undefined,
+      },
+    ]);
+  });
+
+  it("matches the Tencent COS SDK authorization vector including the temporary token", () => {
+    const request = new Request("https://documents.cos.ap-guangzhou.myqcloud.com/?list-type=2&prefix=knowledge%2F");
+    cosSign(
+      request,
+      {
+        accessKeyId: "AKID",
+        secretAccessKey: "SECRET",
+        bucket: "documents",
+        sessionToken: "TOKEN",
+      },
+      new Date(1_700_000_000_000),
+    );
+    expect(request.headers.get("authorization")).toBe(
+      "q-sign-algorithm=sha1&q-ak=AKID&q-sign-time=1699999940;1700000900&q-key-time=1699999940;1700000900&q-header-list=host;x-cos-security-token&q-url-param-list=list-type;prefix&q-signature=6deff29821225b9c530177be28273f258cfd5660",
+    );
+  });
+
+  it("matches the Huawei OBS canonical authorization vector with version and temporary token", () => {
+    const request = new Request("https://documents.obs.cn-north-4.myhuaweicloud.com/knowledge%2Ffile.txt?versionId=v1");
+    obsSign(
+      request,
+      {
+        accessKeyId: "AKID",
+        secretAccessKey: "SECRET",
+        bucket: "documents",
+        sessionToken: "TOKEN",
+      },
+      new Date("2023-11-14T22:13:20Z"),
+    );
+    expect(request.headers.get("authorization")).toBe("OBS AKID:dr1cUJSdXHVtSZ+k2HrtA+mIGoo=");
+    expect(request.headers.get("x-obs-security-token")).toBe("TOKEN");
+  });
+
+  it("matches the Qiniu SDK V2 authorization vector", () => {
+    const url = new URL("https://rsf.qiniu.com/list?bucket=documents&limit=100&prefix=knowledge%2F");
+    const headers = new Headers({ "x-qiniu-date": "20231114T221320Z" });
+    expect(
+      qiniuAuthorization(url, "POST", headers, {
+        accessKeyId: "AKID",
+        secretAccessKey: "SECRET",
+      }),
+    ).toBe("Qiniu AKID:0zZ7kBlL_1HBv_1dylTCCMSb6m4");
+  });
+
+  it("maps native OBS authorization errors without exposing the upstream body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(
+        async () =>
+          new Response("<Error><Code>SignatureDoesNotMatch</Code><Message>secret detail</Message></Error>", {
+            status: 403,
+          }),
+      ),
+    );
+    const result = await huaweiObsExecutors["huawei_obs.list_objects"]!(
+      { bucket: "documents", prefix: "knowledge/" },
+      contextFor("huawei_obs", storageCredential("https://obs.cn-north-4.myhuaweicloud.com")),
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "authorization_failed",
+        message: "Huawei Cloud OBS authorization failed: SignatureDoesNotMatch",
+        details: { status: 403 },
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("secret detail");
+  });
+
+  it("rejects Qiniu prefix traversal before egress", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+    const result = await qiniuKodoExecutors["qiniu_kodo.list_objects"]!(
+      { bucket: "documents", prefix: "private/" },
+      contextFor("qiniu_kodo", storageCredential("https://rsf.qiniu.com", true)),
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "authorization_failed", details: { status: 403 } },
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("rejects a Qiniu download when the object changes between stat and download", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ hash: "etag-before", fsize: 4, mimeType: "text/plain" }))
+      .mockResolvedValueOnce(new Response("data", { headers: { etag: '"etag-after"', "content-type": "text/plain" } }));
+    vi.stubGlobal("fetch", fetcher);
+    const create = vi.fn<TransitFileStore["create"]>();
+    const result = await qiniuKodoExecutors["qiniu_kodo.download_object"]!(
+      { bucket: "documents", objectKey: "knowledge/file.txt", ifMatch: "etag-before" },
+      {
+        ...contextFor("qiniu_kodo", storageCredential("https://rsf.qiniu.com", true)),
+        transitFiles: transitFiles(1024, create),
+      },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "invalid_input", details: { status: 412 } },
+    });
+    expect(new Headers(fetcher.mock.calls[1]?.[1]?.headers).get("if-match")).toBe("etag-before");
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsafe Qiniu download MIME before writing a transit file", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ hash: "etag", fsize: 4, mimeType: "text/html" }))
+      .mockResolvedValueOnce(new Response("<x/>", { headers: { etag: "etag", "content-type": "text/html" } }));
+    vi.stubGlobal("fetch", fetcher);
+    const create = vi.fn<TransitFileStore["create"]>();
+    const result = await qiniuKodoExecutors["qiniu_kodo.download_object"]!(
+      { bucket: "documents", objectKey: "knowledge/file.html" },
+      {
+        ...contextFor("qiniu_kodo", storageCredential("https://rsf.qiniu.com", true)),
+        transitFiles: transitFiles(1024, create),
+      },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "invalid_input", details: { status: 415 } },
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized Qiniu downloads before writing a transit file", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ hash: "etag", fsize: 2048, mimeType: "text/plain" }))
+      .mockResolvedValueOnce(
+        new Response("data", {
+          headers: { etag: "etag", "content-length": "2048", "content-type": "text/plain" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetcher);
+    const create = vi.fn<TransitFileStore["create"]>();
+    const result = await qiniuKodoExecutors["qiniu_kodo.download_object"]!(
+      { bucket: "documents", objectKey: "knowledge/file.txt" },
+      {
+        ...contextFor("qiniu_kodo", storageCredential("https://rsf.qiniu.com", true)),
+        transitFiles: transitFiles(1024, create),
+      },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "invalid_input", details: { status: 413 } },
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("maps Qiniu errors without returning provider secrets", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => Response.json({ error: "invalid token secret-detail" }, { status: 401 })),
+    );
+    const result = await qiniuKodoExecutors["qiniu_kodo.list_objects"]!(
+      { bucket: "documents", prefix: "knowledge/" },
+      contextFor("qiniu_kodo", storageCredential("https://rsf.qiniu.com", true)),
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "authorization_failed", details: { status: 401 } },
+    });
+    expect(JSON.stringify(result)).not.toContain("secret-detail");
+  });
+
+  it("rejects invalid MinIO custom CA material", async () => {
+    await expect(createMinioTlsFetch("not a certificate")).rejects.toThrow(/valid PEM-encoded X.509/u);
+  });
+
+  it("times out native storage credential validation", async () => {
+    vi.useFakeTimers();
+    setDefaultGuardedFetchDnsLookup(null);
+    const fetcher = vi.fn<typeof fetch>(
+      async (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = _input instanceof Request ? _input.signal : init?.signal;
+          signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted", "AbortError")), {
+            once: true,
+          });
+        }),
+    );
+    const validation = huaweiObsValidators.customCredential!(
+      { values: storageCredential("https://obs.cn-north-4.myhuaweicloud.com").values },
+      { fetcher },
+    );
+    const rejection = expect(validation).rejects.toMatchObject({ status: 504 });
+    try {
+      await vi.advanceTimersByTimeAsync(30_000);
+      await rejection;
+    } finally {
+      setDefaultGuardedFetchDnsLookup(undefined);
+    }
+  });
+
+  it("times out MinIO credential validation across its bucket fallback", async () => {
+    vi.useFakeTimers();
+    setDefaultGuardedFetchDnsLookup(null);
+    setPrivateNetworkAccessAllowed(true);
+    const fetcher = vi.fn<typeof fetch>(
+      async (input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = input instanceof Request ? input.signal : init?.signal;
+          if (signal?.aborted) {
+            reject(new DOMException("The operation was aborted", "AbortError"));
+            return;
+          }
+          signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted", "AbortError")), {
+            once: true,
+          });
+        }),
+    );
+    const validation = minioValidators.customCredential!(
+      {
+        values: storageCredential("https://minio.example.com").values,
+      },
+      { fetcher },
+    );
+    const rejection = expect(validation).rejects.toMatchObject({ status: 504 });
+    try {
+      await vi.advanceTimersByTimeAsync(30_000);
+      await rejection;
+    } finally {
+      setDefaultGuardedFetchDnsLookup(undefined);
+      setPrivateNetworkAccessAllowed(false);
+    }
+  });
 });
 
 function storageCredential(
@@ -183,5 +507,14 @@ function contextFor(service: string, credential: ResolvedCredential): ExecutionC
       expect(requestedService).toBe(service);
       return credential;
     },
+  };
+}
+
+function transitFiles(maxBytes: number, create: TransitFileStore["create"]): TransitFileStore {
+  return {
+    maxBytes,
+    create,
+    read: vi.fn<TransitFileStore["read"]>(),
+    delete: vi.fn<TransitFileStore["delete"]>(),
   };
 }

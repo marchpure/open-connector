@@ -324,6 +324,7 @@ export const tencentDocsActions: ActionDefinition[] = [
       items: s.array("The search result files and folders.", tencentDocsFileSchema),
       raw: rawObjectSchema,
     }),
+    resourceBindingsOptional: { folderID: ["application/vnd.tencent-docs.folder"] },
   }),
   defineAction({
     service: "tencent_docs",
@@ -342,7 +343,7 @@ export const tencentDocsActions: ActionDefinition[] = [
   defineAction({
     service: "tencent_docs",
     name: "get_export_progress",
-    description: "Check a Tencent Docs asynchronous export operation and return the download URL when ready.",
+    description: "Check a Tencent Docs asynchronous export operation without exposing its temporary download URL.",
     requiredScopes: [tencentDocsConnectorScopes.driveExport],
     providerPermissions: [tencentDocsProviderScopes.driveExportable],
     inputSchema: exportProgressInputSchema,

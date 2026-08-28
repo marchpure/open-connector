@@ -41,7 +41,7 @@
         ]
       },
       "tier": "beta",
-      "evidence": "Contract tests cover bounded/redacted discovery and ResourceRef identity.",
+      "evidence": "Contract tests cover bounded/redacted discovery, ResourceRef identity, optional folder authorization binding, temporary export URL removal, and request cancellation.",
       "revocation": "Connection revision and lease checks fail closed after revoke/delete; upstream revoke requires a real account.",
       "externalBlocker": "No Tencent Docs enterprise OAuth app and user account were available for a real authorize/read/revoke lifecycle."
     },
@@ -54,8 +54,9 @@
         "notDelegable": ["list_tools", "call_tool", "create_file_with_content", "create_folder"]
       },
       "tier": "beta",
+      "evidence": "A mocked protocol-level test covers initialize, notifications/initialized, tools/call, and normalized file discovery.",
       "limitations": [
-        "MCP tool discovery proves capability presence, not content-read success.",
+        "Protocol-level fixtures prove the adapter contract, not real-account content-read success.",
         "Read/info actions accept discovered file_id only; arbitrary URLs and temporary media URLs are disabled.",
         "Results are redacted and size bounded at the provider boundary."
       ],
@@ -85,7 +86,7 @@
         ]
       },
       "tier": "beta",
-      "evidence": "Existing download/security tests plus P2 ResourceRef binding and bounded-result checks.",
+      "evidence": "Tests cover MCP cancellation, semantic-folder authorization binding, bounded download, unsafe MIME rejection, and ResourceRef normalization.",
       "externalBlocker": "No Baidu Netdisk application and user authorization were available for a real refresh/quota/download/revoke lifecycle."
     },
     {
@@ -94,7 +95,7 @@
       "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
       "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
       "tier": "beta",
-      "evidence": "Contract tests cover native q-sign authorization, configured-bucket discovery, prefix enforcement, official endpoint restriction, bounded download, MIME checks, and generated registry reachability.",
+      "evidence": "Contract tests cover an exact COS SDK q-sign vector including temporary-token signing, configured-bucket discovery, required bucket binding, prefix enforcement, official endpoint restriction, bounded download, MIME checks, redacted provider error codes, timeouts, and generated registry reachability.",
       "externalBlocker": "No Tencent Cloud account/COS credential was available for real service, credential rotation, and revocation evidence."
     },
     {
@@ -103,7 +104,7 @@
       "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
       "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
       "tier": "beta",
-      "evidence": "Contract tests cover native OBS authorization, OBS endpoint and ResourceRef MIME, allowlists, bounded reads, and vendor error mapping.",
+      "evidence": "Contract tests cover a deterministic OBS canonical-signature vector including the temporary token, OBS endpoint and ResourceRef MIME, required bucket binding, allowlists, bounded reads, safe vendor-code preservation, redacted error bodies, and request timeouts.",
       "externalBlocker": "No Huawei Cloud account/OBS credential was available for real service, credential rotation, and revocation evidence."
     },
     {
@@ -112,7 +113,7 @@
       "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
       "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
       "tier": "beta",
-      "evidence": "Contract tests prove path-style request construction, configured bucket/prefix discovery, endpoint pinning, and shared bounded-read controls.",
+      "evidence": "Contract tests prove path-style request construction, configured bucket/prefix discovery, required bucket binding, endpoint pinning, invalid-CA rejection, bounded CA-agent caching, shared bounded-read controls, and a 30-second validation timeout across bucket fallback.",
       "limitations": [
         "Private endpoints require OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK and remain subject to metadata, loopback, link-local, redirect, and DNS guards.",
         "A custom PEM CA is supported on Node deployments and validated before use; Cloudflare cannot reach private MinIO networks.",
@@ -122,11 +123,11 @@
     },
     {
       "providerId": "qiniu_kodo",
-      "implementation": "New canonical provider using Qiniu V2 authorization against native RSF list and RS stat APIs; private object downloads use a five-minute token against the configured bucket domain and never return that token to callers.",
+      "implementation": "New canonical provider using Qiniu V2 authorization against native RSF POST list and RS stat APIs; private object downloads use a five-minute token against the configured bucket domain and never return that token to callers.",
       "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
       "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
       "tier": "beta",
-      "evidence": "Contract tests cover the Qiniu authorization scheme, native management endpoint construction, configured-bucket discovery, and shared object security controls.",
+      "evidence": "Contract tests cover an exact official-SDK V2 signature vector, RSF POST semantics, native endpoint construction, required bucket binding, configured-bucket discovery, prefix denial before egress, ETag race rejection, unsafe MIME and oversized-body rejection, redacted errors, and request timeouts.",
       "externalBlocker": "No Qiniu account/Kodo credential and bucket download domain were available for real service, credential rotation, and revocation evidence."
     }
   ],
@@ -147,8 +148,8 @@
     "generateCatalog": "passed; 1457 providers and 15225 actions",
     "generateRegistry": "passed; 1457 Node providers and 1449 Cloudflare providers",
     "fixCheck": "passed; lint, format, registry generation, and src/scripts/examples typecheck",
-    "focusedTests": "passed; P2 provider, prior office/storage, AWS S3, and Control Plane suites",
-    "fullTests": "passed; 171 files passed, 1 skipped; 1555 tests passed, 4 skipped",
+    "focusedTests": "passed; 5 files and 55 tests across P2 providers, Baidu Netdisk, AWS S3/MinIO, ResourceStore, and Control Plane",
+    "fullTests": "passed; 171 files passed, 1 skipped; 1569 tests passed, 4 skipped",
     "build": "passed",
     "npmAuditOmitDev": "passed; 0 vulnerabilities",
     "npmAudit": "passed; 0 vulnerabilities",

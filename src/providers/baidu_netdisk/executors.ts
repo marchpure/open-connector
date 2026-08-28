@@ -106,7 +106,7 @@ export async function discoverResources(
   const output = (await executeBaiduNetdiskMcpAction(
     "list_files",
     { path: "/", page: 1, type: "all" },
-    { accessToken: credential.accessToken, fetcher },
+    { accessToken: credential.accessToken, fetcher, signal: context.signal },
   )) as { items?: unknown[] };
   return (output.items ?? []).slice(0, 100).flatMap((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];

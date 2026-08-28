@@ -56,6 +56,7 @@ const semanticSourceByCode = new Map<number, (typeof baiduNetdiskSemanticMatchSo
 export type BaiduNetdiskMcpContext = {
   accessToken: string;
   fetcher: ProviderFetch;
+  signal?: AbortSignal;
 };
 
 export async function verifyBaiduNetdiskMcpConnection(accessToken: string, fetcher: ProviderFetch): Promise<void> {
@@ -226,6 +227,7 @@ export async function withBaiduNetdiskMcpClient<T>(
   accessToken: string,
   fetcher: ProviderFetch,
   run: (client: Client) => Promise<T>,
+  signal?: AbortSignal,
 ): Promise<T> {
   return withMcpClient(
     {
@@ -233,6 +235,7 @@ export async function withBaiduNetdiskMcpClient<T>(
       transport: "sse",
       headers: { authorization: `Bearer ${accessToken}` },
       fetcher,
+      signal,
       mapError: normalizeBaiduNetdiskMcpTransportError,
     },
     run,
@@ -245,21 +248,29 @@ async function callBaiduNetdiskMcpTool(
   phase: "read" | "write",
   context: BaiduNetdiskMcpContext,
 ) {
-  return withBaiduNetdiskMcpClient(context.accessToken, context.fetcher, async (client) => {
-    const result = await client.callTool({ name, arguments: args }, { timeout: requestTimeoutMs });
-    const payload =
-      result.structuredContent && !hasUnsafeBaiduId(result.structuredContent)
-        ? requireObject(result.structuredContent)
-        : parseMcpTextResult(result.content);
-    const errno = readOptionalInteger(payload.errno ?? payload.error_no ?? payload.error_code);
-    if (errno != null && errno !== 0) {
-      throw normalizeBaiduNetdiskError(errno, 200, payload.request_id, phase);
-    }
-    if (result.isError) {
-      throw new ProviderRequestError(502, "baidu_netdisk MCP tool call failed");
-    }
-    return payload;
-  });
+  return withBaiduNetdiskMcpClient(
+    context.accessToken,
+    context.fetcher,
+    async (client) => {
+      const result = await client.callTool(
+        { name, arguments: args },
+        { timeout: requestTimeoutMs, signal: context.signal },
+      );
+      const payload =
+        result.structuredContent && !hasUnsafeBaiduId(result.structuredContent)
+          ? requireObject(result.structuredContent)
+          : parseMcpTextResult(result.content);
+      const errno = readOptionalInteger(payload.errno ?? payload.error_no ?? payload.error_code);
+      if (errno != null && errno !== 0) {
+        throw normalizeBaiduNetdiskError(errno, 200, payload.request_id, phase);
+      }
+      if (result.isError) {
+        throw new ProviderRequestError(502, "baidu_netdisk MCP tool call failed");
+      }
+      return payload;
+    },
+    context.signal,
+  );
 }
 
 function parseMcpTextResult(content: Array<{ type: string; [key: string]: unknown }>) {

@@ -11,7 +11,12 @@ import { createHmac } from "node:crypto";
 import { posix } from "node:path";
 import { compactObject, optionalInteger, optionalRecord, optionalString } from "../../core/cast.ts";
 import { assertPublicHttpUrl, assertSafeObjectResponse, readBoundedResponseBytes } from "../../core/request.ts";
-import { createProviderFetch, ProviderRequestError, toProviderExecutionError } from "../provider-runtime.ts";
+import {
+  createProviderFetch,
+  createProviderTimeout,
+  ProviderRequestError,
+  toProviderExecutionError,
+} from "../provider-runtime.ts";
 
 interface KodoContext {
   values: Record<string, string>;
@@ -23,6 +28,7 @@ interface KodoContext {
 const service = "qiniu_kodo";
 const displayName = "Qiniu Kodo";
 const maxMetadataBytes = 4 * 1024 * 1024;
+const requestTimeoutMs = 30_000;
 
 const handlers: Record<string, (input: Record<string, unknown>, context: KodoContext) => Promise<unknown>> = {
   async list_buckets(_input, context) {
@@ -63,12 +69,20 @@ const handlers: Record<string, (input: Record<string, unknown>, context: KodoCon
       throw new ProviderRequestError(412, "Qiniu Kodo object ETag no longer matches");
     }
     const url = buildDownloadUrl(context.values, objectKey);
+    const requestHeaders = new Headers();
+    if (expectedEtag) requestHeaders.set("if-match", expectedEtag);
     const response = await context.fetcher(url, {
       method: "GET",
+      headers: requestHeaders,
       redirect: "error",
       signal: context.signal,
     });
     if (!response.ok) throw await kodoError(response);
+    const downloadedEtag = response.headers.get("etag")?.replace(/^"|"$/gu, "");
+    if (ifMatch && downloadedEtag !== expectedEtag) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new ProviderRequestError(412, "Qiniu Kodo download did not preserve the requested ETag");
+    }
     assertSafeObjectResponse(response, {
       fieldName: "Qiniu Kodo download",
       createError: (message) => new ProviderRequestError(415, message),
@@ -88,7 +102,7 @@ const handlers: Record<string, (input: Record<string, unknown>, context: KodoCon
       name,
       mimeType,
       sizeBytes: file.sizeBytes,
-      etag: response.headers.get("etag")?.replace(/^"|"$/gu, "") ?? expectedEtag ?? null,
+      etag: downloadedEtag ?? expectedEtag ?? null,
       versionId: null,
       file,
     };
@@ -99,6 +113,7 @@ export const executors: ProviderExecutors = Object.fromEntries(
   Object.entries(handlers).map(([name, handler]) => [
     `${service}.${name}`,
     async (input: unknown, executionContext: ExecutionContext) => {
+      const timeout = createProviderTimeout(executionContext.signal, requestTimeoutMs);
       try {
         const credential = await executionContext.getCredential(service);
         if (credential?.authType !== "custom_credential") {
@@ -110,33 +125,53 @@ export const executors: ProviderExecutors = Object.fromEntries(
             values: credential.values,
             fetcher: createProviderFetch(),
             transitFiles: executionContext.transitFiles,
-            signal: executionContext.signal,
+            signal: timeout.signal,
           }),
         };
       } catch (error) {
+        if (timeout.didTimeout()) {
+          return toProviderExecutionError(
+            new ProviderRequestError(504, "Qiniu Kodo request timed out"),
+            "Qiniu Kodo request failed",
+          );
+        }
         return toProviderExecutionError(error, "Qiniu Kodo request failed");
+      } finally {
+        timeout.cleanup();
       }
     },
   ]),
 );
 
 export const credentialValidators: CredentialValidators = {
-  async customCredential(input): Promise<CredentialValidationResult> {
-    const context = { values: input.values, fetcher: createProviderFetch() };
-    await listObjects({ maxKeys: 1 }, context);
-    const bucket = required(input.values.bucket, "bucket");
-    return {
-      profile: { accountId: `${service}:${input.values.accessKeyId}`, displayName: `${displayName} - ${bucket}` },
-      metadata: {
-        region: input.values.region,
-        endpoint: managementEndpoint(input.values, "rsf").origin,
-        downloadDomain: downloadOrigin(input.values).origin,
-        bucket,
-        prefix: input.values.prefix,
-        credentialKind: "aksk",
-        signing: "qiniu-v2",
-      },
-    };
+  async customCredential(input, options): Promise<CredentialValidationResult> {
+    const timeout = createProviderTimeout(options.signal, requestTimeoutMs);
+    try {
+      const context = {
+        values: input.values,
+        fetcher: createProviderFetch({ fetch: options.fetcher }),
+        signal: timeout.signal,
+      };
+      await listObjects({ maxKeys: 1 }, context);
+      const bucket = required(input.values.bucket, "bucket");
+      return {
+        profile: { accountId: `${service}:${input.values.accessKeyId}`, displayName: `${displayName} - ${bucket}` },
+        metadata: {
+          region: input.values.region,
+          endpoint: managementEndpoint(input.values, "rsf").origin,
+          downloadDomain: downloadOrigin(input.values).origin,
+          bucket,
+          prefix: input.values.prefix,
+          credentialKind: "aksk",
+          signing: "qiniu-v2",
+        },
+      };
+    } catch (error) {
+      if (timeout.didTimeout()) throw new ProviderRequestError(504, "Qiniu Kodo credential validation timed out");
+      throw error;
+    } finally {
+      timeout.cleanup();
+    }
   },
 };
 
@@ -148,25 +183,33 @@ export async function discoverResources(
   if (credential?.authType !== "custom_credential") {
     throw new ProviderRequestError(401, "Configure qiniu_kodo custom credentials first.");
   }
-  const runtime = { values: credential.values, fetcher, signal: context.signal };
-  await listObjects({ maxKeys: 1 }, runtime);
-  const bucket = required(credential.values.bucket, "bucket");
-  return [
-    {
-      sourceType: service,
-      resourceId: bucket,
-      title: `${displayName} bucket ${bucket}`,
-      mimeType: "application/vnd.qiniu.kodo.bucket",
-      schema: compactObject({
-        name: bucket,
-        region: credential.values.region,
-        endpoint: managementEndpoint(credential.values, "rsf").origin,
-        prefix: credential.values.prefix,
-        allowlisted: true,
-      }),
-      url: `qiniu://${bucket}`,
-    },
-  ];
+  const timeout = createProviderTimeout(context.signal, requestTimeoutMs);
+  try {
+    const runtime = { values: credential.values, fetcher, signal: timeout.signal };
+    await listObjects({ maxKeys: 1 }, runtime);
+    const bucket = required(credential.values.bucket, "bucket");
+    return [
+      {
+        sourceType: service,
+        resourceId: bucket,
+        title: `${displayName} bucket ${bucket}`,
+        mimeType: "application/vnd.qiniu.kodo.bucket",
+        schema: compactObject({
+          name: bucket,
+          region: credential.values.region,
+          endpoint: managementEndpoint(credential.values, "rsf").origin,
+          prefix: credential.values.prefix,
+          allowlisted: true,
+        }),
+        url: `qiniu://${bucket}`,
+      },
+    ];
+  } catch (error) {
+    if (timeout.didTimeout()) throw new ProviderRequestError(504, "Qiniu Kodo discovery timed out");
+    throw error;
+  } finally {
+    timeout.cleanup();
+  }
 }
 
 async function listObjects(input: Record<string, unknown>, context: KodoContext): Promise<Record<string, unknown>> {
@@ -181,7 +224,7 @@ async function listObjects(input: Record<string, unknown>, context: KodoContext)
   const marker = optionalString(input.continuationToken);
   if (marker) url.searchParams.set("marker", marker);
   url.searchParams.set("limit", String(Math.min(Math.max(optionalInteger(input.maxKeys) ?? 100, 1), 1000)));
-  const result = await signedJson(context, url);
+  const result = await signedJson(context, url, "POST");
   const objects = array(result.items).flatMap((entry) => {
     const item = optionalRecord(entry);
     const key = optionalString(item?.key);
@@ -221,10 +264,17 @@ async function managementJson(
   return signedJson(context, url);
 }
 
-async function signedJson(context: KodoContext, url: URL): Promise<Record<string, unknown>> {
-  const headers = new Headers({ "x-qiniu-date": formatQiniuDate(new Date()) });
-  headers.set("authorization", qiniuAuthorization(url, "GET", headers, context.values));
-  const response = await context.fetcher(url, { headers, redirect: "error", signal: context.signal });
+async function signedJson(
+  context: KodoContext,
+  url: URL,
+  method: "GET" | "POST" = "GET",
+): Promise<Record<string, unknown>> {
+  const headers = new Headers({
+    "content-type": "application/x-www-form-urlencoded",
+    "x-qiniu-date": formatQiniuDate(new Date()),
+  });
+  headers.set("authorization", qiniuAuthorization(url, method, headers, context.values));
+  const response = await context.fetcher(url, { method, headers, redirect: "error", signal: context.signal });
   if (!response.ok) throw await kodoError(response);
   const bytes = await readBoundedResponseBytes(response, {
     maxBytes: maxMetadataBytes,
@@ -239,7 +289,7 @@ async function signedJson(context: KodoContext, url: URL): Promise<Record<string
   }
 }
 
-function qiniuAuthorization(url: URL, method: string, headers: Headers, values: Record<string, string>): string {
+export function qiniuAuthorization(url: URL, method: string, headers: Headers, values: Record<string, string>): string {
   const canonical = `${method} ${url.pathname}${url.search}\nHost: ${url.host}\nContent-Type: application/x-www-form-urlencoded\nX-Qiniu-Date: ${headers.get("x-qiniu-date")}\n\n`;
   return `Qiniu ${required(values.accessKeyId, "accessKeyId")}:${hmacUrl(required(values.secretAccessKey, "secretAccessKey"), canonical)}`;
 }
@@ -311,9 +361,11 @@ async function kodoError(response: Response): Promise<ProviderRequestError> {
     fieldName: "Qiniu Kodo error",
     createError: (message) => new ProviderRequestError(413, message),
   }).catch(() => new Uint8Array());
-  let message = "";
+  let providerCode: string | undefined;
   try {
-    message = optionalString(optionalRecord(JSON.parse(new TextDecoder().decode(bytes)))?.error) ?? "";
+    const payload = optionalRecord(JSON.parse(new TextDecoder().decode(bytes)));
+    providerCode =
+      typeof payload?.code === "number" || typeof payload?.code === "string" ? String(payload.code) : undefined;
   } catch {}
   const status =
     response.status === 401 || response.status === 403 || response.status === 404 || response.status === 429
@@ -323,7 +375,7 @@ async function kodoError(response: Response): Promise<ProviderRequestError> {
         : response.status;
   return new ProviderRequestError(
     status,
-    message ? `Qiniu Kodo request failed: ${message}` : "Qiniu Kodo request failed",
+    `${response.status === 401 || response.status === 403 ? "Qiniu Kodo authorization failed" : "Qiniu Kodo request failed"}${providerCode ? ` (${providerCode})` : ""}`,
   );
 }
 

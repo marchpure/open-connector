@@ -21,8 +21,8 @@ type TencentDocsEnvelope = {
 type TencentDocsActionHandler = (input: Record<string, unknown>, context: TencentDocsActionContext) => Promise<unknown>;
 
 export const tencentDocsActionHandlers: ProviderActionHandlers<"tencent_docs", TencentDocsActionHandler> = {
-  get_current_user(_input, { accessToken, fetcher }) {
-    return tencentDocsGetCurrentUser(accessToken, fetcher);
+  get_current_user(_input, { accessToken, fetcher, signal }) {
+    return tencentDocsGetCurrentUser(accessToken, fetcher, signal);
   },
   create_file(input, context) {
     return tencentDocsCreateFile(input, context);
@@ -71,8 +71,8 @@ export const tencentDocsActionHandlers: ProviderActionHandlers<"tencent_docs", T
   },
 };
 
-async function tencentDocsGetCurrentUser(accessToken: string, fetcher: typeof fetch) {
-  const user = await fetchTencentDocsUser(accessToken, fetcher);
+async function tencentDocsGetCurrentUser(accessToken: string, fetcher: typeof fetch, signal?: AbortSignal) {
+  const user = await fetchTencentDocsUser(accessToken, fetcher, signal);
   return {
     ret: 0,
     msg: "Succeed",
@@ -80,10 +80,10 @@ async function tencentDocsGetCurrentUser(accessToken: string, fetcher: typeof fe
   };
 }
 
-async function fetchTencentDocsUser(accessToken: string, fetcher: typeof fetch) {
+async function fetchTencentDocsUser(accessToken: string, fetcher: typeof fetch, signal?: AbortSignal) {
   const url = new URL(tencentDocsUserInfoUrl);
   url.searchParams.set("access_token", accessToken);
-  const envelope = await requestTencentDocsOAuthEnvelope(url, fetcher);
+  const envelope = await requestTencentDocsOAuthEnvelope(url, fetcher, signal);
   return requireRecord(envelope.data, "tencent_docs userinfo response data");
 }
 
@@ -448,18 +448,20 @@ async function requestTencentDocsOpenApi(
     method: input.method,
     headers,
     ...(body ? { body } : {}),
+    signal: context.signal,
   });
   const envelope = await parseTencentDocsJson<TencentDocsEnvelope>(response, "openapi");
   assertTencentDocsEnvelopeSuccess(envelope, response.status);
   return envelope;
 }
 
-async function requestTencentDocsOAuthEnvelope(url: URL, fetcher: typeof fetch) {
+async function requestTencentDocsOAuthEnvelope(url: URL, fetcher: typeof fetch, signal?: AbortSignal) {
   const response = await fetcher(url.toString(), {
     method: "GET",
     headers: {
       accept: "application/json",
     },
+    signal,
   });
   const envelope = await parseTencentDocsJson<TencentDocsEnvelope>(response, "oauth");
   assertTencentDocsEnvelopeSuccess(envelope, response.status);

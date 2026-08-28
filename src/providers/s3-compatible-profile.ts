@@ -22,8 +22,11 @@ export function s3CompatibleActions(profile: S3CompatibleProfile): ActionDefinit
       id: `${profile.service}.${action.name}`,
       service: profile.service,
       description: action.description.replace(/Amazon S3|AWS S3|S3/gu, profile.displayName),
-      resourceBindings: remapBindings(action.resourceBindings, profile),
-      resourceBindingsOptional: remapBindings(action.resourceBindingsOptional, profile),
+      resourceBindings:
+        action.name === "list_buckets"
+          ? undefined
+          : remapBindings(action.resourceBindings ?? action.resourceBindingsOptional, profile),
+      resourceBindingsOptional: undefined,
     }));
 }
 

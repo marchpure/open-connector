@@ -97,6 +97,7 @@ class AwsS3HttpError extends Error {
 }
 
 const sourceFetchTimeoutMs = 15_000;
+const s3CompatibleRequestTimeoutMs = 30_000;
 const maxSourceBytes = 20 * 1024 * 1024;
 const awsServiceName = "s3";
 const service = "aws_s3";
@@ -248,9 +249,72 @@ export function createS3CompatibleExecutors(profile: {
       )
       .map(([actionId, executor]) => [
         `${profile.service}.${actionId.slice("aws_s3.".length)}`,
-        (input: unknown, context: ExecutionContext) =>
-          executor(input, {
+        async (input: unknown, context: ExecutionContext) => {
+          const timeout = createProviderTimeout(context.signal, s3CompatibleRequestTimeoutMs);
+          try {
+            const result = await executor(input, {
+              ...context,
+              signal: timeout.signal,
+              getCredential: async (requestedService) => {
+                if (requestedService !== service) return context.getCredential(requestedService);
+                const credential = await context.getCredential(profile.service);
+                if (credential?.authType !== "custom_credential") return credential;
+                const values = profileValues(credential.values, profile);
+                return {
+                  ...credential,
+                  values,
+                  metadata: profileMetadata(credential.metadata, values),
+                };
+              },
+            });
+            return timeout.didTimeout()
+              ? {
+                  ok: false,
+                  error: {
+                    code: "provider_error",
+                    message: `${profile.service} request timed out`,
+                    details: { status: 504 },
+                  },
+                }
+              : result;
+          } finally {
+            timeout.cleanup();
+          }
+        },
+      ]),
+  );
+  return {
+    executors: mappedExecutors,
+    credentialValidators: {
+      async customCredential(input, options) {
+        const values = profileValues(input.values, profile);
+        const fetcher = await createS3Fetcher(values, options.fetcher);
+        const timeout = createProviderTimeout(options.signal, s3CompatibleRequestTimeoutMs);
+        try {
+          const result = await validateAwsCredential(values, fetcher, timeout.signal);
+          return {
+            ...result,
+            profile: {
+              ...result.profile,
+              displayName: `${profile.displayName} - ${input.values.bucket || input.values.region}`,
+            },
+            metadata: { ...result.metadata, providerProfile: profile.service },
+          };
+        } catch (error) {
+          if (timeout.didTimeout()) throw new ProviderRequestError(504, `${profile.service} validation timed out`);
+          throw error;
+        } finally {
+          timeout.cleanup();
+        }
+      },
+    },
+    async discoverResources(context, fetcher) {
+      const timeout = createProviderTimeout(context.signal, s3CompatibleRequestTimeoutMs);
+      try {
+        const resources = await discoverResources(
+          {
             ...context,
+            signal: timeout.signal,
             getCredential: async (requestedService) => {
               if (requestedService !== service) return context.getCredential(requestedService);
               const credential = await context.getCredential(profile.service);
@@ -262,52 +326,23 @@ export function createS3CompatibleExecutors(profile: {
                 metadata: profileMetadata(credential.metadata, values),
               };
             },
-          }),
-      ]),
-  );
-  return {
-    executors: mappedExecutors,
-    credentialValidators: {
-      async customCredential(input, options) {
-        const values = profileValues(input.values, profile);
-        const fetcher = await createS3Fetcher(values, options.fetcher);
-        const result = await validateAwsCredential(values, fetcher);
-        return {
-          ...result,
-          profile: {
-            ...result.profile,
-            displayName: `${profile.displayName} - ${input.values.bucket || input.values.region}`,
           },
-          metadata: { ...result.metadata, providerProfile: profile.service },
-        };
-      },
-    },
-    async discoverResources(context, fetcher) {
-      const resources = await discoverResources(
-        {
-          ...context,
-          getCredential: async (requestedService) => {
-            if (requestedService !== service) return context.getCredential(requestedService);
-            const credential = await context.getCredential(profile.service);
-            if (credential?.authType !== "custom_credential") return credential;
-            const values = profileValues(credential.values, profile);
-            return {
-              ...credential,
-              values,
-              metadata: profileMetadata(credential.metadata, values),
-            };
-          },
-        },
-        profile.service === "minio"
-          ? await createS3Fetcher(await profileValuesForDiscovery(context, profile), fetcher)
-          : fetcher,
-      );
-      return resources.map((resource) => ({
-        ...resource,
-        sourceType: profile.service as "tencent_cos" | "huawei_obs" | "minio" | "qiniu_kodo",
-        mimeType: `application/vnd.${profile.service.replace("_", ".")}.bucket`,
-        title: resource.title?.replace("S3", profile.displayName),
-      }));
+          profile.service === "minio"
+            ? await createS3Fetcher(await profileValuesForDiscovery(context, profile), fetcher)
+            : fetcher,
+        );
+        return resources.map((resource) => ({
+          ...resource,
+          sourceType: profile.service as "tencent_cos" | "huawei_obs" | "minio" | "qiniu_kodo",
+          mimeType: `application/vnd.${profile.service.replace("_", ".")}.bucket`,
+          title: resource.title?.replace("S3", profile.displayName),
+        }));
+      } catch (error) {
+        if (timeout.didTimeout()) throw new ProviderRequestError(504, `${profile.service} discovery timed out`);
+        throw error;
+      } finally {
+        timeout.cleanup();
+      }
     },
   };
 }
@@ -426,6 +461,7 @@ export async function discoverResources(
 async function validateAwsCredential(
   input: Record<string, string>,
   fetcher: typeof fetch,
+  signal?: AbortSignal,
 ): Promise<CredentialValidationResult> {
   const accessKeyId = requireAwsField(input.accessKeyId, "accessKeyId");
   const secretAccessKey = requireAwsField(input.secretAccessKey, "secretAccessKey");
@@ -446,7 +482,7 @@ async function validateAwsCredential(
 
   try {
     if (bucket) {
-      const bucketValidation = await validateBucketCredential(client, bucket);
+      const bucketValidation = await validateBucketCredential(client, bucket, signal);
       if (bucketValidation.validated) {
         return {
           profile: {
@@ -470,6 +506,7 @@ async function validateAwsCredential(
       query: {
         "max-buckets": 1,
       },
+      signal,
     });
     const xml = await readBoundedResponseText(response, "AWS S3 credential validation", undefined);
     const parsed = parseListBucketsXml(xml);
@@ -794,11 +831,12 @@ function normalizeAwsS3ProxyBody(body: unknown): string | undefined {
   return typeof body === "string" ? body : JSON.stringify(body);
 }
 
-async function validateBucketCredential(client: AwsS3ClientConfig, bucket: string) {
+async function validateBucketCredential(client: AwsS3ClientConfig, bucket: string, signal?: AbortSignal) {
   try {
     await awsS3Request(client, {
       method: "HEAD",
       bucket,
+      signal,
     });
     return { validated: true };
   } catch (error) {

@@ -236,6 +236,7 @@ export const baiduNetdiskActions: ProviderActionDefinition[] = [
       items: s.array("The normalized semantic matches.", semanticFileSchema),
       truncated: s.boolean("Whether Baidu reports that more matches may be available."),
     }),
+    resourceBindingsOptional: { path: ["application/vnd.baidu-netdisk.folder"] },
   }),
   defineProviderAction("baidu_netdisk", {
     name: "download_file",

@@ -3,6 +3,7 @@ import { Agent, fetch as undiciFetch } from "undici";
 import { ProviderRequestError } from "../provider-runtime.ts";
 
 const agents = new Map<string, Agent>();
+const maxCachedAgents = 32;
 
 /**
  * Build a Node-only fetch transport that trusts one connection-scoped CA.
@@ -13,6 +14,13 @@ export async function createMinioTlsFetch(caCertificate: string): Promise<typeof
   const key = createHash("sha256").update(caCertificate).digest("hex");
   let agent = agents.get(key);
   if (!agent) {
+    if (agents.size >= maxCachedAgents) {
+      const oldest = agents.entries().next().value as [string, Agent] | undefined;
+      if (oldest) {
+        agents.delete(oldest[0]);
+        void oldest[1].close();
+      }
+    }
     agent = new Agent({ connect: { ca: caCertificate, rejectUnauthorized: true } });
     agents.set(key, agent);
   }

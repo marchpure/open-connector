@@ -12,7 +12,12 @@ import { createHash, createHmac } from "node:crypto";
 import { posix } from "node:path";
 import { compactObject, optionalInteger, optionalRecord, optionalString } from "../core/cast.ts";
 import { assertPublicHttpUrl, assertSafeObjectResponse, readBoundedResponseBytes } from "../core/request.ts";
-import { createProviderFetch, ProviderRequestError, toProviderExecutionError } from "./provider-runtime.ts";
+import {
+  createProviderFetch,
+  createProviderTimeout,
+  ProviderRequestError,
+  toProviderExecutionError,
+} from "./provider-runtime.ts";
 
 export type NativeStorageService = "tencent_cos" | "huawei_obs";
 
@@ -45,6 +50,7 @@ interface NativeObjectPage {
 }
 
 const xmlParser = new XMLParser({ ignoreAttributes: false, parseTagValue: false, trimValues: false });
+const nativeStorageTimeoutMs = 30_000;
 
 export function createNativeObjectStorageRuntime(profile: NativeStorageProfile): {
   executors: ProviderExecutors;
@@ -140,6 +146,7 @@ export function createNativeObjectStorageRuntime(profile: NativeStorageProfile):
     Object.entries(handlers).map(([name, handler]) => [
       `${profile.service}.${name}`,
       async (input: unknown, context: ExecutionContext) => {
+        const timeout = createProviderTimeout(context.signal, nativeStorageTimeoutMs);
         try {
           const credential = await context.getCredential(profile.service);
           if (credential?.authType !== "custom_credential") {
@@ -151,11 +158,19 @@ export function createNativeObjectStorageRuntime(profile: NativeStorageProfile):
               values: credential.values,
               fetcher: createProviderFetch(),
               transitFiles: context.transitFiles,
-              signal: context.signal,
+              signal: timeout.signal,
             }),
           };
         } catch (error) {
+          if (timeout.didTimeout()) {
+            return toProviderExecutionError(
+              new ProviderRequestError(504, `${profile.displayName} request timed out`),
+              `${profile.displayName} request failed`,
+            );
+          }
           return toProviderExecutionError(error, `${profile.displayName} request failed`);
+        } finally {
+          timeout.cleanup();
         }
       },
     ]),
@@ -163,24 +178,38 @@ export function createNativeObjectStorageRuntime(profile: NativeStorageProfile):
   return {
     executors,
     credentialValidators: {
-      async customCredential(input): Promise<CredentialValidationResult> {
-        const context: NativeStorageContext = { values: input.values, fetcher: createProviderFetch() };
-        const bucket = requiredValue(input.values.bucket, "bucket");
-        await nativeRequest(profile, context, { method: "HEAD", bucket });
-        return {
-          profile: {
-            accountId: `${profile.service}:${input.values.accessKeyId}`,
-            displayName: `${profile.displayName} - ${bucket}`,
-          },
-          metadata: {
-            region: input.values.region,
-            endpoint: profile.buildEndpoint(input.values).origin,
-            bucket,
-            prefix: input.values.prefix,
-            credentialKind: input.values.sessionToken ? "temporary" : "aksk",
-            signing: profile.service,
-          },
-        };
+      async customCredential(input, options): Promise<CredentialValidationResult> {
+        const timeout = createProviderTimeout(options.signal, nativeStorageTimeoutMs);
+        try {
+          const context: NativeStorageContext = {
+            values: input.values,
+            fetcher: createProviderFetch({ fetch: options.fetcher }),
+            signal: timeout.signal,
+          };
+          const bucket = requiredValue(input.values.bucket, "bucket");
+          await nativeRequest(profile, context, { method: "HEAD", bucket });
+          return {
+            profile: {
+              accountId: `${profile.service}:${input.values.accessKeyId}`,
+              displayName: `${profile.displayName} - ${bucket}`,
+            },
+            metadata: {
+              region: input.values.region,
+              endpoint: profile.buildEndpoint(input.values).origin,
+              bucket,
+              prefix: input.values.prefix,
+              credentialKind: input.values.sessionToken ? "temporary" : "aksk",
+              signing: profile.service,
+            },
+          };
+        } catch (error) {
+          if (timeout.didTimeout()) {
+            throw new ProviderRequestError(504, `${profile.displayName} credential validation timed out`);
+          }
+          throw error;
+        } finally {
+          timeout.cleanup();
+        }
       },
     },
     async discoverResources(context, fetcher) {
@@ -188,25 +217,35 @@ export function createNativeObjectStorageRuntime(profile: NativeStorageProfile):
       if (credential?.authType !== "custom_credential") {
         throw new ProviderRequestError(401, `Configure ${profile.service} custom credentials first.`);
       }
-      const bucket = requiredValue(credential.values.bucket, "bucket");
-      const runtime = { values: credential.values, fetcher, signal: context.signal };
-      await nativeRequest(profile, runtime, { method: "HEAD", bucket });
-      return [
-        {
-          sourceType: profile.service,
-          resourceId: bucket,
-          title: `${profile.displayName} bucket ${bucket}`,
-          mimeType: profile.bucketMimeType,
-          schema: compactObject({
-            name: bucket,
-            region: credential.values.region,
-            endpoint: profile.buildEndpoint(credential.values).origin,
-            prefix: credential.values.prefix,
-            allowlisted: true,
-          }),
-          url: buildNativeUrl(profile, credential.values, bucket).toString(),
-        },
-      ];
+      const timeout = createProviderTimeout(context.signal, nativeStorageTimeoutMs);
+      try {
+        const bucket = requiredValue(credential.values.bucket, "bucket");
+        const runtime = { values: credential.values, fetcher, signal: timeout.signal };
+        await nativeRequest(profile, runtime, { method: "HEAD", bucket });
+        return [
+          {
+            sourceType: profile.service,
+            resourceId: bucket,
+            title: `${profile.displayName} bucket ${bucket}`,
+            mimeType: profile.bucketMimeType,
+            schema: compactObject({
+              name: bucket,
+              region: credential.values.region,
+              endpoint: profile.buildEndpoint(credential.values).origin,
+              prefix: credential.values.prefix,
+              allowlisted: true,
+            }),
+            url: buildNativeUrl(profile, credential.values, bucket).toString(),
+          },
+        ];
+      } catch (error) {
+        if (timeout.didTimeout()) {
+          throw new ProviderRequestError(504, `${profile.displayName} discovery timed out`);
+        }
+        throw error;
+      } finally {
+        timeout.cleanup();
+      }
     },
   };
 }
@@ -322,8 +361,8 @@ function parseHead(headers: Headers, bucket: string, objectKey: string): Record<
   };
 }
 
-export function cosSign(request: Request, values: Record<string, string>): void {
-  const now = Math.floor(Date.now() / 1000);
+export function cosSign(request: Request, values: Record<string, string>, nowDate: Date = new Date()): void {
+  const now = Math.floor(nowDate.getTime() / 1000);
   const keyTime = `${now - 60};${now + 900}`;
   if (values.sessionToken) request.headers.set("x-cos-security-token", values.sessionToken);
   const url = new URL(request.url);
@@ -348,8 +387,8 @@ export function cosSign(request: Request, values: Record<string, string>): void 
   );
 }
 
-export function obsSign(request: Request, values: Record<string, string>): void {
-  const date = new Date().toUTCString();
+export function obsSign(request: Request, values: Record<string, string>, nowDate: Date = new Date()): void {
+  const date = nowDate.toUTCString();
   request.headers.set("date", date);
   if (values.sessionToken) request.headers.set("x-obs-security-token", values.sessionToken);
   const url = new URL(request.url);
