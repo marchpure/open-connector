@@ -5,7 +5,10 @@
   "baseCommit": "69ad6f8028eaf3a34b706012c72dc3f099a348e2",
   "branch": "feat/connection-expansion-w1-databases",
   "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-w1-databases",
-  "implementationCommits": ["f52d2d72fb63b52957ed95e781dc18627ac8bb27"],
+  "implementationCommits": [
+    "f52d2d72fb63b52957ed95e781dc18627ac8bb27",
+    "fcecc1579f66d6cfca416900522d6211267efb21"
+  ],
   "sourceWorktreeIsolation": {
     "path": "/Users/bytedance/.codex/worktrees/knowledge-connection-service-open-connector",
     "baseline": "69ad6f8028eaf3a34b706012c72dc3f099a348e2",
