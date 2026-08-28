@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "service": "starrocks",
   "engineImage": "starrocks/allin1-ubuntu:latest",
-  "capturedAt": "2026-08-28T03:04:48.781Z",
+  "capturedAt": "2026-08-28T05:50:59.481Z",
   "environment": {
     "architecture": "arm64",
     "platform": "darwin"

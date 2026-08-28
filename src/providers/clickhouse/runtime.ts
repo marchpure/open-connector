@@ -588,7 +588,12 @@ async function requestClickhouseJson(input: ClickhouseRequestInput): Promise<Cli
     if (!text.trim()) {
       throw new ProviderRequestError(502, "ClickHouse returned an empty response");
     }
-    return parseClickhouseJson(text);
+    const payload = parseClickhouseJson(text);
+    const exception = optionalString(payload.exception);
+    if (exception) {
+      throw createClickhouseError(500, exception, input.phase);
+    }
+    return payload;
   } catch (error) {
     if (isAbortLikeError(error) && timeout.didTimeout()) {
       throw new ProviderRequestError(504, "ClickHouse request timed out after 30 seconds");
