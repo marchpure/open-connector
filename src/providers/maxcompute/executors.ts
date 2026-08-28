@@ -105,6 +105,7 @@ const handlers = {
   },
   async list_tables(input: Record<string, unknown>, context: MaxComputeContext) {
     const project = optionalString(input.project) ?? context.project;
+    assertMaxComputeProjectScope(project, context.project);
     const schema = optionalString(input.schema) ?? "default";
     const response = await context.client.listTables(
       project,
@@ -125,6 +126,7 @@ const handlers = {
   },
   async describe_table(input: Record<string, unknown>, context: MaxComputeContext) {
     const project = optionalString(input.project) ?? context.project;
+    assertMaxComputeProjectScope(project, context.project);
     const schema = optionalString(input.schema) ?? "default";
     const table = requiredString(input.table, "table");
     const response = await context.client.getTableInfo(project, table, new GetTableInfoRequest({ schemaName: schema }));
@@ -231,4 +233,13 @@ function boundedPageSize(value: unknown): number {
     throw new ProviderRequestError(400, "pageSize must be an integer from 1 to 100.");
   }
   return number;
+}
+
+export function assertMaxComputeProjectScope(project: string, configuredProject: string): void {
+  if (project !== configuredProject) {
+    throw new ProviderRequestError(
+      403,
+      "MaxCompute table operations are restricted to the configured project.",
+    );
+  }
 }
