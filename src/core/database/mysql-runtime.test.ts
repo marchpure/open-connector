@@ -68,7 +68,7 @@ describe("MySQL-wire analytical runtime", () => {
       [],
     );
   });
-  it("preserves native MySQL-wire type names in query metadata", async () => {
+    it("preserves native MySQL-wire type names in query metadata", async () => {
     setPrivateNetworkAccessAllowed(true);
     process.env.CONNECTION_DATABASE_EGRESS_ALLOWLIST = "8.8.8.8";
     const connection = {

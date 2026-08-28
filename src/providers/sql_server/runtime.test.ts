@@ -145,7 +145,7 @@ describe("SQL Server runtime contract", () => {
       text.includes("openconnector_read")
         ? {
             recordset: Object.assign([{ value: "safe" }], {
-              columns: { value: { name: "value" } },
+              columns: { value: { name: "value", type: { name: "NVARCHAR" } } },
             }),
           }
         : mssql.readonlyResult,
@@ -161,6 +161,26 @@ describe("SQL Server runtime contract", () => {
     const queryRequest = mssql.requests.at(-1);
     expect(queryRequest?.input).toHaveBeenCalledWith("p1", "'; drop table users; --");
     expect(queryRequest?.query).toHaveBeenCalledWith(expect.not.stringContaining("drop table users"));
+  });
+
+  it("returns native SQL Server type names in query metadata", async () => {
+    mssql.setQueryImplementation(async (text) =>
+      text.includes("openconnector_read")
+        ? {
+            recordset: Object.assign([{ value: "safe" }], {
+              columns: { value: { name: "value", type: { name: "NVARCHAR" } } },
+            }),
+          }
+        : mssql.readonlyResult,
+    );
+    const backend = await createSqlServerBackend({ ...baseCredential, username: "metadata-reader" });
+    const result = await backend.executeReadQuery("select cast('safe' as nvarchar(10)) as value", [], {
+      maxRows: 10,
+      maxBytes: 1024,
+      timeoutMs: 1000,
+    });
+
+    expect(result.columns).toEqual([{ name: "value", dataType: "NVARCHAR" }]);
   });
 
   it("cancels a request at its timeout and returns the stable timeout class", async () => {
