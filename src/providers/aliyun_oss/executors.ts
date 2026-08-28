@@ -119,6 +119,14 @@ interface AliyunClientOptions {
   securityToken?: string;
   endpoint: string;
   bucket?: string;
+  fetcher?: typeof fetch;
+  signal?: AbortSignal;
+}
+
+interface AliyunOssUrllibOptions {
+  method: string;
+  headers?: Record<string, string>;
+  content?: string | Buffer;
 }
 
 interface AliyunOssContext {
@@ -293,12 +301,16 @@ export const proxy: ProviderProxyExecutor = async (input, context) => {
 };
 
 export const credentialValidators: CredentialValidators = {
-  async customCredential(input): Promise<CredentialValidationResult> {
-    return validateAliyunOssCredential(input.values);
+  async customCredential(input, { fetcher, signal }): Promise<CredentialValidationResult> {
+    return validateAliyunOssCredential(input.values, fetcher, signal);
   },
 };
 
-async function validateAliyunOssCredential(input: Record<string, string>): Promise<CredentialValidationResult> {
+async function validateAliyunOssCredential(
+  input: Record<string, string>,
+  fetcher: typeof fetch,
+  signal?: AbortSignal,
+): Promise<CredentialValidationResult> {
   const accessKeyId = requireAliyunField(input.accessKeyId, "accessKeyId");
   const accessKeySecret = requireAliyunField(input.accessKeySecret, "accessKeySecret");
   const endpoint = normalizeEndpoint(requireAliyunField(input.endpoint, "endpoint"));
@@ -311,6 +323,8 @@ async function validateAliyunOssCredential(input: Record<string, string>): Promi
       accessKeySecret,
       securityToken,
       endpoint,
+      fetcher,
+      signal,
     });
     const result = await client.listBuckets({ "max-keys": 1 });
     const firstBucket = normalizeBucket(result.buckets?.[0]);
@@ -349,7 +363,37 @@ async function createAliyunOssClient(input: AliyunClientOptions): Promise<Aliyun
     endpoint: stripProtocol(endpoint),
     bucket: input.bucket,
     secure: true,
-  }) as unknown as AliyunOssClient;
+    urllib: input.fetcher ? createAliyunOssUrllib(input.fetcher, input.signal) : undefined,
+  } as never) as unknown as AliyunOssClient;
+}
+
+function createAliyunOssUrllib(fetcher: typeof fetch, signal?: AbortSignal) {
+  return {
+    async request(url: string, options: AliyunOssUrllibOptions) {
+      const response = await fetcher(url, {
+        method: options.method,
+        headers: options.headers,
+        body: options.content == null ? undefined : (toRequestBody(options.content) as BodyInit),
+        signal,
+      });
+      const data = await readBoundedResponseBytes(response, {
+        maxBytes: 2 * 1024 * 1024,
+        fieldName: "Alibaba Cloud OSS SDK response",
+        signal,
+        createError: (message) => new ProviderRequestError(413, message),
+      });
+      return {
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        data: Buffer.from(data),
+        res: response,
+      };
+    },
+  };
+}
+
+function toRequestBody(value: string | Buffer): string | Buffer {
+  return value;
 }
 
 function buildAliyunOssProxyBaseUrl(endpoint: string, bucket: string | undefined): string {
@@ -595,6 +639,8 @@ async function aliyunDownloadObject(input: Record<string, unknown>, context: Ali
       name,
       mimeType,
       sizeBytes: file.sizeBytes,
+      etag: response.headers.get("etag"),
+      versionId: response.headers.get("x-oss-version-id"),
       file,
     };
   } catch (error) {
@@ -727,6 +773,8 @@ async function createClientForAction(
     securityToken: optionalString(context.values.securityToken),
     endpoint,
     bucket,
+    fetcher: context.fetcher,
+    signal: context.signal,
   });
 }
 

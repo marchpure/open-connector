@@ -50,6 +50,8 @@ const downloadedObjectSchema = s.requiredObject("A downloaded S3 object stored i
     name: s.nonEmptyString("The stored transit file name."),
     mimeType: s.nonEmptyString("The stored transit file MIME type."),
   }),
+  etag: s.nullable(s.string("The downloaded object's ETag, or null when S3 omitted it.")),
+  versionId: s.nullable(s.string("The downloaded object's version ID, or null when S3 omitted it.")),
 });
 
 const objectMetadataSchema = s.object("Structured S3 object metadata.", {

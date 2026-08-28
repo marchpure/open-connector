@@ -49,6 +49,8 @@ const downloadedObjectSchema = s.requiredObject("A downloaded OSS object stored 
     name: s.nonEmptyString("The stored transit file name."),
     mimeType: s.nonEmptyString("The stored transit file MIME type."),
   }),
+  etag: s.nullable(s.string("The downloaded object's ETag, or null when OSS omitted it.")),
+  versionId: s.nullable(s.string("The downloaded object's version ID, or null when OSS omitted it.")),
 });
 
 const objectMetadataSchema = s.object("Structured OSS object metadata.", {

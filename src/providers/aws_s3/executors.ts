@@ -303,7 +303,7 @@ async function awsListBuckets(input: Record<string, unknown>, context: AwsAction
     }),
     signal: context.signal,
   });
-  const xml = await response.text();
+  const xml = await readBoundedResponseText(response, "AWS S3 bucket listing", context.signal);
   const parsed = parseListBucketsXml(xml);
 
   return {
@@ -340,7 +340,7 @@ async function awsListObjects(input: Record<string, unknown>, context: AwsAction
     }),
     signal: context.signal,
   });
-  const xml = await response.text();
+  const xml = await readBoundedResponseText(response, "AWS S3 object listing", context.signal);
   const parsed = parseListObjectsXml(xml, { bucket, region });
 
   return parsed;
@@ -424,6 +424,8 @@ async function awsDownloadObject(input: Record<string, unknown>, context: AwsAct
       name,
       mimeType,
       sizeBytes: file.sizeBytes,
+      etag: response.headers.get("etag"),
+      versionId: response.headers.get("x-amz-version-id"),
       file,
     };
   } catch (error) {
@@ -830,7 +832,7 @@ function normalizeRequestBody(value: AwsS3RequestInput["body"]) {
 }
 
 async function createAwsS3HttpError(response: Response) {
-  const text = await response.text();
+  const text = await readBoundedResponseText(response, "AWS S3 error response");
   const parsedError = parseAwsErrorXml(text);
   return new AwsS3HttpError({
     status: response.status,
@@ -1105,6 +1107,16 @@ async function downloadSourceFile(sourceUrl: string, signal?: AbortSignal) {
   } finally {
     timeout.cleanup();
   }
+}
+
+async function readBoundedResponseText(response: Response, fieldName: string, signal?: AbortSignal): Promise<string> {
+  const bytes = await readBoundedResponseBytes(response, {
+    maxBytes: 2 * 1024 * 1024,
+    fieldName,
+    signal,
+    createError: (message) => new ProviderRequestError(413, message),
+  });
+  return new TextDecoder().decode(bytes);
 }
 
 function validateSourceUrl(value: string): URL {

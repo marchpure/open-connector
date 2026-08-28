@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   assertPublicHttpUrl,
+  readBoundedResponseBytes,
   classifyIpAddress,
   isBlockedIpAddress,
   isEgressTrustedHost,
@@ -328,5 +329,34 @@ describe("trusted egress hosts", () => {
   it("trusts no hosts by default", () => {
     expect(isEgressTrustedHost("open.feishu.cn")).toBe(false);
     expect(isEgressTrustedHost("")).toBe(false);
+  });
+});
+
+describe("readBoundedResponseBytes", () => {
+  it("cancels a pending upstream reader when the caller aborts", async () => {
+    const controller = new AbortController();
+    let cancelled = false;
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(streamController) {
+          streamController.enqueue(new Uint8Array([1]));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }),
+    );
+
+    const reading = readBoundedResponseBytes(response, {
+      maxBytes: 1024,
+      fieldName: "object",
+      signal: controller.signal,
+      createError: (message) => new Error(message),
+    });
+    await Promise.resolve();
+    controller.abort();
+
+    await expect(reading).rejects.toThrow("object was aborted");
+    expect(cancelled).toBe(true);
   });
 });

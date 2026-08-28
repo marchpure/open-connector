@@ -66,6 +66,8 @@ describe("AWS S3 download_object", () => {
         name: "annual report #1.pdf",
         mimeType: "application/pdf",
         sizeBytes: content.length,
+        etag: '"etag-1"',
+        versionId: null,
         file: {
           fileId: "transit-file-1",
           downloadUrl: "http://localhost/api/files/transit-file-1",
