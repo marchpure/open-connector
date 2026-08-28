@@ -90,6 +90,17 @@ const tencentDocsSmartsheetSheetSchema = s.object("A Tencent Docs Smartsheet chi
   raw: rawObjectSchema,
 });
 
+const readSmartsheetRecordsInputSchema = s.object(
+  "Input for reading one bounded page of Tencent Docs Smartsheet records.",
+  {
+    fileID: nonEmptyString("The Tencent Docs Smartsheet file ID."),
+    sheetID: nonEmptyString("The child sheet ID returned by list_smartsheet_sheets."),
+    limit: s.positiveInteger("The maximum number of records to return, capped at 100.", { maximum: 100 }),
+    offset: s.nonNegativeInteger("The zero-based record offset."),
+  },
+  { optional: ["limit", "offset"] },
+);
+
 const createFileInputSchema = s.object(
   "Input for creating a Tencent Docs online file.",
   {
@@ -443,6 +454,26 @@ export const tencentDocsActions: ActionDefinition[] = [
       raw: rawObjectSchema,
     }),
     resourceBindings: { fileID: ["application/vnd.tencent-docs.smartsheet"] },
+  }),
+  defineAction({
+    service: "tencent_docs",
+    name: "get_smartsheet_records",
+    description: "Read up to one hundred records from a discovered Tencent Docs Smartsheet child sheet.",
+    requiredScopes: [tencentDocsConnectorScopes.smartsheetRead],
+    providerPermissions: [tencentDocsProviderScopes.smartsheetReadonly],
+    inputSchema: readSmartsheetRecordsInputSchema,
+    outputSchema: s.object("One bounded Tencent Docs Smartsheet record page.", {
+      ...apiResponseBaseSchema,
+      records: s.array("The records returned by Tencent Docs.", rawObjectSchema, { maxItems: 100 }),
+      total: nullableInteger("The total record count returned by Tencent Docs."),
+      hasMore: nullableBoolean("Whether Tencent Docs reports more records."),
+      offset: s.nonNegativeInteger("The zero-based record offset."),
+      raw: rawObjectSchema,
+    }),
+    resourceBindings: {
+      fileID: ["application/vnd.tencent-docs.smartsheet"],
+      sheetID: ["application/vnd.tencent-docs.smartsheet.sheet"],
+    },
   }),
   defineAction({
     service: "tencent_docs",

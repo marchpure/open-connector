@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "status": "CONNECTION_INCREMENTAL_P2_FROZEN_WITH_EXTERNAL_BLOCKERS",
+  "status": "CONNECTION_INCREMENTAL_P2_CANDIDATE_WITH_EXTERNAL_BLOCKERS",
   "baseSha": "3bbd44624933300487a54ee3acba23190b66ee98",
   "branch": "feat/connection-expansion-p2-cn-office-storage",
   "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-p2-cn-office-storage",
@@ -69,6 +69,7 @@
           "get_doc_content",
           "get_sheet_range",
           "list_smartsheet_sheets",
+          "get_smartsheet_records",
           "start_export",
           "get_export_progress"
         ],
@@ -83,7 +84,7 @@
         ]
       },
       "tier": "beta",
-      "evidence": "Contract tests cover bounded/redacted discovery, ResourceRef identity, optional folder authorization binding, temporary export URL removal, and request cancellation.",
+      "evidence": "Contract tests cover bounded/redacted discovery, ResourceRef identity, optional folder authorization binding, provider-observed nested file and Smart Sheet identities, bounded Smart Sheet record pages, temporary export URL removal, and request cancellation.",
       "revocation": "Connection revision and lease checks fail closed after revoke/delete; upstream revoke requires a real account.",
       "externalBlocker": "No Tencent Docs enterprise OAuth app and user account were available for a real authorize/read/revoke lifecycle."
     },
@@ -198,7 +199,7 @@
   ],
   "security": {
     "credentialOwnership": "All credentials remain encrypted behind credential_ref and are resolved only inside the server runtime.",
-    "authorization": "Discovery is connection-scoped; resource-bound reads exact-match the latest revision's ResourceRef and upstream access is checked again on every invocation. Expired OAuth credentials refresh before validation, discovery, lease issuance, and action execution; the atomic credential update advances the connection revision so pre-refresh leases fail closed.",
+    "authorization": "Discovery is connection-scoped; resource-bound reads exact-match the latest revision's ResourceRef and upstream access is checked again on every invocation. Successful leased Tencent Docs, WPS MCP, and Baidu Netdisk list/search actions append only bounded provider-returned identities after an atomic tenant/service/revision recheck; failed actions, guessed IDs, stale revisions, and cross-tenant observations add nothing. Expired OAuth credentials refresh before validation, discovery, lease issuance, and action execution; the atomic credential update advances the connection revision so pre-refresh leases fail closed.",
     "leasePolicy": "Office mutations, generic WPS tool calls, storage writes/deletes, and presigned URLs cannot enter Agent leases.",
     "storage": "Bucket and prefix are allowlisted, endpoint overrides are pinned to the configured origin, reads are streamed/bounded, unsafe MIME is rejected, and version/ETag preconditions are preserved.",
     "ssrf": "Public storage endpoints use public-only DNS validation. MinIO private networking requires the deployment-level opt-in and cannot reach cloud metadata or other always-blocked addresses."
@@ -210,11 +211,11 @@
     "The existing Feishu, DingTalk, WeCom, AWS S3, Aliyun OSS, and Volcengine TOS implementations are regression baselines."
   ],
   "verification": {
-    "generateCatalog": "passed; 1457 providers and 15225 actions",
+    "generateCatalog": "passed; 1457 providers and 15226 actions",
     "generateRegistry": "passed; 1457 Node providers and 1449 Cloudflare providers",
     "fixCheck": "passed; lint, format, registry generation, and src/scripts/examples typecheck",
-    "focusedTests": "passed; 11 files and 139 tests across P2 providers, Baidu Netdisk, AWS S3/MinIO, OAuth refresh/configuration, ActionRunner scope enforcement, ResourceStore, Connection Service, and Control Plane",
-    "fullTests": "passed; 172 files passed, 1 skipped; 1583 tests passed, 4 skipped",
+    "focusedTests": "passed; targeted Control Plane, ResourceStore, and P2 provider run covered 3 files and 47 tests",
+    "fullTests": "passed; 172 files passed, 1 skipped; 1587 tests passed, 4 skipped",
     "build": "passed",
     "npmAuditOmitDev": "passed; 0 vulnerabilities",
     "npmAudit": "passed; 0 vulnerabilities",

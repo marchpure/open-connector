@@ -3,6 +3,7 @@ import type { ExecutionContext, ResolvedCredential, TransitFileStore } from "../
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setDefaultGuardedFetchDnsLookup } from "../core/guarded-fetch.ts";
 import { setPrivateNetworkAccessAllowed } from "../core/request.ts";
+import { observeActionResources as observeBaiduNetdiskResources } from "./baidu_netdisk/executors.ts";
 import { discoverResources as discoverHuaweiObsResources } from "./huawei_obs/executors.ts";
 import { credentialValidators as huaweiObsValidators } from "./huawei_obs/executors.ts";
 import { executors as huaweiObsExecutors } from "./huawei_obs/executors.ts";
@@ -19,9 +20,12 @@ import { discoverResources as discoverTencentCosResources } from "./tencent_cos/
 import { provider as tencentDocsProvider } from "./tencent_docs/definition.ts";
 import { credentialValidators as tencentDocsValidators } from "./tencent_docs/executors.ts";
 import { discoverResources as discoverTencentDocsResources } from "./tencent_docs/executors.ts";
+import { executors as tencentDocsExecutors } from "./tencent_docs/executors.ts";
+import { observeActionResources as observeTencentDocsResources } from "./tencent_docs/executors.ts";
 import { wpsMcpActions } from "./wps_mcp/actions.ts";
 import { credentialValidators as wpsMcpValidators } from "./wps_mcp/executors.ts";
 import { discoverResources as discoverWpsResources } from "./wps_mcp/executors.ts";
+import { observeActionResources as observeWpsResources } from "./wps_mcp/executors.ts";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -97,6 +101,82 @@ describe("P2 CN office and storage discovery", () => {
         signal: controller.signal,
       }),
     ).rejects.toMatchObject({ status: 413 });
+  });
+
+  it("reads a bounded Tencent Docs Smartsheet record page", async () => {
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe("/openapi/smartbook/v2/files/smart-1/sheets/sheet-1");
+      expect(request.method).toBe("POST");
+      expect(await request.json()).toEqual({ action: "getRecords", limit: 100, offset: 20 });
+      return Response.json({
+        ret: 0,
+        msg: "Succeed",
+        data: {
+          records: Array.from({ length: 120 }, (_, index) => ({ recordId: `record-${index}`, fields: {} })),
+          total: 140,
+          hasMore: true,
+        },
+      });
+    });
+
+    const result = await tencentDocsExecutors["tencent_docs.get_smartsheet_records"]!(
+      { fileID: "smart-1", sheetID: "sheet-1", limit: 100, offset: 20 },
+      contextFor("tencent_docs", tencentDocsCredential),
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      output: { total: 140, hasMore: true, offset: 20, raw: { bounded: true } },
+    });
+    expect(result.ok && (result.output as { records: unknown[] }).records).toHaveLength(100);
+  });
+
+  it("normalizes only provider-returned office list and search resources", () => {
+    expect(
+      observeTencentDocsResources("tencent_docs.search_files", {
+        items: [{ ID: "doc-2", type: "doc", title: "Nested" }, { title: "missing id" }],
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        sourceType: "tencent_docs",
+        resourceId: "doc-2",
+        mimeType: "application/vnd.tencent-docs.doc",
+      }),
+    ]);
+    expect(
+      observeTencentDocsResources("tencent_docs.list_smartsheet_sheets", {
+        sheets: [{ sheetID: "sheet-2", title: "Tasks" }],
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        resourceId: "sheet-2",
+        mimeType: "application/vnd.tencent-docs.smartsheet.sheet",
+      }),
+    ]);
+    expect(
+      observeWpsResources("wps_mcp.list_files", {
+        files: [{ file_id: "wps-2", file_type: "folder", name: "Nested" }],
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        sourceType: "wps_mcp",
+        resourceId: "wps-2",
+        mimeType: "application/vnd.wps.folder",
+      }),
+    ]);
+    expect(
+      observeBaiduNetdiskResources("baidu_netdisk.semantic_search_files", {
+        items: [{ id: "9007199254740993", path: "/nested.txt", kind: "file", name: "nested.txt" }],
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        sourceType: "baidu_netdisk",
+        resourceId: "9007199254740993",
+        resourceToken: "/nested.txt",
+      }),
+    ]);
+    expect(observeTencentDocsResources("tencent_docs.get_file_metadata", { items: [{ ID: "ignored" }] })).toEqual([]);
   });
 
   it("defaults Tencent Docs OAuth authorization to read-only provider scopes", () => {

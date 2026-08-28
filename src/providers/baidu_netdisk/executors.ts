@@ -1,4 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, TransitFileWriter } from "../../core/types.ts";
+import type { ProviderResourceCandidate } from "../provider-loader.ts";
 import type { ProviderActionHandlers } from "../provider-runtime.ts";
 
 import { optionalString, requiredString } from "../../core/cast.ts";
@@ -117,6 +118,38 @@ export async function discoverResources(
     return [
       {
         sourceType: "baidu_netdisk" as const,
+        resourceId,
+        resourceToken: optionalString(item.path),
+        title: optionalString(item.name),
+        mimeType: `application/vnd.baidu-netdisk.${kind}`,
+        version: optionalString(item.modifiedAt),
+        etag: optionalString(item.cloudMd5),
+        schema: boundedProviderResourceSchema(item),
+        url: `https://pan.baidu.com/disk/main#/index?path=${encodeURIComponent(optionalString(item.path) ?? "/")}`,
+      },
+    ];
+  });
+}
+
+export function observeActionResources(actionId: string, output: unknown): ProviderResourceCandidate[] {
+  if (
+    !["baidu_netdisk.list_files", "baidu_netdisk.search_files", "baidu_netdisk.semantic_search_files"].includes(
+      actionId,
+    )
+  ) {
+    return [];
+  }
+  const record =
+    output && typeof output === "object" && !Array.isArray(output) ? (output as Record<string, unknown>) : {};
+  return (Array.isArray(record.items) ? record.items : []).slice(0, 100).flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const resourceId = optionalString(item.id);
+    if (!resourceId) return [];
+    const kind = optionalString(item.kind) ?? "file";
+    return [
+      {
+        sourceType: "baidu_netdisk",
         resourceId,
         resourceToken: optionalString(item.path),
         title: optionalString(item.name),

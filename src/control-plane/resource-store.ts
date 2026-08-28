@@ -65,6 +65,72 @@ export class TenantResourceStore implements ResourceAuthorization {
     }
   }
 
+  /**
+   * Append provider-observed resources only while the exact connection
+   * revision is still active and tenant-visible.
+   */
+  appendIfCurrent(
+    connectionId: string,
+    connectionRevision: number,
+    service: string,
+    resources: ResourceRef[],
+  ): boolean {
+    this.database.exec("begin immediate");
+    try {
+      const connection = this.database
+        .prepare(
+          `select revision from tenant_connections
+            where id=? and tenant_id=? and workspace_id=? and service=? and status <> 'revoked'`,
+        )
+        .get(connectionId, this.principal.tenantId, this.principal.workspaceId, service) as
+        | Record<string, unknown>
+        | undefined;
+      if (Number(connection?.revision) !== connectionRevision) {
+        this.database.exec("rollback");
+        return false;
+      }
+
+      const insert = this.database.prepare(
+        `insert into connection_resources
+          (tenant_id, workspace_id, connection_id, connection_revision, source_type,
+           resource_id, resource_token, resource_json, discovered_at)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         on conflict (tenant_id, workspace_id, connection_id, connection_revision, source_type, resource_id)
+         do update set resource_token=excluded.resource_token,
+                       resource_json=excluded.resource_json,
+                       discovered_at=excluded.discovered_at`,
+      );
+      const discoveredAt = new Date().toISOString();
+      for (const resource of resources.slice(0, 100)) {
+        if (
+          resource.tenantId !== this.principal.tenantId ||
+          resource.workspaceId !== this.principal.workspaceId ||
+          resource.connectionId !== connectionId ||
+          resource.sourceType !== service ||
+          !resource.resourceId.trim()
+        ) {
+          continue;
+        }
+        insert.run(
+          this.principal.tenantId,
+          this.principal.workspaceId,
+          connectionId,
+          connectionRevision,
+          resource.sourceType,
+          resource.resourceId,
+          resource.resourceToken ?? null,
+          JSON.stringify(resource),
+          discoveredAt,
+        );
+      }
+      this.database.exec("commit");
+      return true;
+    } catch (error) {
+      this.database.exec("rollback");
+      throw error;
+    }
+  }
+
   authorize(
     connectionId: string,
     service: string,

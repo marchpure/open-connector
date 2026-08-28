@@ -13,6 +13,7 @@ export interface ExecutorModule {
   executors: ProviderExecutors;
   proxy?: ProviderProxyExecutor;
   discoverResources?: (context: ExecutionContext, fetcher: typeof fetch) => Promise<ProviderResourceCandidate[]>;
+  observeActionResources?: (actionId: string, output: unknown) => ProviderResourceCandidate[];
 }
 
 export interface ProviderResourceCandidate {
@@ -82,6 +83,12 @@ export interface IProviderLoader {
     context: ExecutionContext,
     signal?: AbortSignal,
   ): Promise<ProviderResourceCandidate[]>;
+
+  /**
+   * Normalize resource identities returned by a successful provider action.
+   * Only provider-owned output parsers may create candidates.
+   */
+  observeActionResources?(service: string, actionId: string, output: unknown): Promise<ProviderResourceCandidate[]>;
 }
 
 /**
@@ -139,6 +146,17 @@ export class ProviderLoader implements IProviderLoader {
     const module = await loadExecutors();
     if (!module.discoverResources) return [];
     return module.discoverResources({ ...context, signal }, providerFetch);
+  }
+
+  async observeActionResources(
+    service: string,
+    actionId: string,
+    output: unknown,
+  ): Promise<ProviderResourceCandidate[]> {
+    const loadExecutors = this.executorModules[service];
+    if (!loadExecutors) return [];
+    const module = await loadExecutors();
+    return module.observeActionResources?.(actionId, output) ?? [];
   }
 
   private _findActionExecutor(

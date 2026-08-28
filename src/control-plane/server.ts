@@ -549,6 +549,32 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         } as never,
         signal: context.req.raw.signal,
       });
+      if (result?.result.ok && options.providerLoader.observeActionResources) {
+        try {
+          const candidates = await options.providerLoader.observeActionResources(
+            selected.service,
+            actionId,
+            result.result.output,
+          );
+          if (candidates.length > 0) {
+            runtime.resources.appendIfCurrent(
+              selected.id,
+              current.revision,
+              selected.service,
+              candidates.slice(0, 100).map((candidate) =>
+                toResourceRef(candidate, {
+                  tenantId: current.tenantId,
+                  workspaceId: current.workspaceId,
+                  connectionId: current.id,
+                }),
+              ),
+            );
+          }
+        } catch {
+          // Resource observation is authorization enrichment. A parser or
+          // persistence failure must not rewrite an already completed action.
+        }
+      }
       return context.json(
         {
           executionId: result?.executionId,

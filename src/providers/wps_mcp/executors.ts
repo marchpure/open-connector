@@ -1,4 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
+import type { ProviderResourceCandidate } from "../provider-loader.ts";
 import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-runtime.ts";
 import type { Client } from "@modelcontextprotocol/client";
@@ -173,6 +174,28 @@ export async function discoverResources(
       return [
         {
           sourceType: "wps_mcp" as const,
+          resourceId,
+          title: readFirstString(record, ["name", "file_name", "fname"]),
+          mimeType: `application/vnd.wps.${fileType.replace(/[^a-z0-9-]/giu, "") || "file"}`,
+          version: readFirstString(record, ["version", "etag", "mtime"]),
+          schema: boundedProviderResourceSchema(record),
+          url: safeWpsTraceUrl(readFirstString(record, ["url", "web_url", "link"])),
+        },
+      ];
+    });
+}
+
+export function observeActionResources(actionId: string, output: unknown): ProviderResourceCandidate[] {
+  if (!["wps_mcp.search_files", "wps_mcp.list_my_files", "wps_mcp.list_files"].includes(actionId)) return [];
+  return findWpsRecords(output)
+    .slice(0, 100)
+    .flatMap((record) => {
+      const resourceId = readFirstString(record, ["file_id", "fileId", "id"]);
+      if (!resourceId) return [];
+      const fileType = readFirstString(record, ["type", "file_type", "fileType"]) ?? "file";
+      return [
+        {
+          sourceType: "wps_mcp",
           resourceId,
           title: readFirstString(record, ["name", "file_name", "fname"]),
           mimeType: `application/vnd.wps.${fileType.replace(/[^a-z0-9-]/giu, "") || "file"}`,

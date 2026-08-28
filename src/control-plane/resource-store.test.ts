@@ -13,6 +13,66 @@ const principal: TenantPrincipal = {
 };
 
 describe("TenantResourceStore", () => {
+  it("atomically appends only current tenant-scoped provider observations", () => {
+    const database = new DatabaseSync(":memory:");
+    database.exec(`
+      create table tenant_connections (
+        id text primary key,
+        tenant_id text not null,
+        workspace_id text not null,
+        service text not null,
+        revision integer not null,
+        status text not null
+      );
+      insert into tenant_connections values
+        ('connection-a', 'tenant-a', 'workspace-a', 'tencent_docs', 2, 'ready'),
+        ('connection-b', 'tenant-b', 'workspace-b', 'tencent_docs', 2, 'ready');
+    `);
+    const store = new TenantResourceStore(database, principal);
+    const resource: ResourceRef = {
+      sourceType: "tencent_docs",
+      tenantId: "tenant-a",
+      workspaceId: "workspace-a",
+      connectionId: "connection-a",
+      resourceId: "nested-doc",
+      mimeType: "application/vnd.tencent-docs.doc",
+    };
+
+    expect(store.appendIfCurrent("connection-a", 2, "tencent_docs", [resource])).toBe(true);
+    expect(
+      store.authorize(
+        "connection-a",
+        "tencent_docs",
+        "tencent_docs.get_doc_content",
+        { fileID: "nested-doc" },
+        { fileID: ["application/vnd.tencent-docs.doc"] },
+      ),
+    ).toEqual({ allowed: true });
+    expect(
+      store.authorize(
+        "connection-a",
+        "tencent_docs",
+        "tencent_docs.get_doc_content",
+        { fileID: "guessed-doc" },
+        { fileID: ["application/vnd.tencent-docs.doc"] },
+      ),
+    ).toMatchObject({ allowed: false, code: "resource_not_discovered" });
+
+    database.prepare("update tenant_connections set revision=3 where id='connection-a'").run();
+    expect(store.appendIfCurrent("connection-a", 2, "tencent_docs", [{ ...resource, resourceId: "stale-doc" }])).toBe(
+      false,
+    );
+    expect(
+      store.appendIfCurrent("connection-b", 2, "tencent_docs", [
+        { ...resource, connectionId: "connection-b", resourceId: "cross-tenant-doc" },
+      ]),
+    ).toBe(false);
+    expect(
+      database.prepare("select count(*) as count from connection_resources where resource_id <> 'nested-doc'").get(),
+    ).toEqual({ count: 0 });
+    database.close();
+  });
+
   it("authorizes only the latest tenant-scoped discovery revision and resource kind", () => {
     const database = new DatabaseSync(":memory:");
     database.exec(`

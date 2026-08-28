@@ -6,6 +6,7 @@ import type {
   ProviderExecutors,
   ProviderProxyExecutor,
 } from "../../core/types.ts";
+import type { ProviderResourceCandidate } from "../provider-loader.ts";
 
 import { optionalRecord, optionalString } from "../../core/cast.ts";
 import {
@@ -221,6 +222,56 @@ export async function discoverResources(
         schema: boundedProviderResourceSchema(item),
         owner: ownerId ? { id: ownerId, displayName: optionalString(item.ownerName) } : undefined,
         aclSummary: { visibility: item.isOwner === true ? ("private" as const) : ("shared" as const) },
+        url: safeTencentDocsTraceUrl(item.url),
+      },
+    ];
+  });
+}
+
+export function observeActionResources(actionId: string, output: unknown): ProviderResourceCandidate[] {
+  const record = optionalRecord(output);
+  if (!record) return [];
+  if (actionId === "tencent_docs.list_folder" || actionId === "tencent_docs.search_files") {
+    return normalizeTencentDocsCandidates(record.items);
+  }
+  if (actionId === "tencent_docs.list_smartsheet_sheets") {
+    return (Array.isArray(record.sheets) ? record.sheets : []).slice(0, 100).flatMap((value) => {
+      const sheet = optionalRecord(value);
+      const resourceId = optionalString(sheet?.sheetID);
+      if (!sheet || !resourceId) return [];
+      return [
+        {
+          sourceType: "tencent_docs",
+          resourceId,
+          title: optionalString(sheet.title),
+          mimeType: "application/vnd.tencent-docs.smartsheet.sheet",
+          schema: boundedProviderResourceSchema(sheet),
+        },
+      ];
+    });
+  }
+  return [];
+}
+
+function normalizeTencentDocsCandidates(value: unknown): ProviderResourceCandidate[] {
+  return (Array.isArray(value) ? value : []).slice(0, 100).flatMap((entry) => {
+    const item = optionalRecord(entry);
+    const resourceId = optionalString(item?.ID);
+    if (!item || !resourceId) return [];
+    const type = optionalString(item.type) ?? "file";
+    const ownerId = optionalString(item.ownerID);
+    return [
+      {
+        sourceType: "tencent_docs",
+        resourceId,
+        title: optionalString(item.title),
+        mimeType: tencentDocsMimeType(type),
+        version:
+          optionalString(item.lastModifyTime) ??
+          (typeof item.lastModifyTime === "number" ? String(item.lastModifyTime) : undefined),
+        schema: boundedProviderResourceSchema(item),
+        owner: ownerId ? { id: ownerId, displayName: optionalString(item.ownerName) } : undefined,
+        aclSummary: { visibility: item.isOwner === true ? "private" : "shared" },
         url: safeTencentDocsTraceUrl(item.url),
       },
     ];

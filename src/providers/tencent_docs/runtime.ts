@@ -63,6 +63,9 @@ export const tencentDocsActionHandlers: ProviderActionHandlers<"tencent_docs", T
   list_smartsheet_sheets(input, context) {
     return tencentDocsListSmartsheetSheets(input, context);
   },
+  get_smartsheet_records(input, context) {
+    return tencentDocsGetSmartsheetRecords(input, context);
+  },
   update_form_collection_deadline(input, context) {
     return tencentDocsUpdateFormCollectionDeadline(input, context);
   },
@@ -365,8 +368,33 @@ async function tencentDocsListSmartsheetSheets(input: Record<string, unknown>, c
   return {
     ret: normalizeTencentDocsRet(envelope.ret),
     msg: normalizeTencentDocsMsg(envelope.msg),
-    sheets: normalizeTencentDocsSmartsheetSheets(data.getSheet),
+    sheets: normalizeTencentDocsSmartsheetSheets(data.sheets ?? data.getSheet),
     raw: data,
+  };
+}
+
+async function tencentDocsGetSmartsheetRecords(input: Record<string, unknown>, context: TencentDocsActionContext) {
+  const limit = Math.min(optionalInteger(input.limit) ?? 20, 100);
+  const offset = optionalInteger(input.offset) ?? 0;
+  const envelope = await requestTencentDocsOpenApi(
+    {
+      path: `/openapi/smartbook/v2/files/${encodeURIComponent(
+        String(input.fileID),
+      )}/sheets/${encodeURIComponent(String(input.sheetID))}`,
+      method: "POST",
+      json: { action: "getRecords", limit, offset },
+    },
+    context,
+  );
+  const data = requireRecord(envelope.data, "tencent_docs get_smartsheet_records data");
+  return {
+    ret: normalizeTencentDocsRet(envelope.ret),
+    msg: normalizeTencentDocsMsg(envelope.msg),
+    records: normalizeRecordArray(data.records).slice(0, 100),
+    total: normalizeNullableInteger(data.total),
+    hasMore: normalizeNullableBoolean(data.hasMore),
+    offset,
+    raw: { bounded: true },
   };
 }
 
@@ -579,13 +607,13 @@ function normalizeRecordArray(value: unknown) {
 
 function normalizeTencentDocsSmartsheetSheets(value: unknown) {
   if (!Array.isArray(value)) {
-    throw new ProviderRequestError(502, "tencent_docs response missing getSheet array");
+    throw new ProviderRequestError(502, "tencent_docs response missing sheets array");
   }
 
   return value.map((item) => {
     const sheet = requireRecord(item, "tencent_docs smartsheet sheet item");
     return {
-      sheetID: requireString(sheet.sheetID, "tencent_docs smartsheet sheet missing sheetID"),
+      sheetID: requireString(sheet.sheetID ?? sheet.sheetId, "tencent_docs smartsheet sheet missing sheetID"),
       title: optionalString(sheet.title) ?? null,
       isVisible: normalizeNullableBoolean(sheet.isVisible ?? sheet.isVibile),
       rowCount: normalizeNullableInteger(sheet.rowCount),
