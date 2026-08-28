@@ -206,4 +206,36 @@ describe("connection-service security evidence", () => {
     expect(await connections.get("fixture", "default")).toMatchObject({ id: first.id, revision: "3" });
     database.close();
   });
+
+  it("rejects replacement of another owner's personal connection", async () => {
+    const database = new DatabaseSync(":memory:");
+    const codec = new AesGcmSecretCodec("test-key");
+    const ownerConnections = new TenantConnectionStore(database, principal, codec);
+    await ownerConnections.set("fixture", "private", {
+      authType: "custom_credential",
+      values: { secret: "owner-secret" },
+      profile: { accountId: "owner", displayName: "owner", grantedScopes: [] },
+      metadata: {},
+    });
+
+    const otherConnections = new TenantConnectionStore(
+      database,
+      { ...principal, subject: "other-subject", ownerId: "other-owner" },
+      codec,
+    );
+    await expect(
+      otherConnections.set("fixture", "private", {
+        authType: "custom_credential",
+        values: { secret: "attacker-secret" },
+        profile: { accountId: "attacker", displayName: "attacker", grantedScopes: [] },
+        metadata: {},
+      }),
+    ).rejects.toMatchObject({ code: "connection_forbidden" });
+
+    expect(database.prepare("select status, owner_id from tenant_connections").get()).toEqual({
+      status: "ready",
+      owner_id: principal.ownerId,
+    });
+    database.close();
+  });
 });
