@@ -117,6 +117,55 @@ function readEnablement(value: string | undefined): EnablementEntry[] {
         owner: "knowledge-platform",
         evidenceRef: "docs/connection-expansion/w2-office-storage-handoff.json#/connections/5",
       },
+      {
+        service: "oceanbase",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/p1-incremental-data-platforms-handoff.json#/providers/oceanbase",
+      },
+      {
+        service: "tidb_sql",
+        tier: "verified",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/p1-incremental-data-platforms-handoff.json#/providers/tidb_sql",
+      },
+      {
+        service: "maxcompute",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/p1-incremental-data-platforms-handoff.json#/providers/maxcompute",
+      },
+      {
+        service: "hologres",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/p1-incremental-data-platforms-handoff.json#/providers/hologres",
+      },
+      {
+        service: "hive",
+        tier: "verified",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/p1-incremental-data-platforms-handoff.json#/providers/hive",
+      },
+      {
+        service: "trino",
+        tier: "verified",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/p1-incremental-data-platforms-handoff.json#/providers/trino",
+      },
+      {
+        service: "elasticsearch",
+        tier: "verified",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/p1-incremental-data-platforms-handoff.json#/providers/elasticsearch",
+      },
     ];
   }
   const parsed = JSON.parse(value) as unknown;

@@ -29,6 +29,9 @@ const paginationSizeField = s.optional(
     10,
   ),
 );
+const searchCursorField = s.optional(
+  s.string("Opaque point-in-time/search_after cursor returned by the previous page. It cannot be combined with from."),
+);
 const sortOrderField = s.optional(
   s.withDefault(s.stringEnum("The sort order for this field.", ["asc", "desc"]), "asc"),
 );
@@ -357,6 +360,7 @@ const queryIndex = defineProviderAction(service, {
     indexName: indexNameField,
     query: freeTextQueryField,
     from: paginationFromField,
+    cursor: searchCursorField,
     size: paginationSizeField,
     fields: s.optional(
       s.array(
@@ -392,7 +396,10 @@ const queryIndex = defineProviderAction(service, {
         size: s.positiveInteger("The requested page size."),
         returned: s.nonNegativeInteger("The number of hits returned in this page."),
         hasMore: s.boolean("Whether more hits likely exist after this page."),
+        nextCursor: s.nullableString("Opaque cursor for the next stable point-in-time page."),
       }),
+      bytes: s.nonNegativeInteger("Serialized bytes returned in the bounded hit set."),
+      truncated: s.boolean("Whether the row or byte budget truncated this page."),
       took: s.nullable(s.integer("The search duration in milliseconds, or null when unavailable.")),
       timedOut: s.nullable(s.boolean("Whether the search timed out, or null when unavailable.")),
       maxScore: s.nullable(s.number("The maximum score in the page, or null when unavailable.")),

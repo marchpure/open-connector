@@ -18,6 +18,7 @@ import { ConnectionError } from "../connection-service.ts";
 import { readJsonBody, jsonError } from "../server/api/http-utils.ts";
 import { verifyPrincipalToken } from "./auth.ts";
 import { CatalogEnablement } from "./catalog.ts";
+import { isAllowedDataPlatformLeaseAction, isDataPlatformService } from "./data-platform-policy.ts";
 import { TenantFileAdapter } from "./file-adapter.ts";
 import { ConnectionJobStore } from "./job-store.ts";
 import { ConnectionLeaseService, LeaseError } from "./lease.ts";
@@ -389,6 +390,25 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         403,
         "connection_forbidden",
         "Storage write, delete, and presign actions require the connection owner.",
+      );
+    }
+    if (
+      isDataPlatformService(connection.service) &&
+      requestedActions.some((actionId) => {
+        const action = options.catalog.actionsById.get(actionId);
+        return (
+          !action ||
+          action.service !== connection.service ||
+          !action.execution.locallyExecutable ||
+          !isAllowedDataPlatformLeaseAction(connection.service, actionId)
+        );
+      })
+    ) {
+      return jsonError(
+        context,
+        403,
+        "lease_action_forbidden",
+        "The requested action is not in this data connector's bounded read allowlist.",
       );
     }
     try {

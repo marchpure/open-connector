@@ -16,9 +16,9 @@ import {
   readDatabaseConfig,
 } from "./runtime.ts";
 
-interface MysqlBackendOptions {
-  service: "mysql" | "doris" | "starrocks";
-  engine: "MySQL" | "Apache Doris" | "StarRocks";
+export interface MysqlBackendOptions {
+  service: "mysql" | "doris" | "starrocks" | "tidb_sql" | "oceanbase";
+  engine: "MySQL" | "Apache Doris" | "StarRocks" | "TiDB" | "OceanBase";
   defaultPort: number;
   defaultDatabase: string;
   versionMatches: (version: string) => boolean;
@@ -235,13 +235,13 @@ class MysqlWireBackend implements DatabaseBackend {
     this.signal?.addEventListener("abort", abort, { once: true });
     try {
       connection = await this.pool.getConnection();
-      if (this.options.service === "mysql") {
+      if (usesTransactionalReadOnlySession(this.options.service)) {
         await connection.query("SET SESSION TRANSACTION READ ONLY");
         await connection.query("START TRANSACTION READ ONLY");
       } else {
         await assertMysqlWireReadOnlyPrincipal(connection, this.options.engine);
       }
-      if (this.options.service !== "mysql") {
+      if (this.options.service === "doris" || this.options.service === "starrocks") {
         await configureAnalyticalSession(connection, timeoutMs, options.maxRows);
       }
       if (options.enforceScanBudget) {
@@ -264,7 +264,7 @@ class MysqlWireBackend implements DatabaseBackend {
     } catch (error) {
       throw normalizeDatabaseError(error);
     } finally {
-      if (this.options.service === "mysql") {
+      if (usesTransactionalReadOnlySession(this.options.service)) {
         await connection?.query("ROLLBACK").catch(() => undefined);
       }
       connection?.release();
@@ -280,7 +280,7 @@ async function assertMysqlScanBudget(
   timeoutMs: number,
   service: MysqlBackendOptions["service"] = "mysql",
 ): Promise<void> {
-  if (service !== "mysql") {
+  if (service === "doris" || service === "starrocks") {
     const [rows] = await queryWithTimeout(connection, `EXPLAIN ${sql}`, parameters, timeoutMs);
     const explanation = (rows as RowDataPacket[])
       .flatMap((row) => Object.values(row))
@@ -291,6 +291,21 @@ async function assertMysqlScanBudget(
       throw new DatabaseRuntimeError(
         "database_budget_exceeded",
         `${service === "doris" ? "Doris" : "StarRocks"} query exceeds the configured scan row budget.`,
+      );
+    }
+    return;
+  }
+  if (service === "tidb_sql" || service === "oceanbase") {
+    const [rows] = await queryWithTimeout(connection, `EXPLAIN ${sql}`, parameters, timeoutMs);
+    const estimates = (rows as RowDataPacket[]).flatMap((row) =>
+      Object.entries(row)
+        .filter(([key]) => /^(?:estRows|rows)$/i.test(key))
+        .map(([, value]) => Number(value)),
+    );
+    if (estimates.some((estimate) => Number.isFinite(estimate) && estimate > databaseScanBudgetRows)) {
+      throw new DatabaseRuntimeError(
+        "database_budget_exceeded",
+        `${service === "tidb_sql" ? "TiDB" : "OceanBase"} query exceeds the configured scan row budget.`,
       );
     }
     return;
@@ -307,6 +322,10 @@ async function assertMysqlScanBudget(
   if (maximumEstimatedRows(plan) > databaseScanBudgetRows) {
     throw new DatabaseRuntimeError("database_budget_exceeded", "MySQL query exceeds the configured scan row budget.");
   }
+}
+
+function usesTransactionalReadOnlySession(service: MysqlBackendOptions["service"]): boolean {
+  return service === "mysql" || service === "oceanbase";
 }
 
 async function queryWithTimeout(

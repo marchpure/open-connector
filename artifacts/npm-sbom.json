@@ -2,14 +2,336 @@
   "version": "1.4.0",
   "name": "@oomol-lab/open-connector",
   "problems": [
-    "extraneous: @emnapi/core@1.11.1 /Users/bytedance/.codex/worktrees/knowledge-connection-expansion-integration/node_modules/@emnapi/core",
-    "extraneous: @emnapi/runtime@1.11.1 /Users/bytedance/.codex/worktrees/knowledge-connection-expansion-integration/node_modules/@emnapi/runtime",
-    "extraneous: @emnapi/wasi-threads@1.2.2 /Users/bytedance/.codex/worktrees/knowledge-connection-expansion-integration/node_modules/@emnapi/wasi-threads",
-    "extraneous: @img/sharp-wasm32@0.35.2 /Users/bytedance/.codex/worktrees/knowledge-connection-expansion-integration/node_modules/@img/sharp-wasm32",
-    "extraneous: @napi-rs/wasm-runtime@1.1.6 /Users/bytedance/.codex/worktrees/knowledge-connection-expansion-integration/node_modules/@napi-rs/wasm-runtime",
-    "extraneous: @tybys/wasm-util@0.10.3 /Users/bytedance/.codex/worktrees/knowledge-connection-expansion-integration/node_modules/@tybys/wasm-util"
+    "extraneous: @emnapi/core@1.11.1 /Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms/node_modules/@emnapi/core",
+    "extraneous: @emnapi/runtime@1.11.1 /Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms/node_modules/@emnapi/runtime",
+    "extraneous: @emnapi/wasi-threads@1.2.2 /Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms/node_modules/@emnapi/wasi-threads",
+    "extraneous: @img/sharp-wasm32@0.35.2 /Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms/node_modules/@img/sharp-wasm32",
+    "extraneous: @napi-rs/wasm-runtime@1.1.6 /Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms/node_modules/@napi-rs/wasm-runtime",
+    "extraneous: @tybys/wasm-util@0.10.3 /Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms/node_modules/@tybys/wasm-util"
   ],
   "dependencies": {
+    "@alicloud/maxcompute20220104": {
+      "version": "5.1.0",
+      "resolved": "https://registry.npmjs.org/@alicloud/maxcompute20220104/-/maxcompute20220104-5.1.0.tgz",
+      "overridden": false,
+      "dependencies": {
+        "@alicloud/openapi-core": {
+          "version": "1.0.8",
+          "resolved": "https://registry.npmjs.org/@alicloud/openapi-core/-/openapi-core-1.0.8.tgz",
+          "overridden": false,
+          "dependencies": {
+            "@alicloud/credentials": {
+              "version": "2.4.7",
+              "resolved": "https://registry.npmjs.org/@alicloud/credentials/-/credentials-2.4.7.tgz",
+              "overridden": false,
+              "dependencies": {
+                "@alicloud/tea-typescript": {
+                  "version": "1.8.0"
+                },
+                "httpx": {
+                  "version": "2.3.3"
+                },
+                "ini": {
+                  "version": "1.3.8",
+                  "resolved": "https://registry.npmjs.org/ini/-/ini-1.3.8.tgz",
+                  "overridden": false
+                },
+                "kitx": {
+                  "version": "2.2.0",
+                  "resolved": "https://registry.npmjs.org/kitx/-/kitx-2.2.0.tgz",
+                  "overridden": false,
+                  "dependencies": {
+                    "@types/node": {
+                      "version": "22.20.1",
+                      "resolved": "https://registry.npmjs.org/@types/node/-/node-22.20.1.tgz",
+                      "overridden": false,
+                      "dependencies": {
+                        "undici-types": {
+                          "version": "6.21.0",
+                          "resolved": "https://registry.npmjs.org/undici-types/-/undici-types-6.21.0.tgz",
+                          "overridden": false
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "@alicloud/gateway-pop": {
+              "version": "0.0.6",
+              "resolved": "https://registry.npmjs.org/@alicloud/gateway-pop/-/gateway-pop-0.0.6.tgz",
+              "overridden": false,
+              "dependencies": {
+                "@alicloud/credentials": {
+                  "version": "2.4.7"
+                },
+                "@alicloud/darabonba-array": {
+                  "version": "0.1.2",
+                  "resolved": "https://registry.npmjs.org/@alicloud/darabonba-array/-/darabonba-array-0.1.2.tgz",
+                  "overridden": false,
+                  "dependencies": {
+                    "@alicloud/tea-typescript": {
+                      "version": "1.8.0"
+                    }
+                  }
+                },
+                "@alicloud/darabonba-encode-util": {
+                  "version": "0.0.2",
+                  "resolved": "https://registry.npmjs.org/@alicloud/darabonba-encode-util/-/darabonba-encode-util-0.0.2.tgz",
+                  "overridden": false,
+                  "dependencies": {
+                    "moment": {
+                      "version": "2.30.1"
+                    }
+                  }
+                },
+                "@alicloud/darabonba-map": {
+                  "version": "0.0.1",
+                  "resolved": "https://registry.npmjs.org/@alicloud/darabonba-map/-/darabonba-map-0.0.1.tgz",
+                  "overridden": false,
+                  "dependencies": {
+                    "@alicloud/tea-typescript": {
+                      "version": "1.8.0"
+                    }
+                  }
+                },
+                "@alicloud/darabonba-signature-util": {
+                  "version": "0.0.4",
+                  "resolved": "https://registry.npmjs.org/@alicloud/darabonba-signature-util/-/darabonba-signature-util-0.0.4.tgz",
+                  "overridden": false,
+                  "dependencies": {
+                    "@alicloud/darabonba-encode-util": {
+                      "version": "0.0.1",
+                      "resolved": "https://registry.npmjs.org/@alicloud/darabonba-encode-util/-/darabonba-encode-util-0.0.1.tgz",
+                      "overridden": false,
+                      "dependencies": {
+                        "@alicloud/tea-typescript": {
+                          "version": "1.8.0"
+                        },
+                        "moment": {
+                          "version": "2.30.1"
+                        }
+                      }
+                    }
+                  }
+                },
+                "@alicloud/darabonba-string": {
+                  "version": "1.0.3",
+                  "resolved": "https://registry.npmjs.org/@alicloud/darabonba-string/-/darabonba-string-1.0.3.tgz",
+                  "overridden": false,
+                  "dependencies": {
+                    "@alicloud/tea-typescript": {
+                      "version": "1.8.0"
+                    }
+                  }
+                },
+                "@alicloud/endpoint-util": {
+                  "version": "0.0.1",
+                  "resolved": "https://registry.npmjs.org/@alicloud/endpoint-util/-/endpoint-util-0.0.1.tgz",
+                  "overridden": false,
+                  "dependencies": {
+                    "@alicloud/tea-typescript": {
+                      "version": "1.8.0"
+                    },
+                    "kitx": {
+                      "version": "2.2.0"
+                    }
+                  }
+                },
+                "@alicloud/gateway-spi": {
+                  "version": "0.0.8"
+                },
+                "@alicloud/openapi-util": {
+                  "version": "0.3.3",
+                  "resolved": "https://registry.npmjs.org/@alicloud/openapi-util/-/openapi-util-0.3.3.tgz",
+                  "overridden": false,
+                  "dependencies": {
+                    "@alicloud/tea-typescript": {
+                      "version": "1.8.0"
+                    },
+                    "@alicloud/tea-util": {
+                      "version": "1.4.11"
+                    },
+                    "kitx": {
+                      "version": "2.2.0"
+                    },
+                    "sm3": {
+                      "version": "1.0.3",
+                      "resolved": "https://registry.npmjs.org/sm3/-/sm3-1.0.3.tgz",
+                      "overridden": false
+                    }
+                  }
+                },
+                "@alicloud/tea-typescript": {
+                  "version": "1.8.0"
+                },
+                "@alicloud/tea-util": {
+                  "version": "1.4.11",
+                  "resolved": "https://registry.npmjs.org/@alicloud/tea-util/-/tea-util-1.4.11.tgz",
+                  "overridden": false,
+                  "dependencies": {
+                    "@alicloud/tea-typescript": {
+                      "version": "1.8.0"
+                    },
+                    "@darabonba/typescript": {
+                      "version": "1.0.5"
+                    },
+                    "kitx": {
+                      "version": "2.2.0"
+                    }
+                  }
+                }
+              }
+            },
+            "@alicloud/gateway-spi": {
+              "version": "0.0.8",
+              "resolved": "https://registry.npmjs.org/@alicloud/gateway-spi/-/gateway-spi-0.0.8.tgz",
+              "overridden": false,
+              "dependencies": {
+                "@alicloud/credentials": {
+                  "version": "2.4.7"
+                },
+                "@alicloud/tea-typescript": {
+                  "version": "1.8.0"
+                }
+              }
+            },
+            "@darabonba/typescript": {
+              "version": "1.0.5"
+            }
+          }
+        },
+        "@darabonba/typescript": {
+          "version": "1.0.5",
+          "resolved": "https://registry.npmjs.org/@darabonba/typescript/-/typescript-1.0.5.tgz",
+          "overridden": false,
+          "dependencies": {
+            "@alicloud/tea-typescript": {
+              "version": "1.8.0",
+              "resolved": "https://registry.npmjs.org/@alicloud/tea-typescript/-/tea-typescript-1.8.0.tgz",
+              "overridden": false,
+              "dependencies": {
+                "@types/node": {
+                  "version": "12.20.55",
+                  "resolved": "https://registry.npmjs.org/@types/node/-/node-12.20.55.tgz",
+                  "overridden": false
+                },
+                "httpx": {
+                  "version": "2.3.3"
+                }
+              }
+            },
+            "http-proxy-agent": {
+              "version": "5.0.0",
+              "resolved": "https://registry.npmjs.org/http-proxy-agent/-/http-proxy-agent-5.0.0.tgz",
+              "overridden": false,
+              "dependencies": {
+                "@tootallnate/once": {
+                  "version": "2.0.1",
+                  "resolved": "https://registry.npmjs.org/@tootallnate/once/-/once-2.0.1.tgz",
+                  "overridden": false
+                },
+                "agent-base": {
+                  "version": "6.0.2",
+                  "resolved": "https://registry.npmjs.org/agent-base/-/agent-base-6.0.2.tgz",
+                  "overridden": false,
+                  "dependencies": {
+                    "debug": {
+                      "version": "4.4.3"
+                    }
+                  }
+                },
+                "debug": {
+                  "version": "4.4.3"
+                }
+              }
+            },
+            "https-proxy-agent": {
+              "version": "5.0.1",
+              "resolved": "https://registry.npmjs.org/https-proxy-agent/-/https-proxy-agent-5.0.1.tgz",
+              "overridden": false,
+              "dependencies": {
+                "agent-base": {
+                  "version": "6.0.2"
+                },
+                "debug": {
+                  "version": "4.4.3"
+                }
+              }
+            },
+            "httpx": {
+              "version": "2.3.3",
+              "resolved": "https://registry.npmjs.org/httpx/-/httpx-2.3.3.tgz",
+              "overridden": false,
+              "dependencies": {
+                "@types/node": {
+                  "version": "20.19.43",
+                  "resolved": "https://registry.npmjs.org/@types/node/-/node-20.19.43.tgz",
+                  "overridden": false,
+                  "dependencies": {
+                    "undici-types": {
+                      "version": "6.21.0",
+                      "resolved": "https://registry.npmjs.org/undici-types/-/undici-types-6.21.0.tgz",
+                      "overridden": false
+                    }
+                  }
+                },
+                "debug": {
+                  "version": "4.4.3"
+                }
+              }
+            },
+            "lodash": {
+              "version": "4.18.1"
+            },
+            "moment-timezone": {
+              "version": "0.5.48",
+              "resolved": "https://registry.npmjs.org/moment-timezone/-/moment-timezone-0.5.48.tgz",
+              "overridden": false,
+              "dependencies": {
+                "moment": {
+                  "version": "2.30.1"
+                }
+              }
+            },
+            "moment": {
+              "version": "2.30.1",
+              "resolved": "https://registry.npmjs.org/moment/-/moment-2.30.1.tgz",
+              "overridden": false
+            },
+            "socks-proxy-agent": {
+              "version": "6.2.1",
+              "resolved": "https://registry.npmjs.org/socks-proxy-agent/-/socks-proxy-agent-6.2.1.tgz",
+              "overridden": false,
+              "dependencies": {
+                "agent-base": {
+                  "version": "6.0.2",
+                  "resolved": "https://registry.npmjs.org/agent-base/-/agent-base-6.0.2.tgz",
+                  "overridden": false,
+                  "dependencies": {
+                    "debug": {
+                      "version": "4.4.3"
+                    }
+                  }
+                },
+                "debug": {
+                  "version": "4.4.3"
+                },
+                "socks": {
+                  "version": "2.8.9"
+                }
+              }
+            },
+            "ws": {
+              "version": "8.21.0"
+            },
+            "xml2js": {
+              "version": "0.6.2"
+            }
+          }
+        }
+      }
+    },
     "@aws-sdk/client-s3": {
       "version": "3.1111.0",
       "resolved": "https://registry.npmjs.org/@aws-sdk/client-s3/-/client-s3-3.1111.0.tgz",
@@ -588,7 +910,7 @@
       "overridden": false,
       "extraneous": true,
       "problems": [
-        "extraneous: @emnapi/core@1.11.1 /Users/bytedance/.codex/worktrees/knowledge-connection-expansion-integration/node_modules/@emnapi/core"
+        "extraneous: @emnapi/core@1.11.1 /Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms/node_modules/@emnapi/core"
       ],
       "dependencies": {
         "@emnapi/wasi-threads": {
@@ -605,7 +927,7 @@
       "overridden": false,
       "extraneous": true,
       "problems": [
-        "extraneous: @emnapi/runtime@1.11.1 /Users/bytedance/.codex/worktrees/knowledge-connection-expansion-integration/node_modules/@emnapi/runtime"
+        "extraneous: @emnapi/runtime@1.11.1 /Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms/node_modules/@emnapi/runtime"
       ],
       "dependencies": {
         "tslib": {
@@ -619,7 +941,7 @@
       "overridden": false,
       "extraneous": true,
       "problems": [
-        "extraneous: @emnapi/wasi-threads@1.2.2 /Users/bytedance/.codex/worktrees/knowledge-connection-expansion-integration/node_modules/@emnapi/wasi-threads"
+        "extraneous: @emnapi/wasi-threads@1.2.2 /Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms/node_modules/@emnapi/wasi-threads"
       ],
       "dependencies": {
         "tslib": {
@@ -663,7 +985,7 @@
       "overridden": false,
       "extraneous": true,
       "problems": [
-        "extraneous: @img/sharp-wasm32@0.35.2 /Users/bytedance/.codex/worktrees/knowledge-connection-expansion-integration/node_modules/@img/sharp-wasm32"
+        "extraneous: @img/sharp-wasm32@0.35.2 /Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms/node_modules/@img/sharp-wasm32"
       ],
       "dependencies": {
         "@emnapi/runtime": {
@@ -769,7 +1091,7 @@
       "overridden": false,
       "extraneous": true,
       "problems": [
-        "extraneous: @napi-rs/wasm-runtime@1.1.6 /Users/bytedance/.codex/worktrees/knowledge-connection-expansion-integration/node_modules/@napi-rs/wasm-runtime"
+        "extraneous: @napi-rs/wasm-runtime@1.1.6 /Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms/node_modules/@napi-rs/wasm-runtime"
       ],
       "dependencies": {
         "@emnapi/core": {
@@ -2767,7 +3089,7 @@
       "overridden": false,
       "extraneous": true,
       "problems": [
-        "extraneous: @tybys/wasm-util@0.10.3 /Users/bytedance/.codex/worktrees/knowledge-connection-expansion-integration/node_modules/@tybys/wasm-util"
+        "extraneous: @tybys/wasm-util@0.10.3 /Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms/node_modules/@tybys/wasm-util"
       ],
       "dependencies": {
         "tslib": {
@@ -4237,6 +4559,65 @@
       "version": "0.8.3",
       "resolved": "https://registry.npmjs.org/fflate/-/fflate-0.8.3.tgz",
       "overridden": false
+    },
+    "hive-driver": {
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/hive-driver/-/hive-driver-1.0.1.tgz",
+      "overridden": false,
+      "dependencies": {
+        "node-int64": {
+          "version": "0.4.0",
+          "resolved": "https://registry.npmjs.org/node-int64/-/node-int64-0.4.0.tgz",
+          "overridden": false
+        },
+        "thrift": {
+          "version": "0.23.0",
+          "resolved": "https://registry.npmjs.org/thrift/-/thrift-0.23.0.tgz",
+          "overridden": false,
+          "dependencies": {
+            "browser-or-node": {
+              "version": "1.3.0",
+              "resolved": "https://registry.npmjs.org/browser-or-node/-/browser-or-node-1.3.0.tgz",
+              "overridden": false
+            },
+            "isomorphic-ws": {
+              "version": "4.0.1",
+              "resolved": "https://registry.npmjs.org/isomorphic-ws/-/isomorphic-ws-4.0.1.tgz",
+              "overridden": false,
+              "dependencies": {
+                "ws": {
+                  "version": "8.21.0"
+                }
+              }
+            },
+            "node-int64": {
+              "version": "0.4.0"
+            },
+            "q": {
+              "version": "1.5.1",
+              "resolved": "https://registry.npmjs.org/q/-/q-1.5.1.tgz",
+              "overridden": false
+            },
+            "uuid": {
+              "version": "13.0.2",
+              "resolved": "https://registry.npmjs.org/uuid/-/uuid-13.0.2.tgz",
+              "overridden": false
+            },
+            "ws": {
+              "version": "5.2.7",
+              "resolved": "https://registry.npmjs.org/ws/-/ws-5.2.7.tgz",
+              "overridden": false,
+              "dependencies": {
+                "async-limiter": {
+                  "version": "1.0.1",
+                  "resolved": "https://registry.npmjs.org/async-limiter/-/async-limiter-1.0.1.tgz",
+                  "overridden": false
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "hono": {
       "version": "4.13.5",

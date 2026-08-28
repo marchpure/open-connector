@@ -9,7 +9,7 @@ import type { ProviderActionHandlers } from "../provider-runtime.ts";
 
 import { Buffer } from "node:buffer";
 import { optionalBoolean, optionalNumber, optionalRecord, optionalString } from "../../core/cast.ts";
-import { assertPublicHttpUrl, isPrivateNetworkAccessAllowed } from "../../core/request.ts";
+import { assertPublicHttpUrl, isPrivateNetworkAccessAllowed, readBoundedResponseBytes } from "../../core/request.ts";
 import {
   createProviderFetch,
   createProviderProxyUrl,
@@ -209,30 +209,24 @@ export const credentialValidators: CredentialValidators = {
       baseUrl,
       authorization: buildApiKeyAuthHeader(requireElasticsearchField(input.apiKey, "apiKey")),
       method: "GET",
-      path: "/_security/_authenticate",
+      path: "/",
       fetcher: guardedFetcher,
       signal,
       phase: "validate",
     });
-    const authenticatedUsername = optionalString(payload.username)?.trim();
-    const fullName = optionalString(payload.full_name)?.trim();
-    const apiKeyMetadata = optionalRecord(payload.api_key);
-    const apiKeyId = optionalString(apiKeyMetadata?.id)?.trim();
-    const apiKeyName = optionalString(apiKeyMetadata?.name)?.trim();
-    const accountId = apiKeyId ?? authenticatedUsername ?? "api_key";
-    const accountName = apiKeyName ?? fullName ?? authenticatedUsername ?? "API Key";
+    const product = identifySearchProduct(payload);
+    const accountId = "api_key";
 
     return {
       profile: {
         accountId: `elasticsearch:${buildInstanceKey(baseUrl)}:${accountId}`,
-        displayName: `Elasticsearch - ${accountName}`,
+        displayName: `${product.displayName} - API Key`,
       },
       grantedScopes: [],
       metadata: {
         baseUrl,
-        ...(apiKeyId ? { apiKeyId } : {}),
-        ...(apiKeyName ? { apiKeyName } : {}),
-        ...(authenticatedUsername ? { username: authenticatedUsername } : {}),
+        product: product.id,
+        version: product.version,
       },
     };
   },
@@ -245,23 +239,24 @@ export const credentialValidators: CredentialValidators = {
       baseUrl,
       authorization: buildBasicAuthHeader(username, password),
       method: "GET",
-      path: "/_security/_authenticate",
+      path: "/",
       fetcher: guardedFetcher,
       signal,
       phase: "validate",
     });
-    const authenticatedUsername = optionalString(payload.username)?.trim() || username;
-    const fullName = optionalString(payload.full_name)?.trim();
+    const product = identifySearchProduct(payload);
 
     return {
       profile: {
-        accountId: `elasticsearch:${buildInstanceKey(baseUrl)}:${authenticatedUsername}`,
-        displayName: fullName || `Elasticsearch - ${authenticatedUsername}`,
+        accountId: `elasticsearch:${buildInstanceKey(baseUrl)}:${username}`,
+        displayName: `${product.displayName} - ${username}`,
       },
       grantedScopes: [],
       metadata: {
         baseUrl,
-        username: authenticatedUsername,
+        username,
+        product: product.id,
+        version: product.version,
       },
     };
   },
@@ -344,18 +339,59 @@ async function getElasticsearchIndexSchema(input: Record<string, unknown>, conte
 
 async function queryElasticsearchIndex(input: Record<string, unknown>, context: ElasticsearchActionContext) {
   const indexName = requireElasticsearchField(input.indexName, "indexName");
+  const cursor = readSearchCursor(input.cursor);
+  if (cursor && input.from !== undefined) {
+    throw new ProviderRequestError(400, "cursor cannot be combined with from");
+  }
   const from = readNumber(input.from, 0);
   const size = readNumber(input.size, 10);
   const body = buildSearchBody(input, from, size);
+  if (cursor) {
+    delete body.from;
+    body.pit = { id: cursor.pitId, keep_alive: "1m" };
+    body.search_after = cursor.sort;
+  } else {
+    const pit = await createSearchPointInTime(indexName, context);
+    body.pit = {
+      id: requireElasticsearchField(pit.payload.id ?? pit.payload.pit_id, "point-in-time id"),
+      keep_alive: "1m",
+    };
+    delete body.from;
+  }
+  if (!body.sort) body.sort = [{ _shard_doc: "asc" }];
   const { payload } = await elasticsearchRequest<Record<string, unknown>>({
     ...context,
     method: "POST",
-    path: `/${encodePathSegment(indexName)}/_search`,
+    path: "/_search",
     body,
     phase: "execute",
   });
 
-  return normalizeSearchResponse(indexName, payload, from, size);
+  return normalizeBoundedSearchResponse(indexName, payload, from, size);
+}
+
+async function createSearchPointInTime(
+  indexName: string,
+  context: ElasticsearchActionContext,
+): Promise<ElasticsearchRequestResult<Record<string, unknown>>> {
+  try {
+    return await elasticsearchRequest<Record<string, unknown>>({
+      ...context,
+      method: "POST",
+      path: `/${encodePathSegment(indexName)}/_pit`,
+      query: { keep_alive: "1m" },
+      phase: "execute",
+    });
+  } catch (error) {
+    if (!(error instanceof ProviderRequestError) || error.status !== 400) throw error;
+    return elasticsearchRequest<Record<string, unknown>>({
+      ...context,
+      method: "POST",
+      path: `/${encodePathSegment(indexName)}/_search/point_in_time`,
+      query: { keep_alive: "1m" },
+      phase: "execute",
+    });
+  }
 }
 
 function normalizeTermFilters(value: unknown) {
@@ -574,11 +610,32 @@ async function readElasticsearchPayload(response: Response) {
   if (response.status === 204) {
     return null;
   }
+  const bytes = await readBoundedResponseBytes(response, {
+    maxBytes: 12 * 1024 * 1024,
+    fieldName: "Elasticsearch response",
+    createError: (message) => new ProviderRequestError(502, message),
+  });
+  const text = new TextDecoder().decode(bytes);
   const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) {
-    return response.json();
+  return contentType.includes("application/json") ? JSON.parse(text) : text;
+}
+
+function identifySearchProduct(payload: Record<string, unknown>): {
+  id: "elasticsearch" | "opensearch";
+  displayName: "Elasticsearch" | "OpenSearch";
+  version: string;
+} {
+  const version = optionalRecord(payload.version);
+  const distribution = optionalString(version?.distribution)?.toLowerCase();
+  const tagline = optionalString(payload.tagline)?.toLowerCase() ?? "";
+  const number = optionalString(version?.number) ?? "";
+  if (distribution === "opensearch" || tagline.includes("opensearch")) {
+    return { id: "opensearch", displayName: "OpenSearch", version: number };
   }
-  return response.text();
+  if (tagline.includes("you know, for search") || optionalString(version?.build_flavor)) {
+    return { id: "elasticsearch", displayName: "Elasticsearch", version: number };
+  }
+  throw new ProviderRequestError(400, "Server did not identify as Elasticsearch or OpenSearch.");
 }
 
 async function readElasticsearchError(response: Response) {
@@ -669,6 +726,7 @@ function normalizeSearchHit(payload: Record<string, unknown>) {
     id: optionalString(payload._id) ?? "",
     score: optionalNumber(payload._score) ?? null,
     source,
+    sort: Array.isArray(payload.sort) ? payload.sort : [],
     ...(highlight
       ? {
           highlight: Object.fromEntries(
@@ -678,6 +736,66 @@ function normalizeSearchHit(payload: Record<string, unknown>) {
           ),
         }
       : {}),
+  };
+}
+
+interface ElasticsearchSearchCursor {
+  pitId: string;
+  sort: unknown[];
+}
+
+function readSearchCursor(value: unknown): ElasticsearchSearchCursor | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.length > 16_384) {
+    throw new ProviderRequestError(400, "cursor is invalid");
+  }
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Record<string, unknown>;
+    if (typeof parsed.pitId !== "string" || !parsed.pitId || !Array.isArray(parsed.sort) || parsed.sort.length === 0) {
+      throw new Error("invalid");
+    }
+    return { pitId: parsed.pitId, sort: parsed.sort };
+  } catch {
+    throw new ProviderRequestError(400, "cursor is invalid");
+  }
+}
+
+function normalizeBoundedSearchResponse(
+  indexName: string,
+  payload: Record<string, unknown>,
+  from: number,
+  size: number,
+) {
+  const normalized = normalizeSearchResponse(indexName, payload, from, size);
+  const boundedHits: typeof normalized.hits = [];
+  let bytes = 2;
+  let truncated = false;
+  for (const hit of normalized.hits) {
+    const hitBytes = Buffer.byteLength(JSON.stringify(hit));
+    if (bytes + hitBytes > 10 * 1024 * 1024) {
+      truncated = true;
+      break;
+    }
+    boundedHits.push(hit);
+    bytes += hitBytes;
+  }
+  const lastHit = boundedHits.at(-1);
+  const pitId = optionalString(payload.pit_id) ?? optionalString(optionalRecord(payload.pit)?.id);
+  const hasMore = truncated || boundedHits.length === size;
+  return {
+    ...normalized,
+    hits: boundedHits,
+    bytes,
+    truncated,
+    pagination: {
+      ...normalized.pagination,
+      returned: boundedHits.length,
+      hasMore,
+      nextCursor:
+        hasMore && pitId && lastHit?.sort.length
+          ? Buffer.from(JSON.stringify({ pitId, sort: lastHit.sort })).toString("base64url")
+          : null,
+    },
   };
 }
 

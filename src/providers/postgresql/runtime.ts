@@ -18,15 +18,45 @@ import {
 const pools = new Map<string, { credentialKey: string; pool: Pool }>();
 let shutdownRegistered = false;
 
+export interface PostgresqlWireBackendOptions {
+  service: "postgresql" | "hologres";
+  engine: "PostgreSQL" | "Hologres";
+  defaultPort: number;
+  defaultDatabase: string;
+  versionMatches: (version: string) => boolean;
+  identityQuery?: string;
+}
+
 export async function createPostgresqlBackend(
   values: Record<string, string>,
   signal?: AbortSignal,
 ): Promise<DatabaseBackend> {
-  const config = readDatabaseConfig(values, { port: 5432, database: "postgres" });
+  return createPostgresqlWireBackend(
+    values,
+    {
+      service: "postgresql",
+      engine: "PostgreSQL",
+      defaultPort: 5432,
+      defaultDatabase: "postgres",
+      versionMatches: (version) => !/hologres/i.test(version),
+    },
+    signal,
+  );
+}
+
+export async function createPostgresqlWireBackend(
+  values: Record<string, string>,
+  options: PostgresqlWireBackendOptions,
+  signal?: AbortSignal,
+): Promise<DatabaseBackend> {
+  const config = readDatabaseConfig(values, {
+    port: options.defaultPort,
+    database: options.defaultDatabase,
+  });
   await assertDatabaseEgress(config);
   registerShutdown();
-  const endpointKey = [config.host, config.port, config.database, config.username].join("\0");
-  const credentialKey = credentialPoolKey("postgresql", config);
+  const endpointKey = [options.service, config.host, config.port, config.database, config.username].join("\0");
+  const credentialKey = credentialPoolKey(options.service, config);
   let entry = pools.get(endpointKey);
   if (entry?.credentialKey !== credentialKey) {
     await entry?.pool.end().catch(() => undefined);
@@ -58,17 +88,24 @@ export async function createPostgresqlBackend(
     entry = { credentialKey, pool };
     pools.set(endpointKey, entry);
   }
-  return new PostgresqlBackend(config, entry.pool, signal);
+  return new PostgresqlBackend(config, entry.pool, options, signal);
 }
 
 class PostgresqlBackend implements DatabaseBackend {
   readonly config: DatabaseConnectionConfig;
   private readonly pool: Pool;
+  private readonly options: PostgresqlWireBackendOptions;
   private readonly signal?: AbortSignal;
 
-  constructor(config: DatabaseConnectionConfig, pool: Pool, signal?: AbortSignal) {
+  constructor(
+    config: DatabaseConnectionConfig,
+    pool: Pool,
+    options: PostgresqlWireBackendOptions,
+    signal?: AbortSignal,
+  ) {
     this.config = config;
     this.pool = pool;
+    this.options = options;
     this.signal = signal;
   }
 
@@ -79,9 +116,20 @@ class PostgresqlBackend implements DatabaseBackend {
       10_000,
     );
     const row = result.rows[0] as Record<string, unknown> | undefined;
+    let version = String(row?.version ?? "");
+    if (this.options.identityQuery) {
+      const identityResult = await this.readTransaction(this.options.identityQuery, [], 10_000);
+      version = String((identityResult.rows[0] as Record<string, unknown> | undefined)?.version ?? "");
+    }
+    if (!this.options.versionMatches(version)) {
+      throw new DatabaseRuntimeError(
+        "database_query_failed",
+        `Connected server did not identify as ${this.options.engine}.`,
+      );
+    }
     return {
-      engine: "PostgreSQL",
-      version: String(row?.version ?? ""),
+      engine: this.options.engine,
+      version,
       database: String(row?.database ?? this.config.database),
     };
   }
@@ -186,7 +234,10 @@ class PostgresqlBackend implements DatabaseBackend {
     this.signal?.addEventListener("abort", abort, { once: true });
     try {
       if (this.pool.waitingCount >= 8) {
-        throw new DatabaseRuntimeError("database_budget_exceeded", "PostgreSQL connection queue limit exceeded.");
+        throw new DatabaseRuntimeError(
+          "database_budget_exceeded",
+          `${this.options.engine} connection queue limit exceeded.`,
+        );
       }
       client = await this.pool.connect();
       await client.query("begin read only");
