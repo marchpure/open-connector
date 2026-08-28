@@ -8,6 +8,7 @@ import {
   assertReadOnlySql,
   boundedQueryResult,
   credentialPoolKey,
+  databaseScanBudgetRows,
   DatabaseRuntimeError,
   normalizeDatabaseError,
   quoteIdentifier,
@@ -170,11 +171,16 @@ class PostgresqlBackend implements DatabaseBackend {
   ) {
     assertReadOnlySql(query, "postgresql");
     const bounded = `select * from (${stripFinalSemicolon(query)}) as openconnector_read limit ${limits.maxRows + 1}`;
-    const result = await this.readTransaction(bounded, parameters, limits.timeoutMs);
+    const result = await this.readTransaction(bounded, parameters, limits.timeoutMs, true);
     return this.toResult(result, limits.maxRows, limits.maxBytes);
   }
 
-  private async readTransaction(sql: string, parameters: DatabaseScalar[], timeoutMs = 30_000): Promise<PgQueryResult> {
+  private async readTransaction(
+    sql: string,
+    parameters: DatabaseScalar[],
+    timeoutMs = 30_000,
+    enforceScanBudget = false,
+  ): Promise<PgQueryResult> {
     let client: PoolClient | undefined;
     const abort = (): void => client?.release(true);
     this.signal?.addEventListener("abort", abort, { once: true });
@@ -185,6 +191,9 @@ class PostgresqlBackend implements DatabaseBackend {
       client = await this.pool.connect();
       await client.query("begin read only");
       await client.query(`set local statement_timeout = ${Math.max(100, Math.min(timeoutMs, 30_000))}`);
+      if (enforceScanBudget) {
+        await assertPostgresqlScanBudget(client, sql, parameters);
+      }
       return await client.query(sql, parameters);
     } catch (error) {
       throw normalizeDatabaseError(error);
@@ -209,6 +218,33 @@ class PostgresqlBackend implements DatabaseBackend {
       throw normalizeDatabaseError(new Error("Cross-database discovery requires a separate PostgreSQL connection."));
     }
   }
+}
+
+async function assertPostgresqlScanBudget(
+  client: PoolClient,
+  sql: string,
+  parameters: DatabaseScalar[],
+): Promise<void> {
+  const explain = await client.query({
+    text: `EXPLAIN (FORMAT JSON) ${sql}`,
+    values: parameters,
+  });
+  const document = explain.rows[0]?.["QUERY PLAN"];
+  const plan = Array.isArray(document) ? document[0] : document;
+  if (maximumPlanRows(plan) > databaseScanBudgetRows) {
+    throw new DatabaseRuntimeError(
+      "database_budget_exceeded",
+      "PostgreSQL query exceeds the configured scan row budget.",
+    );
+  }
+}
+
+function maximumPlanRows(value: unknown): number {
+  if (Array.isArray(value)) return Math.max(0, ...value.map(maximumPlanRows));
+  if (!value || typeof value !== "object") return 0;
+  const record = value as Record<string, unknown>;
+  const own = typeof record["Plan Rows"] === "number" ? record["Plan Rows"] : 0;
+  return Math.max(own, ...Object.values(record).map(maximumPlanRows));
 }
 
 function stripFinalSemicolon(sql: string): string {

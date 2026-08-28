@@ -8,6 +8,7 @@ import {
   assertReadOnlySql,
   boundedQueryResult,
   credentialPoolKey,
+  databaseScanBudgetRows,
   DatabaseRuntimeError,
   normalizeDatabaseError,
   quoteIdentifier,
@@ -221,6 +222,9 @@ class MysqlWireBackend implements DatabaseBackend {
       } else {
         await assertMysqlWireReadOnlyPrincipal(connection, this.options.engine);
       }
+      if (this.options.service === "mysql" && sql.includes("openconnector_read")) {
+        await assertMysqlScanBudget(connection, sql, parameters, timeoutMs);
+      }
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         return await Promise.race([
@@ -245,6 +249,41 @@ class MysqlWireBackend implements DatabaseBackend {
       this.signal?.removeEventListener("abort", abort);
     }
   }
+}
+
+async function assertMysqlScanBudget(
+  connection: PoolConnection,
+  sql: string,
+  parameters: DatabaseScalar[],
+  timeoutMs: number,
+): Promise<void> {
+  const [rows] = await connection.query(
+    {
+      sql: `EXPLAIN FORMAT=JSON ${sql}`,
+      timeout: timeoutMs,
+    },
+    parameters,
+  );
+  const raw = Object.values((rows as RowDataPacket[])[0] ?? {})[0];
+  if (typeof raw !== "string") return;
+  let plan: unknown;
+  try {
+    plan = JSON.parse(raw) as unknown;
+  } catch {
+    return;
+  }
+  if (maximumEstimatedRows(plan) > databaseScanBudgetRows) {
+    throw new DatabaseRuntimeError("database_budget_exceeded", "MySQL query exceeds the configured scan row budget.");
+  }
+}
+
+function maximumEstimatedRows(value: unknown): number {
+  if (Array.isArray(value)) return Math.max(0, ...value.map(maximumEstimatedRows));
+  if (!value || typeof value !== "object") return 0;
+  const record = value as Record<string, unknown>;
+  const candidates = ["rows_examined_per_scan", "rows_produced_per_join", "rows"];
+  const own = Math.max(0, ...candidates.map((key) => (typeof record[key] === "number" ? record[key] : 0)));
+  return Math.max(own, ...Object.values(record).map(maximumEstimatedRows));
 }
 
 async function assertMysqlWireReadOnlyPrincipal(connection: PoolConnection, engine: string): Promise<void> {
