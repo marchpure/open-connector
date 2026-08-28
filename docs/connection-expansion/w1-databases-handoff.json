@@ -1,10 +1,17 @@
 {
   "schemaVersion": 1,
   "status": "CONNECTION_W1_FROZEN_WITH_EXTERNAL_BLOCKERS",
+  "base_sha": "69ad6f8028eaf3a34b706012c72dc3f099a348e2",
   "baseCommit": "69ad6f8028eaf3a34b706012c72dc3f099a348e2",
   "branch": "feat/connection-expansion-w1-databases",
   "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-w1-databases",
   "implementationCommits": ["f52d2d72fb63b52957ed95e781dc18627ac8bb27"],
+  "sourceWorktreeIsolation": {
+    "path": "/Users/bytedance/.codex/worktrees/knowledge-connection-service-open-connector",
+    "baseline": "69ad6f8028eaf3a34b706012c72dc3f099a348e2",
+    "initialStatus": "clean before branch creation",
+    "scope": "The database expansion branch did not modify, reset, clean, or commit to the source worktree."
+  },
   "providers": [
     {
       "service": "postgresql",
