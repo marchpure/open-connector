@@ -71,6 +71,7 @@ export interface BoundedResponseBytesOptions {
   maxBytes: number;
   fieldName: string;
   createError: (message: string) => Error;
+  signal?: AbortSignal;
 }
 
 /**
@@ -96,6 +97,10 @@ export async function readBoundedResponseBytes(
   let totalBytes = 0;
   try {
     while (true) {
+      if (options.signal?.aborted) {
+        await reader.cancel(options.signal.reason).catch(() => undefined);
+        throw options.createError(`${options.fieldName} was aborted`);
+      }
       const { done, value } = await reader.read();
       if (done) {
         break;
@@ -118,6 +123,38 @@ export async function readBoundedResponseBytes(
     offset += chunk.byteLength;
   }
   return bytes;
+}
+
+/**
+ * Keep object-storage downloads as inert, bounded bytes. The runtime never
+ * needs to decompress provider responses, so encoded responses are rejected
+ * explicitly rather than risking a decompression bomb in a downstream layer.
+ */
+export function assertSafeObjectResponse(
+  response: Response,
+  options: { fieldName: string; createError: (message: string) => Error },
+): void {
+  const encoding = response.headers.get("content-encoding")?.trim().toLowerCase();
+  if (encoding && encoding !== "identity") {
+    throw options.createError(`${options.fieldName} uses unsupported content-encoding`);
+  }
+
+  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (!contentType) return;
+  if (contentType.length > 128) {
+    throw options.createError(`${options.fieldName} has an invalid content type`);
+  }
+  if (
+    contentType === "text/html" ||
+    contentType === "application/xhtml+xml" ||
+    contentType === "text/javascript" ||
+    contentType === "application/javascript" ||
+    contentType === "application/x-javascript" ||
+    contentType === "application/x-sh" ||
+    contentType === "application/x-httpd-php"
+  ) {
+    throw options.createError(`${options.fieldName} has a disallowed content type`);
+  }
 }
 
 // Egress targets are classified into three tiers for the SSRF guard:

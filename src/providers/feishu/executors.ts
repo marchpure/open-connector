@@ -90,25 +90,46 @@ export async function discoverResources(
     signal: context.signal,
     phase: "execute",
   });
-  const data = await request({
-    method: "POST",
-    path: "/search/v2/doc_wiki/search",
-    body: { query: "", doc_filter: {}, wiki_filter: {}, page_size: 20 },
-  });
-  const results = Array.isArray(data.res_units) ? data.res_units : [];
-  return results.flatMap((item) => {
-    const record = optionalRecord(item);
-    if (!record) return [];
-    const resourceId =
-      optionalString(record.document_id) ??
-      optionalString(record.obj_token) ??
-      optionalString(record.node_token) ??
-      optionalString(record.token) ??
-      optionalString(record.id);
-    if (!resourceId) return [];
-    return [
-      {
-        sourceType: "feishu" as const,
+  const resources: Array<{
+    sourceType: "feishu";
+    resourceId: string;
+    resourceToken?: string;
+    title?: string;
+    mimeType?: string;
+    schema?: Record<string, unknown>;
+    url?: string;
+  }> = [];
+  const seen = new Set<string>();
+  let pageToken: string | undefined;
+
+  // Discovery is deliberately bounded. The caller can use the regular
+  // search_documents action for an explicit continuation token.
+  for (let page = 0; page < 5; page += 1) {
+    const data = await request({
+      method: "POST",
+      path: "/search/v2/doc_wiki/search",
+      body: {
+        query: "",
+        doc_filter: {},
+        wiki_filter: {},
+        page_size: 20,
+        page_token: pageToken,
+      },
+    });
+    const results = Array.isArray(data.res_units) ? data.res_units : [];
+    for (const item of results) {
+      const record = optionalRecord(item);
+      if (!record) continue;
+      const resourceId =
+        optionalString(record.document_id) ??
+        optionalString(record.obj_token) ??
+        optionalString(record.node_token) ??
+        optionalString(record.token) ??
+        optionalString(record.id);
+      if (!resourceId || seen.has(resourceId)) continue;
+      seen.add(resourceId);
+      resources.push({
+        sourceType: "feishu",
         resourceId,
         resourceToken:
           optionalString(record.obj_token) ?? optionalString(record.node_token) ?? optionalString(record.token),
@@ -116,9 +137,14 @@ export async function discoverResources(
         mimeType: optionalString(record.obj_type) ?? optionalString(record.type),
         schema: record,
         url: optionalString(record.url),
-      },
-    ];
-  });
+      });
+    }
+    if (data.has_more !== true) break;
+    const next = optionalString(data.page_token);
+    if (!next || next === pageToken) break;
+    pageToken = next;
+  }
+  return resources;
 }
 
 function createFeishuSharedHandlers(

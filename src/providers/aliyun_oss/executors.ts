@@ -11,7 +11,12 @@ import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import AliOss from "ali-oss";
 import { compactObject, optionalInteger, optionalRecord, optionalString, requiredRawString } from "../../core/cast.ts";
 import { assertGuardedEgressUrl } from "../../core/guarded-fetch.ts";
-import { assertPublicHttpUrl, isPrivateNetworkAccessAllowed, readBoundedResponseBytes } from "../../core/request.ts";
+import {
+  assertPublicHttpUrl,
+  assertSafeObjectResponse,
+  isPrivateNetworkAccessAllowed,
+  readBoundedResponseBytes,
+} from "../../core/request.ts";
 import {
   createProviderFetch,
   createProviderProxyUrl,
@@ -493,6 +498,7 @@ async function aliyunHeadObject(input: Record<string, unknown>, context: AliyunO
     objectKey,
     compactObject({
       versionId: optionalString(input.versionId),
+      headers: { "If-Match": optionalString(input.ifMatch) },
     }),
   );
 
@@ -537,6 +543,10 @@ async function aliyunDownloadObject(input: Record<string, unknown>, context: Ali
     const client = await createClientForAction(input, context, bucket);
     const headers = new Headers();
     headers.set("accept", "*/*");
+    const ifMatch = optionalString(input.ifMatch);
+    if (ifMatch) {
+      headers.set("if-match", ifMatch);
+    }
     headers.set("user-agent", providerUserAgent);
     headers.set("x-oss-date", new Date().toUTCString());
     const securityToken = optionalString(context.values.securityToken);
@@ -568,10 +578,15 @@ async function aliyunDownloadObject(input: Record<string, unknown>, context: Ali
 
     const name = optionalString(input.fileName) ?? defaultObjectFileName(objectKey);
     const mimeType = optionalString(response.headers.get("content-type")) ?? "application/octet-stream";
+    assertSafeObjectResponse(response, {
+      fieldName: "Alibaba Cloud OSS download",
+      createError: (message) => new ProviderRequestError(415, message),
+    });
     const bytes = await readBoundedResponseBytes(response, {
       maxBytes: context.transitFiles.maxBytes,
       fieldName: "Alibaba Cloud OSS download",
       createError: (message) => new ProviderRequestError(413, message),
+      signal: context.signal,
     });
     const file = await context.transitFiles.create(new File([Uint8Array.from(bytes)], name, { type: mimeType }));
 
