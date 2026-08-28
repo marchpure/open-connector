@@ -2,7 +2,13 @@ import type { CredentialValidators, ProviderExecutors, TransitFileWriter } from 
 import type { ProviderActionHandlers } from "../provider-runtime.ts";
 
 import { optionalString, requiredString } from "../../core/cast.ts";
-import { defineProviderExecutors, mapProviderActionHandlers, requireOAuthCredential } from "../provider-runtime.ts";
+import {
+  boundedProviderResourceSchema,
+  boundedProviderActionResult,
+  defineProviderExecutors,
+  mapProviderActionHandlers,
+  requireOAuthCredential,
+} from "../provider-runtime.ts";
 import { baiduNetdiskActions } from "./actions.ts";
 import { executeBaiduNetdiskMcpAction, verifyBaiduNetdiskMcpConnection } from "./runtime-mcp.ts";
 import {
@@ -43,7 +49,8 @@ const handlers: ProviderActionHandlers<"baidu_netdisk", BaiduNetdiskHandler> = m
       case "create_folder":
         return createBaiduNetdiskFolder;
       default:
-        return (input, context) => executeBaiduNetdiskMcpAction(name, input, context);
+        return async (input, context) =>
+          boundedProviderActionResult(await executeBaiduNetdiskMcpAction(name, input, context));
     }
   },
 );
@@ -78,3 +85,47 @@ export const credentialValidators: CredentialValidators = {
     };
   },
 };
+
+export async function discoverResources(
+  context: import("../../core/types.ts").ExecutionContext,
+  fetcher: typeof fetch,
+): Promise<
+  Array<{
+    sourceType: "baidu_netdisk";
+    resourceId: string;
+    resourceToken?: string;
+    title?: string;
+    mimeType?: string;
+    version?: string;
+    etag?: string;
+    schema?: Record<string, unknown>;
+    url?: string;
+  }>
+> {
+  const credential = await requireOAuthCredential(context, "baidu_netdisk");
+  const output = (await executeBaiduNetdiskMcpAction(
+    "list_files",
+    { path: "/", page: 1, type: "all" },
+    { accessToken: credential.accessToken, fetcher },
+  )) as { items?: unknown[] };
+  return (output.items ?? []).slice(0, 100).flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const resourceId = optionalString(item.id);
+    if (!resourceId) return [];
+    const kind = optionalString(item.kind) ?? "file";
+    return [
+      {
+        sourceType: "baidu_netdisk" as const,
+        resourceId,
+        resourceToken: optionalString(item.path),
+        title: optionalString(item.name),
+        mimeType: `application/vnd.baidu-netdisk.${kind}`,
+        version: optionalString(item.modifiedAt),
+        etag: optionalString(item.cloudMd5),
+        schema: boundedProviderResourceSchema(item),
+        url: `https://pan.baidu.com/disk/main#/index?path=${encodeURIComponent(optionalString(item.path) ?? "/")}`,
+      },
+    ];
+  });
+}

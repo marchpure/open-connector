@@ -2,7 +2,7 @@ import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { OAuthProviderContext } from "../provider-runtime.ts";
 
 import { compactObject, optionalInteger, optionalRecord, optionalString } from "../../core/cast.ts";
-import { ProviderRequestError } from "../provider-runtime.ts";
+import { ProviderRequestError, readProviderJsonBody } from "../provider-runtime.ts";
 
 const tencentDocsUserInfoUrl = "https://docs.qq.com/oauth/v2/userinfo";
 export const tencentDocsApiBaseUrl: string = "https://docs.qq.com";
@@ -152,7 +152,7 @@ async function tencentDocsListFolder(input: Record<string, unknown>, context: Te
         sortType: optionalString(input.sortType),
         asc: optionalInteger(input.asc),
         start: optionalInteger(input.start),
-        limit: optionalInteger(input.limit),
+        limit: Math.min(optionalInteger(input.limit) ?? 20, 100),
       }),
     },
     context,
@@ -162,8 +162,8 @@ async function tencentDocsListFolder(input: Record<string, unknown>, context: Te
     ret: normalizeTencentDocsRet(envelope.ret),
     msg: normalizeTencentDocsMsg(envelope.msg),
     next: normalizeNullableInteger(data.next),
-    items: normalizeTencentDocsFileList(data.list),
-    raw: data,
+    items: normalizeTencentDocsFileList(data.list).slice(0, 100),
+    raw: { bounded: true },
   };
 }
 
@@ -195,7 +195,7 @@ async function tencentDocsSearchFiles(input: Record<string, unknown>, context: T
     total: normalizeNullableInteger(data.total),
     hasMore: normalizeNullableBoolean(data.hasMore),
     items: normalizeTencentDocsFileList(data.list),
-    raw: data,
+    raw: { bounded: true },
   };
 }
 
@@ -465,12 +465,11 @@ async function requestTencentDocsOAuthEnvelope(url: URL, fetcher: typeof fetch) 
 }
 
 async function parseTencentDocsJson<T>(response: Response, context: string) {
-  let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch {
-    throw mapTencentDocsHttpError(response.status, `tencent_docs ${context} returned invalid JSON`);
-  }
+  const payload = await readProviderJsonBody(response, {
+    emptyBody: {},
+    invalidJsonMessage: `tencent_docs ${context} returned invalid JSON`,
+    maxBytes: 4 * 1024 * 1024,
+  });
 
   if (!response.ok) {
     throw mapTencentDocsHttpError(response.status, extractTencentDocsErrorMessage(payload));

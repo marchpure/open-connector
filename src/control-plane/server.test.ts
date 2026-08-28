@@ -594,6 +594,44 @@ describe("connection control API", () => {
     database.close();
   });
 
+  it("does not issue Agent leases for office mutations or generic MCP calls", async () => {
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([provider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          customCredential: async () => ({ profile: { accountId: "validated" } }),
+        }),
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const token = createPrincipalToken(principal, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "secret" } }),
+    });
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+    const lease = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["tencent_docs.batch_update_doc", "wps_mcp.call_tool", "baidu_netdisk.create_share_link"],
+        invocationId: "inv-read-only",
+        audience: "knowledge-runtime",
+      }),
+    });
+    expect(lease.status).toBe(403);
+    expect(await lease.json()).toMatchObject({ error: { code: "lease_action_forbidden" } });
+    database.close();
+  });
+
   it("persists failed validation and marks the connection error", async () => {
     const database = new DatabaseSync(":memory:");
     const validateCredential = vi

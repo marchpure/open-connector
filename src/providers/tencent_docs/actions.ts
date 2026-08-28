@@ -288,6 +288,7 @@ export const tencentDocsActions: ActionDefinition[] = [
       ...apiResponseBaseSchema,
       file: tencentDocsFileSchema,
     }),
+    resourceBindings: { fileID: [] },
   }),
   defineAction({
     service: "tencent_docs",
@@ -313,6 +314,7 @@ export const tencentDocsActions: ActionDefinition[] = [
       items: s.array("The files and folders in the folder.", tencentDocsFileSchema),
       raw: rawObjectSchema,
     }),
+    resourceBindingsOptional: { folderID: ["application/vnd.tencent-docs.folder"] },
   }),
   defineAction({
     service: "tencent_docs",
@@ -343,6 +345,7 @@ export const tencentDocsActions: ActionDefinition[] = [
       operationID: s.string("The Tencent Docs export operation ID."),
       exportHandle: s.string("An opaque handle that can be passed to get_export_progress."),
     }),
+    resourceBindings: { fileID: [] },
   }),
   defineAction({
     service: "tencent_docs",
@@ -389,6 +392,7 @@ export const tencentDocsActions: ActionDefinition[] = [
       gridData: rawObjectSchema,
       raw: rawObjectSchema,
     }),
+    resourceBindings: { fileID: ["application/vnd.tencent-docs.sheet"] },
   }),
   defineAction({
     service: "tencent_docs",
@@ -416,6 +420,7 @@ export const tencentDocsActions: ActionDefinition[] = [
       version: s.integer("The Tencent Docs document version."),
       raw: rawObjectSchema,
     }),
+    resourceBindings: { fileID: ["application/vnd.tencent-docs.doc"] },
   }),
   defineAction({
     service: "tencent_docs",
@@ -441,6 +446,7 @@ export const tencentDocsActions: ActionDefinition[] = [
       sheets: s.array("The Smartsheet child sheets returned by Tencent Docs.", tencentDocsSmartsheetSheetSchema),
       raw: rawObjectSchema,
     }),
+    resourceBindings: { fileID: ["application/vnd.tencent-docs.smartsheet"] },
   }),
   defineAction({
     service: "tencent_docs",

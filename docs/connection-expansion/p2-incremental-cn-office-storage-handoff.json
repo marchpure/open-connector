@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "status": "CONNECTION_INCREMENTAL_P2_FROZEN_WITH_EXTERNAL_BLOCKERS",
+  "baseSha": "3bbd44624933300487a54ee3acba23190b66ee98",
+  "branch": "feat/connection-expansion-p2-cn-office-storage",
+  "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-p2-cn-office-storage",
+  "scope": ["tencent_docs", "wps_mcp", "baidu_netdisk", "tencent_cos", "huawei_obs", "minio", "qiniu_kodo"],
+  "sharedChanges": [
+    "src/control-plane/index.ts",
+    "src/control-plane/server.ts",
+    "src/control-plane/types.ts",
+    "src/providers/provider-loader.ts",
+    "src/providers/aws_s3/executors.ts",
+    "src/providers/s3-compatible-profile.ts",
+    "src/providers/p2-cn-office-storage.test.ts"
+  ],
+  "connections": [
+    {
+      "providerId": "tencent_docs",
+      "implementation": "Hardened the existing OAuth provider; no duplicate provider was created.",
+      "auth": "OAuth 2.0 with state stored by Connection Service; official Tencent Docs scopes remain provider-native.",
+      "actions": {
+        "agentLeaseRead": [
+          "get_current_user",
+          "list_folder",
+          "search_files",
+          "get_file_metadata",
+          "get_doc_content",
+          "get_sheet_range",
+          "list_smartsheet_sheets",
+          "start_export",
+          "get_export_progress"
+        ],
+        "notDelegable": [
+          "create_file",
+          "rename_file",
+          "batch_update_sheet",
+          "batch_update_doc",
+          "update_form_collection_deadline",
+          "generate_form_result"
+        ]
+      },
+      "tier": "beta",
+      "evidence": "Contract tests cover bounded/redacted discovery and ResourceRef identity.",
+      "revocation": "Connection revision and lease checks fail closed after revoke/delete; upstream revoke requires a real account.",
+      "externalBlocker": "No Tencent Docs enterprise OAuth app and user account were available for a real authorize/read/revoke lifecycle."
+    },
+    {
+      "providerId": "wps_mcp",
+      "implementation": "Kept the canonical official MCP provider. No unsupported WPS enterprise OAuth/API adapter was added.",
+      "auth": "Official WPS MCP access token stored as an encrypted Connection Service credential.",
+      "actions": {
+        "agentLeaseRead": ["search_files", "list_my_files", "list_files", "get_file_info", "read_file"],
+        "notDelegable": ["list_tools", "call_tool", "create_file_with_content", "create_folder"]
+      },
+      "tier": "beta",
+      "limitations": [
+        "MCP tool discovery proves capability presence, not content-read success.",
+        "Read/info actions accept discovered file_id only; arbitrary URLs and temporary media URLs are disabled.",
+        "Results are redacted and size bounded at the provider boundary."
+      ],
+      "externalBlocker": "No real WPS account token was available for list/search/info/read and token-revocation evidence."
+    },
+    {
+      "providerId": "baidu_netdisk",
+      "implementation": "Hardened the existing OAuth and official MCP-backed runtime.",
+      "auth": "OAuth 2.0 basic/netdisk scopes with refresh handled by the shared OAuth runtime.",
+      "actions": {
+        "agentLeaseRead": [
+          "get_current_account",
+          "get_quota",
+          "list_files",
+          "search_files",
+          "semantic_search_files",
+          "download_file"
+        ],
+        "notDelegable": [
+          "upload_file_from_url",
+          "create_text_file",
+          "create_folder",
+          "create_share_link",
+          "copy",
+          "move",
+          "rename"
+        ]
+      },
+      "tier": "beta",
+      "evidence": "Existing download/security tests plus P2 ResourceRef binding and bounded-result checks.",
+      "externalBlocker": "No Baidu Netdisk application and user authorization were available for a real refresh/quota/download/revoke lifecycle."
+    },
+    {
+      "providerId": "tencent_cos",
+      "implementation": "New canonical provider profile over the hardened S3-compatible SigV4 runtime; Tencent identity, region, endpoint, bucket, prefix, temporary token, ETag, and version remain explicit.",
+      "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
+      "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
+      "tier": "beta",
+      "evidence": "Contract tests cover configured-bucket discovery, prefix enforcement, endpoint pinning, bounded download, MIME checks, and generated registry reachability.",
+      "externalBlocker": "No Tencent Cloud account/COS credential was available; native SDK/error parity and real revoke/rotation remain unverified."
+    },
+    {
+      "providerId": "huawei_obs",
+      "implementation": "New canonical provider profile over the hardened S3-compatible SigV4 runtime; Huawei identity and endpoint remain explicit.",
+      "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
+      "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
+      "tier": "beta",
+      "evidence": "Same security contract matrix as Tencent COS with an OBS-specific endpoint and ResourceRef MIME.",
+      "externalBlocker": "No Huawei Cloud account/OBS credential was available; native SDK/error parity and real revoke/rotation remain unverified."
+    },
+    {
+      "providerId": "minio",
+      "implementation": "New self-hosted canonical profile reusing the AWS S3 security runtime with forced path-style addressing.",
+      "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
+      "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
+      "tier": "beta",
+      "evidence": "Contract tests prove path-style request construction, configured bucket/prefix discovery, endpoint pinning, and shared bounded-read controls.",
+      "limitations": [
+        "Private endpoints require OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK and remain subject to metadata, loopback, link-local, redirect, and DNS guards.",
+        "Custom private CA injection is not implemented.",
+        "MinIO evidence does not promote AWS S3 or other vendors to verified."
+      ],
+      "externalBlocker": "No controlled TLS/private-CA MinIO deployment was available for a full credential rotation and revocation lifecycle."
+    },
+    {
+      "providerId": "qiniu_kodo",
+      "implementation": "New canonical provider profile over the official Kodo S3-compatible endpoint and hardened SigV4 runtime.",
+      "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
+      "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
+      "tier": "beta",
+      "evidence": "Contract tests cover provider-specific endpoint construction, configured-bucket discovery, and shared object security controls.",
+      "externalBlocker": "No Qiniu account/Kodo credential was available; native SDK/error parity and real revoke/rotation remain unverified."
+    }
+  ],
+  "security": {
+    "credentialOwnership": "All credentials remain encrypted behind credential_ref and are resolved only inside the server runtime.",
+    "authorization": "Discovery is connection-scoped; resource-bound reads exact-match the latest revision's ResourceRef and upstream access is checked again on every invocation.",
+    "leasePolicy": "Office mutations, generic WPS tool calls, storage writes/deletes, and presigned URLs cannot enter Agent leases.",
+    "storage": "Bucket and prefix are allowlisted, endpoint overrides are pinned to the configured origin, reads are streamed/bounded, unsafe MIME is rejected, and version/ETag preconditions are preserved.",
+    "ssrf": "Public storage endpoints use public-only DNS validation. MinIO private networking requires the deployment-level opt-in and cannot reach cloud metadata or other always-blocked addresses."
+  },
+  "integrationNotes": [
+    "Do not merge P1 implicitly.",
+    "Regenerate catalog and both registries after conflict resolution.",
+    "Keep all seven providers beta until the external account lifecycle evidence is attached.",
+    "The existing Feishu, DingTalk, WeCom, AWS S3, Aliyun OSS, and Volcengine TOS implementations are regression baselines."
+  ],
+  "verification": {
+    "generateCatalog": "passed; 1457 providers and 15237 actions",
+    "generateRegistry": "passed; 1457 Node providers and 1449 Cloudflare providers",
+    "fixCheck": "passed; lint, format, registry generation, and src/scripts/examples typecheck",
+    "focusedTests": "passed; P2 provider, prior office/storage, AWS S3, and Control Plane suites",
+    "fullTests": "passed; 171 files passed, 1 skipped; 1554 tests passed, 4 skipped",
+    "build": "passed",
+    "npmAuditOmitDev": "passed; 0 vulnerabilities",
+    "npmAudit": "passed; 0 vulnerabilities",
+    "catalogVerifier": "passed; all seven canonical providers have actions and generated lazy registry entries",
+    "gitDiffCheck": "passed",
+    "sbom": "Existing artifacts/npm-sbom-cyclonedx.json remains applicable because no dependency was added."
+  }
+}

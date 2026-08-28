@@ -9,6 +9,8 @@ import type {
 
 import { optionalRecord, optionalString } from "../../core/cast.ts";
 import {
+  boundedProviderResourceSchema,
+  boundedProviderActionResult,
   createProviderFetch,
   createProviderProxyUrl,
   normalizeProviderProxyHeaders,
@@ -52,13 +54,15 @@ export const executors: ProviderExecutors = Object.fromEntries(
 
         return {
           ok: true,
-          output: await handler(input as Record<string, unknown>, {
-            accessToken: credential.accessToken,
-            clientId: clientId ?? "",
-            openID: openID ?? "",
-            fetcher: tencentDocsFetch,
-            signal: context.signal,
-          }),
+          output: boundedProviderActionResult(
+            await handler(input as Record<string, unknown>, {
+              accessToken: credential.accessToken,
+              clientId: clientId ?? "",
+              openID: openID ?? "",
+              fetcher: tencentDocsFetch,
+              signal: context.signal,
+            }),
+          ),
         };
       } catch (error) {
         return toProviderExecutionError(error, "tencent_docs request failed");
@@ -152,3 +156,68 @@ export const credentialValidators: CredentialValidators = {
     };
   },
 };
+
+export async function discoverResources(
+  context: ExecutionContext,
+  fetcher: typeof fetch,
+): Promise<
+  Array<{
+    sourceType: "tencent_docs";
+    resourceId: string;
+    title?: string;
+    mimeType?: string;
+    version?: string;
+    schema?: Record<string, unknown>;
+    owner?: { id: string; displayName?: string };
+    aclSummary?: { visibility: "private" | "shared" };
+    url?: string;
+  }>
+> {
+  const credential = await requireOAuthCredential(context, service);
+  const clientId =
+    optionalString(credential.metadata.clientId) ??
+    optionalString(credential.metadata.client_id) ??
+    optionalString(credential.metadata.oauthClientId);
+  const openID =
+    optionalString(credential.metadata.openID) ??
+    optionalString(credential.metadata.openId) ??
+    optionalString(credential.metadata.user_id);
+  if (!clientId || !openID) {
+    throw new ProviderRequestError(400, "tencent_docs discovery requires clientId and openID OAuth metadata.");
+  }
+  const output = (await tencentDocsActionHandlers.list_folder(
+    { start: 0, limit: 100 },
+    { accessToken: credential.accessToken, clientId, openID, fetcher, signal: context.signal },
+  )) as { items?: unknown[] };
+  return (output.items ?? []).slice(0, 100).flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const resourceId = optionalString(item.ID);
+    if (!resourceId) return [];
+    const type = optionalString(item.type) ?? "file";
+    const ownerId = optionalString(item.ownerID);
+    return [
+      {
+        sourceType: "tencent_docs" as const,
+        resourceId,
+        title: optionalString(item.title),
+        mimeType: tencentDocsMimeType(type),
+        version:
+          optionalString(item.lastModifyTime) ??
+          (typeof item.lastModifyTime === "number" ? String(item.lastModifyTime) : undefined),
+        schema: boundedProviderResourceSchema(item),
+        owner: ownerId ? { id: ownerId, displayName: optionalString(item.ownerName) } : undefined,
+        aclSummary: { visibility: item.isOwner === true ? ("private" as const) : ("shared" as const) },
+        url: optionalString(item.url),
+      },
+    ];
+  });
+}
+
+function tencentDocsMimeType(type: string): string {
+  if (type === "doc") return "application/vnd.tencent-docs.doc";
+  if (type === "sheet") return "application/vnd.tencent-docs.sheet";
+  if (type === "smartsheet") return "application/vnd.tencent-docs.smartsheet";
+  if (type === "folder") return "application/vnd.tencent-docs.folder";
+  return `application/vnd.tencent-docs.${type.replace(/[^a-z0-9-]/giu, "") || "file"}`;
+}

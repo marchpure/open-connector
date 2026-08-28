@@ -45,6 +45,24 @@ describe("AWS S3 download_object", () => {
     expect(requests[0]?.url.origin).toBe("https://documents.s3.compat.example.test");
   });
 
+  it("rejects action endpoint overrides outside the configured connection origin", async () => {
+    const configured = {
+      ...credential,
+      values: { ...credential.values, endpoint: "https://s3.compat.example.test" },
+      metadata: { ...credential.metadata, endpoint: "https://s3.compat.example.test" },
+    };
+    const result = await executors["aws_s3.list_objects"]!(
+      { bucket: "documents", endpoint: "https://attacker.example.test" },
+      {
+        getCredential: async () => configured,
+      },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "authorization_failed", message: "endpoint is outside the connection allowlist" },
+    });
+  });
+
   it("downloads an object byte-for-byte into transit storage", async () => {
     const content = new Uint8Array([83, 51, 0, 255]);
     const requests = stubResponses([

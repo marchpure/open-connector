@@ -391,6 +391,15 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         "Storage write, delete, and presign actions require the connection owner.",
       );
     }
+    const prohibitedAgentActions = requestedActions.filter(isProhibitedAgentLeaseAction);
+    if (prohibitedAgentActions.length > 0) {
+      return jsonError(
+        context,
+        403,
+        "lease_action_forbidden",
+        `These capabilities cannot be delegated to an Agent lease: ${prohibitedAgentActions.join(", ")}.`,
+      );
+    }
     try {
       const issued = leases.issue(principalOf(context), {
         connectionIds: [connectionId],
@@ -828,7 +837,15 @@ function optionalString(value: unknown): string | undefined {
 }
 
 function isOwnerControlledStorageAction(actionId: string): boolean {
-  return /^(?:aws_s3|aliyun_oss)\.(?:put_object|delete_object|generate_presigned_url)$/u.test(actionId);
+  return /^(?:aws_s3|aliyun_oss|volcengine_tos|tencent_cos|huawei_obs|minio|qiniu_kodo)\.(?:put_object|delete_object|generate_presigned_url)$/u.test(
+    actionId,
+  );
+}
+
+function isProhibitedAgentLeaseAction(actionId: string): boolean {
+  return /^(?:(?:tencent_docs)\.(?:create_file|rename_file|batch_update_sheet|batch_update_doc|update_form_collection_deadline|generate_form_result)|(?:wps_mcp)\.(?:call_tool|create_file_with_content|create_folder)|(?:baidu_netdisk)\.(?:upload_file_from_url|create_text_file|create_folder|create_share_link|copy|move|rename)|(?:aws_s3|aliyun_oss|volcengine_tos|tencent_cos|huawei_obs|minio|qiniu_kodo)\.(?:put_object|delete_object|generate_presigned_url))$/u.test(
+    actionId,
+  );
 }
 
 function optionalVisibility(value: unknown): "personal" | "team" | undefined {

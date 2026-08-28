@@ -14,9 +14,11 @@ import {
   assertPublicHttpUrl,
   assertSafeObjectResponse,
   hasUnsafeControlCharacter,
+  isPrivateNetworkAccessAllowed,
   readBoundedResponseBytes,
 } from "../../core/request.ts";
 import {
+  createProviderFetch,
   createProviderProxyUrl,
   createProviderTimeout,
   defineProviderExecutors,
@@ -44,6 +46,8 @@ type AwsS3ClientConfig = {
   sessionToken?: string;
   region: string;
   endpoint?: string;
+  forcePathStyle?: boolean;
+  allowPrivateNetwork?: boolean;
   fetcher: typeof fetch;
 };
 
@@ -132,7 +136,10 @@ export const executors: ProviderExecutors = defineProviderExecutors<AwsActionCon
     return {
       values: credential.values,
       metadata: credential.metadata,
-      fetcher,
+      fetcher:
+        credential.values.allowPrivateNetwork === "true"
+          ? createProviderFetch({ allowPrivateNetwork: isPrivateNetworkAccessAllowed })
+          : fetcher,
       transitFiles: context.transitFiles,
       signal: context.signal,
     };
@@ -182,6 +189,7 @@ export const proxy: ProviderProxyExecutor = async (input, context) => {
         region,
         endpoint,
         fetcher: providerFetch,
+        allowPrivateNetwork: credential.values.allowPrivateNetwork === "true",
       }),
       {
         method,
@@ -213,6 +221,127 @@ export const credentialValidators: CredentialValidators = {
     return validateAwsCredential(input.values, fetcher);
   },
 };
+
+export function createS3CompatibleExecutors(profile: {
+  service: string;
+  displayName: string;
+  defaultEndpoint(values: Record<string, string>): string | undefined;
+  forcePathStyle?: boolean;
+}): {
+  executors: ProviderExecutors;
+  credentialValidators: CredentialValidators;
+  discoverResources: (
+    context: ExecutionContext,
+    fetcher: typeof fetch,
+  ) => Promise<
+    Array<{
+      sourceType: "tencent_cos" | "huawei_obs" | "minio" | "qiniu_kodo";
+      resourceId: string;
+      title?: string;
+      mimeType?: string;
+      schema?: Record<string, unknown>;
+      url?: string;
+    }>
+  >;
+} {
+  const mappedExecutors: ProviderExecutors = Object.fromEntries(
+    Object.entries(executors).map(([actionId, executor]) => [
+      `${profile.service}.${actionId.slice("aws_s3.".length)}`,
+      (input: unknown, context: ExecutionContext) =>
+        executor(input, {
+          ...context,
+          getCredential: async (requestedService) => {
+            if (requestedService !== service) return context.getCredential(requestedService);
+            const credential = await context.getCredential(profile.service);
+            if (credential?.authType !== "custom_credential") return credential;
+            const values = profileValues(credential.values, profile);
+            return {
+              ...credential,
+              values,
+              metadata: profileMetadata(credential.metadata, values),
+            };
+          },
+        }),
+    ]),
+  );
+  return {
+    executors: mappedExecutors,
+    credentialValidators: {
+      async customCredential(input, options) {
+        const values = profileValues(input.values, profile);
+        const fetcher =
+          values.allowPrivateNetwork === "true"
+            ? createProviderFetch({ allowPrivateNetwork: isPrivateNetworkAccessAllowed })
+            : options.fetcher;
+        const result = await validateAwsCredential(values, fetcher);
+        return {
+          ...result,
+          profile: {
+            ...result.profile,
+            displayName: `${profile.displayName} - ${input.values.bucket || input.values.region}`,
+          },
+          metadata: { ...result.metadata, providerProfile: profile.service },
+        };
+      },
+    },
+    async discoverResources(context, fetcher) {
+      const resources = await discoverResources(
+        {
+          ...context,
+          getCredential: async (requestedService) => {
+            if (requestedService !== service) return context.getCredential(requestedService);
+            const credential = await context.getCredential(profile.service);
+            if (credential?.authType !== "custom_credential") return credential;
+            const values = profileValues(credential.values, profile);
+            return {
+              ...credential,
+              values,
+              metadata: profileMetadata(credential.metadata, values),
+            };
+          },
+        },
+        profile.service === "minio"
+          ? createProviderFetch({ fetch: fetcher, allowPrivateNetwork: isPrivateNetworkAccessAllowed })
+          : fetcher,
+      );
+      return resources.map((resource) => ({
+        ...resource,
+        sourceType: profile.service as "tencent_cos" | "huawei_obs" | "minio" | "qiniu_kodo",
+        mimeType: `application/vnd.${profile.service.replace("_", ".")}.bucket`,
+        title: resource.title?.replace("S3", profile.displayName),
+      }));
+    },
+  };
+}
+
+function profileMetadata(metadata: Record<string, unknown>, values: Record<string, string>): Record<string, unknown> {
+  return {
+    ...metadata,
+    endpoint: values.endpoint,
+    region: values.region,
+    bucket: values.bucket,
+    prefix: values.prefix,
+    forcePathStyle: values.forcePathStyle,
+    allowPrivateNetwork: values.allowPrivateNetwork,
+  };
+}
+
+function profileValues(
+  values: Record<string, string>,
+  profile: {
+    service: string;
+    defaultEndpoint(values: Record<string, string>): string | undefined;
+    forcePathStyle?: boolean;
+  },
+): Record<string, string> {
+  const endpoint = values.endpoint || profile.defaultEndpoint(values);
+  return {
+    ...values,
+    ...(endpoint ? { endpoint } : {}),
+    ...(profile.forcePathStyle ? { forcePathStyle: "true" } : {}),
+    ...(profile.service === "minio" ? { allowPrivateNetwork: "true" } : {}),
+  };
+}
 
 export async function discoverResources(
   context: ExecutionContext,
@@ -257,7 +386,13 @@ export async function discoverResources(
           prefix: optionalString(credential.metadata.prefix) ?? optionalString(credential.values.prefix),
           allowlisted: true,
         }),
-        url: buildBucketResourceUrl(region, name, resolveEndpoint({}, actionContext)),
+        url: buildBucketResourceUrl(
+          region,
+          name,
+          resolveEndpoint({}, actionContext),
+          isForcePathStyle(actionContext),
+          allowsPrivateNetwork(actionContext),
+        ),
       };
     })
     .filter((resource): resource is NonNullable<typeof resource> => resource !== undefined);
@@ -281,6 +416,7 @@ async function validateAwsCredential(
     region,
     fetcher,
     endpoint,
+    forcePathStyle: input.forcePathStyle === "true",
   });
 
   try {
@@ -371,7 +507,13 @@ async function awsListBuckets(input: Record<string, unknown>, context: AwsAction
 async function awsListObjects(input: Record<string, unknown>, context: AwsActionContext) {
   const bucket = resolveBucket(input, context);
   const region = resolveRegion(input, context);
-  createAwsS3BaseUrl(region, bucket, resolveEndpoint(input, context));
+  createAwsS3BaseUrl(
+    region,
+    bucket,
+    resolveEndpoint(input, context),
+    isForcePathStyle(context),
+    allowsPrivateNetwork(context),
+  );
   assertAllowedBucket(bucket, context);
   const requestedPrefix = assertAllowedPrefix(
     optionalString(input.prefix) ??
@@ -403,7 +545,13 @@ async function awsListObjects(input: Record<string, unknown>, context: AwsAction
 async function awsHeadObject(input: Record<string, unknown>, context: AwsActionContext) {
   const bucket = resolveBucket(input, context);
   const objectKey = requireAwsField(input.objectKey, "objectKey");
-  createAwsS3BaseUrl(resolveRegion(input, context), bucket, resolveEndpoint(input, context));
+  createAwsS3BaseUrl(
+    resolveRegion(input, context),
+    bucket,
+    resolveEndpoint(input, context),
+    isForcePathStyle(context),
+    allowsPrivateNetwork(context),
+  );
   assertAllowedBucket(bucket, context);
   assertAllowedObjectKey(objectKey, context);
   const response = await awsS3Request(createClientForAction(input, context), {
@@ -445,7 +593,13 @@ async function awsDownloadObject(input: Record<string, unknown>, context: AwsAct
 
     const bucket = resolveBucket(input, context);
     const objectKey = readObjectKey(input);
-    createAwsS3BaseUrl(resolveRegion(input, context), bucket, resolveEndpoint(input, context));
+    createAwsS3BaseUrl(
+      resolveRegion(input, context),
+      bucket,
+      resolveEndpoint(input, context),
+      isForcePathStyle(context),
+      allowsPrivateNetwork(context),
+    );
     assertAllowedBucket(bucket, context);
     assertAllowedObjectKey(objectKey, context);
     const response = await awsS3Request(createClientForAction(input, context), {
@@ -519,7 +673,14 @@ async function awsPutObject(input: Record<string, unknown>, context: AwsActionCo
   return {
     bucket,
     objectKey,
-    url: buildObjectUrl(region, bucket, objectKey, resolveEndpoint(input, context)),
+    url: buildObjectUrl(
+      region,
+      bucket,
+      objectKey,
+      resolveEndpoint(input, context),
+      isForcePathStyle(context),
+      allowsPrivateNetwork(context),
+    ),
     etag: headers.etag ?? null,
   };
 }
@@ -527,7 +688,13 @@ async function awsPutObject(input: Record<string, unknown>, context: AwsActionCo
 async function awsDeleteObject(input: Record<string, unknown>, context: AwsActionContext) {
   const bucket = resolveBucket(input, context);
   const objectKey = requireAwsField(input.objectKey, "objectKey");
-  createAwsS3BaseUrl(resolveRegion(input, context), bucket, resolveEndpoint(input, context));
+  createAwsS3BaseUrl(
+    resolveRegion(input, context),
+    bucket,
+    resolveEndpoint(input, context),
+    isForcePathStyle(context),
+    allowsPrivateNetwork(context),
+  );
   assertAllowedBucket(bucket, context);
   assertAllowedObjectKey(objectKey, context);
   await awsS3Request(createClientForAction(input, context), {
@@ -550,7 +717,13 @@ async function awsDeleteObject(input: Record<string, unknown>, context: AwsActio
 async function awsGeneratePresignedUrl(input: Record<string, unknown>, context: AwsActionContext) {
   const bucket = resolveBucket(input, context);
   const objectKey = requireAwsField(input.objectKey, "objectKey");
-  createAwsS3BaseUrl(resolveRegion(input, context), bucket, resolveEndpoint(input, context));
+  createAwsS3BaseUrl(
+    resolveRegion(input, context),
+    bucket,
+    resolveEndpoint(input, context),
+    isForcePathStyle(context),
+    allowsPrivateNetwork(context),
+  );
   assertAllowedBucket(bucket, context);
   assertAllowedObjectKey(objectKey, context);
   const method = normalizePresignedMethod(input.method);
@@ -622,6 +795,11 @@ function createClientForAction(input: Record<string, unknown>, context: AwsActio
     sessionToken: optionalString(values.sessionToken)?.trim(),
     region: resolveRegion(input, context),
     endpoint: resolveEndpoint(input, context),
+    forcePathStyle:
+      context.values.forcePathStyle === "true" ||
+      context.metadata.forcePathStyle === true ||
+      context.metadata.forcePathStyle === "true",
+    allowPrivateNetwork: context.values.allowPrivateNetwork === "true",
     fetcher: context.fetcher,
   });
 }
@@ -634,6 +812,8 @@ async function awsS3Request(client: AwsS3ClientConfig, input: AwsS3RequestInput)
     bucket: input.bucket,
     objectKey: input.objectKey,
     query: input.query,
+    forcePathStyle: client.forcePathStyle,
+    allowPrivateNetwork: client.allowPrivateNetwork,
   });
   const body = normalizeRequestBody(input.body);
   const payloadHash =
@@ -681,6 +861,8 @@ function awsPresignUrl(
     bucket: input.bucket,
     objectKey: input.objectKey,
     endpoint: client.endpoint,
+    forcePathStyle: client.forcePathStyle,
+    allowPrivateNetwork: client.allowPrivateNetwork,
   });
   const headers = new Headers();
   for (const [key, value] of Object.entries(input.headers ?? {})) {
@@ -765,9 +947,18 @@ function buildRequestTarget(input: {
   bucket?: string;
   objectKey?: string;
   query?: Record<string, string | number | boolean | undefined>;
+  forcePathStyle?: boolean;
+  allowPrivateNetwork?: boolean;
 }) {
-  const url = createAwsS3BaseUrl(input.region, input.bucket, input.endpoint);
-  url.pathname = input.objectKey ? `/${encodeS3Key(input.objectKey)}` : "/";
+  const url = createAwsS3BaseUrl(
+    input.region,
+    input.bucket,
+    input.endpoint,
+    input.forcePathStyle,
+    input.allowPrivateNetwork,
+  );
+  const bucketPath = input.forcePathStyle && input.bucket ? `/${encodeURIComponent(input.bucket)}` : "";
+  url.pathname = input.objectKey ? `${bucketPath}/${encodeS3Key(input.objectKey)}` : bucketPath || "/";
   for (const [key, value] of Object.entries(input.query ?? {})) {
     if (value == null) {
       continue;
@@ -780,12 +971,20 @@ function buildRequestTarget(input: {
   };
 }
 
-function createAwsS3BaseUrl(region: string, bucket: string | undefined, endpoint?: string): URL {
+function createAwsS3BaseUrl(
+  region: string,
+  bucket: string | undefined,
+  endpoint?: string,
+  forcePathStyle = false,
+  allowPrivateNetwork = false,
+): URL {
   if (!/^[a-z0-9][a-z0-9.-]*$/iu.test(region) || (bucket !== undefined && !/^[a-z0-9][a-z0-9.-]*$/iu.test(bucket))) {
     throw new ProviderRequestError(400, "bucket and region must form a valid AWS S3 endpoint");
   }
-  const base = endpoint ? parseS3Endpoint(endpoint) : new URL(`https://s3.${region}.amazonaws.com`);
-  const expectedHost = bucket ? `${bucket}.${base.host}` : base.host;
+  const base = endpoint
+    ? parseS3Endpoint(endpoint, allowPrivateNetwork)
+    : new URL(`https://s3.${region}.amazonaws.com`);
+  const expectedHost = bucket && !forcePathStyle ? `${bucket}.${base.host}` : base.host;
   let url: URL;
   try {
     url = new URL(`https://${expectedHost}`);
@@ -805,17 +1004,32 @@ function createAwsS3BaseUrl(region: string, bucket: string | undefined, endpoint
   return url;
 }
 
-function buildObjectUrl(region: string, bucket: string, objectKey: string, endpoint?: string) {
+function buildObjectUrl(
+  region: string,
+  bucket: string,
+  objectKey: string,
+  endpoint?: string,
+  forcePathStyle = false,
+  allowPrivateNetwork = false,
+) {
   return buildRequestTarget({
     region,
     bucket,
     objectKey,
     endpoint,
+    forcePathStyle,
+    allowPrivateNetwork,
   }).url.toString();
 }
 
-function buildBucketResourceUrl(region: string, bucket: string, endpoint?: string): string {
-  return createAwsS3BaseUrl(region, bucket, endpoint).origin;
+function buildBucketResourceUrl(
+  region: string,
+  bucket: string,
+  endpoint?: string,
+  forcePathStyle = false,
+  allowPrivateNetwork = false,
+): string {
+  return buildRequestTarget({ region, bucket, endpoint, forcePathStyle, allowPrivateNetwork }).url.toString();
 }
 
 function buildCanonicalHeaders(headers: Headers) {
@@ -1224,11 +1438,20 @@ function resolveRegion(input: Record<string, unknown>, context: AwsActionContext
 }
 
 function resolveEndpoint(input: Record<string, unknown>, context: AwsActionContext): string | undefined {
-  return (
-    optionalString(input.endpoint) ??
-    optionalString(context.metadata.endpoint) ??
-    optionalString(context.values.endpoint)
-  );
+  const configured = optionalString(context.metadata.endpoint) ?? optionalString(context.values.endpoint);
+  const requested = optionalString(input.endpoint);
+  if (requested && configured && normalizeEndpointOrigin(requested) !== normalizeEndpointOrigin(configured)) {
+    throw new ProviderRequestError(403, "endpoint is outside the connection allowlist");
+  }
+  return requested ?? configured;
+}
+
+function isForcePathStyle(context: AwsActionContext): boolean {
+  return context.values.forcePathStyle === "true" || context.metadata.forcePathStyle === true;
+}
+
+function allowsPrivateNetwork(context: AwsActionContext): boolean {
+  return context.values.allowPrivateNetwork === "true";
 }
 
 function assertAllowedBucket(bucket: string, context: AwsActionContext): void {
@@ -1253,7 +1476,7 @@ function assertAllowedObjectKey(objectKey: string, context: AwsActionContext): v
   }
 }
 
-function parseS3Endpoint(value: string): URL {
+function parseS3Endpoint(value: string, allowPrivateNetwork = false): URL {
   let url: URL;
   try {
     url = new URL(value.includes("://") ? value : `https://${value}`);
@@ -1266,8 +1489,13 @@ function parseS3Endpoint(value: string): URL {
   assertPublicHttpUrl(url.toString(), {
     fieldName: "endpoint",
     createError: (message) => new ProviderRequestError(400, message),
+    allowPrivateNetwork: allowPrivateNetwork && isPrivateNetworkAccessAllowed(),
   });
   return url;
+}
+
+function normalizeEndpointOrigin(value: string): string {
+  return new URL(value.includes("://") ? value : `https://${value}`).origin;
 }
 
 function resolveBucket(input: Record<string, unknown>, context: AwsActionContext) {
