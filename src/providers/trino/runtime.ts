@@ -213,7 +213,9 @@ class TrinoBackend implements DatabaseBackend {
         method = "GET";
       }
     } finally {
-      if (queryId && rows.length > maxRows) {
+      // A bounded caller must not leave a queued/running Trino statement
+      // behind when the row cap, timeout, or request abort is reached.
+      if (queryId && (rows.length > maxRows || this.signal?.aborted || Date.now() >= deadline)) {
         await trinoFetch(`${origin}/v1/query/${encodeURIComponent(queryId)}`, {
           method: "DELETE",
           headers,
