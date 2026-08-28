@@ -171,6 +171,17 @@ export function assertSafeObjectResponse(
   }
 }
 
+/**
+ * Reject control characters before an object key reaches URL construction,
+ * signing, or an upstream object-storage API.
+ */
+export function hasUnsafeControlCharacter(value: string): boolean {
+  return [...value].some((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code <= 0x1f || code === 0x7f;
+  });
+}
+
 // Egress targets are classified into three tiers for the SSRF guard:
 //
 //   - "reserved" (localHostnames, cloudMetadataHostnames, localHostnameSuffixes,

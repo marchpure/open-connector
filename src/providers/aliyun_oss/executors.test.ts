@@ -152,6 +152,23 @@ describe("Alibaba Cloud OSS download_object", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("rejects control characters before signing the object key", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const { store } = createTransitFileStore(1024);
+
+    const result = await executeDownload({ bucket: "documents", objectKey: "reports/\u0000secret" }, store);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "invalid_input",
+        message: "objectKey contains an unsafe control character",
+      },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("rejects bucket values that alter the provider origin", async () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);

@@ -2,12 +2,13 @@ import type { CredentialValidationResult, CredentialValidators, ProviderExecutor
 import type { OAuthProviderContext } from "../provider-runtime.ts";
 import type { FeishuActionRuntimeContext } from "./shared/client.ts";
 
-import { optionalRecord, optionalString } from "../../core/cast.ts";
+import { optionalNumber, optionalRecord, optionalString } from "../../core/cast.ts";
 import {
   defineOAuthProviderExecutors,
   getProviderActionHandler,
   mapProviderActionHandlers,
   ProviderRequestError,
+  boundedProviderResourceSchema,
 } from "../provider-runtime.ts";
 import { feishuActions } from "./actions.ts";
 import { feishuActionHandlers, fetchFeishuUserInfo } from "./runtime.ts";
@@ -76,9 +77,13 @@ export async function discoverResources(
     sourceType: "feishu";
     resourceId: string;
     resourceToken?: string;
+    version?: string;
+    etag?: string;
     title?: string;
     mimeType?: string;
     schema?: Record<string, unknown>;
+    owner?: { id: string; displayName?: string };
+    aclSummary?: { visibility: "private" | "shared" | "team"; subjectCount?: number };
     url?: string;
   }>
 > {
@@ -94,9 +99,13 @@ export async function discoverResources(
     sourceType: "feishu";
     resourceId: string;
     resourceToken?: string;
+    version?: string;
+    etag?: string;
     title?: string;
     mimeType?: string;
     schema?: Record<string, unknown>;
+    owner?: { id: string; displayName?: string };
+    aclSummary?: { visibility: "private" | "shared" | "team"; subjectCount?: number };
     url?: string;
   }> = [];
   const seen = new Set<string>();
@@ -131,7 +140,21 @@ export async function discoverResources(
         optionalString(record.obj_type) ??
         defaults.mimeType ??
         optionalString(record.type),
-      schema: record,
+      schema: boundedProviderResourceSchema(record),
+      version: optionalString(record.version) ?? optionalString(record.revision_id),
+      etag: optionalString(record.etag),
+      owner: optionalString(record.owner_id)
+        ? {
+            id: optionalString(record.owner_id)!,
+            displayName: optionalString(record.owner_name),
+          }
+        : undefined,
+      aclSummary: (() => {
+        const visibility = optionalString(record.visibility);
+        return visibility
+          ? { visibility: normalizeFeishuVisibility(visibility), subjectCount: optionalNumber(record.subject_count) }
+          : undefined;
+      })(),
       url: safeFeishuResourceUrl(record.url),
     });
   };
@@ -309,6 +332,13 @@ function safeFeishuResourceUrl(value: unknown): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function normalizeFeishuVisibility(value: string): "private" | "shared" | "team" {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "private") return "private";
+  if (normalized === "team" || normalized === "organization" || normalized === "org") return "team";
+  return "shared";
 }
 
 function createFeishuSharedHandlers(

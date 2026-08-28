@@ -14,6 +14,7 @@ import { assertGuardedEgressUrl } from "../../core/guarded-fetch.ts";
 import {
   assertPublicHttpUrl,
   assertSafeObjectResponse,
+  hasUnsafeControlCharacter,
   isPrivateNetworkAccessAllowed,
   readBoundedResponseBytes,
 } from "../../core/request.ts";
@@ -459,6 +460,9 @@ function readObjectKey(input: Record<string, unknown>): string {
   if (objectKey.length === 0) {
     throw new ProviderRequestError(400, "objectKey must not be empty");
   }
+  if (hasUnsafeControlCharacter(objectKey)) {
+    throw new ProviderRequestError(400, "objectKey contains an unsafe control character");
+  }
   if (objectKey.split("/").some((segment) => segment === "." || segment === "..")) {
     throw new ProviderRequestError(400, "objectKey must not contain . or .. path segments");
   }
@@ -707,7 +711,7 @@ async function downloadSourceFile(
   }
 
   return {
-    bytes: await readResponseBytesWithLimit(response, maxSourceBytes),
+    bytes: await readResponseBytesWithLimit(response, maxSourceBytes, requestSignal),
     contentType: response.headers.get("content-type") ?? undefined,
   };
 }
@@ -1010,36 +1014,12 @@ function parseUrl(value: string, fieldName: "endpoint" | "sourceUrl"): URL {
   }
 }
 
-async function readResponseBytesWithLimit(response: Response, maxBytes: number): Promise<Buffer> {
-  if (!response.body) {
-    throw new ProviderRequestError(502, "sourceUrl response body is unavailable");
-  }
-
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let totalBytes = 0;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      if (!value || value.byteLength === 0) {
-        continue;
-      }
-
-      totalBytes += value.byteLength;
-      if (totalBytes > maxBytes) {
-        await reader.cancel("sourceUrl payload is too large");
-        throw new ProviderRequestError(400, "sourceUrl payload is too large");
-      }
-
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
+async function readResponseBytesWithLimit(response: Response, maxBytes: number, signal?: AbortSignal): Promise<Buffer> {
+  const bytes = await readBoundedResponseBytes(response, {
+    maxBytes,
+    fieldName: "sourceUrl payload",
+    signal,
+    createError: (message) => new ProviderRequestError(400, message),
+  });
+  return Buffer.from(bytes);
 }
