@@ -30,6 +30,7 @@ export class ConnectionLeaseService {
         invocation_id text not null,
         audience text not null,
         connection_ids_json text not null,
+        connection_revisions_json text,
         allowed_actions_json text not null,
         issued_at text not null,
         expires_at text not null,
@@ -38,12 +39,14 @@ export class ConnectionLeaseService {
       create index if not exists idx_connection_leases_scope
         on connection_leases (tenant_id, workspace_id, expires_at);
     `);
+    ensureConnectionRevisionColumn(this.database);
   }
 
   issue(
     principal: TenantPrincipal,
     input: {
       connectionIds: string[];
+      connectionRevisions?: Record<string, number>;
       allowedActions: string[];
       invocationId: string;
       audience: string;
@@ -55,6 +58,7 @@ export class ConnectionLeaseService {
     if (connectionIds.length === 0 || allowedActions.length === 0) {
       throw new LeaseError("invalid_lease", "connection_ids and allowed_actions must both be non-empty.");
     }
+    const connectionRevisions = normalizeConnectionRevisions(connectionIds, input.connectionRevisions);
     if (!input.invocationId.trim() || !input.audience.trim()) {
       throw new LeaseError("invalid_lease", "invocation_id and audience are required.");
     }
@@ -71,6 +75,7 @@ export class ConnectionLeaseService {
       invocationId: input.invocationId,
       audience: input.audience,
       connectionIds,
+      connectionRevisions,
       allowedActions,
       issuedAt: issued.toISOString(),
       expiresAt: expires.toISOString(),
@@ -81,8 +86,8 @@ export class ConnectionLeaseService {
       .prepare(
         `insert into connection_leases
           (token_hash, jti, tenant_id, workspace_id, subject, invocation_id, audience,
-           connection_ids_json, allowed_actions_json, issued_at, expires_at)
-         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           connection_ids_json, connection_revisions_json, allowed_actions_json, issued_at, expires_at)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         hashToken(token),
@@ -93,6 +98,7 @@ export class ConnectionLeaseService {
         claims.invocationId,
         claims.audience,
         JSON.stringify(claims.connectionIds),
+        claims.connectionRevisions ? JSON.stringify(claims.connectionRevisions) : null,
         JSON.stringify(claims.allowedActions),
         claims.issuedAt,
         claims.expiresAt,
@@ -103,7 +109,34 @@ export class ConnectionLeaseService {
   verify(
     token: string,
     principal: TenantPrincipal,
-    expected: { connectionId: string; actionId: string; audience: string; invocationId: string },
+    expected: {
+      connectionId: string;
+      connectionRevision?: number;
+      actionId: string;
+      audience: string;
+      invocationId: string;
+    },
+  ): ConnectionLeaseClaims {
+    const claims = this.verifyRuntime(token, expected);
+    if (
+      claims.tenantId !== principal.tenantId ||
+      claims.workspaceId !== principal.workspaceId ||
+      claims.subject !== principal.subject
+    ) {
+      throw new LeaseError("lease_scope_denied", "Connection lease does not grant this principal.");
+    }
+    return claims;
+  }
+
+  verifyRuntime(
+    token: string,
+    expected: {
+      connectionId: string;
+      connectionRevision?: number;
+      actionId?: string;
+      audience: string;
+      invocationId: string;
+    },
   ): ConnectionLeaseClaims {
     if (!token.startsWith("cl_")) {
       throw new LeaseError("invalid_lease", "Malformed connection lease.");
@@ -123,13 +156,12 @@ export class ConnectionLeaseService {
     }
     const claims = rowToClaims(row);
     if (
-      claims.tenantId !== principal.tenantId ||
-      claims.workspaceId !== principal.workspaceId ||
-      claims.subject !== principal.subject ||
       claims.audience !== expected.audience ||
       claims.invocationId !== expected.invocationId ||
       !claims.connectionIds.includes(expected.connectionId) ||
-      !claims.allowedActions.includes(expected.actionId)
+      (expected.connectionRevision !== undefined &&
+        claims.connectionRevisions?.[expected.connectionId] !== expected.connectionRevision) ||
+      (expected.actionId !== undefined && !claims.allowedActions.includes(expected.actionId))
     ) {
       throw new LeaseError("lease_scope_denied", "Connection lease does not grant this invocation.");
     }
@@ -158,6 +190,13 @@ export class ConnectionLeaseService {
   }
 }
 
+function ensureConnectionRevisionColumn(database: DatabaseSync): void {
+  const columns = database.prepare("pragma table_info(connection_leases)").all() as Array<{ name?: unknown }>;
+  if (!columns.some((column) => column.name === "connection_revisions_json")) {
+    database.exec("alter table connection_leases add column connection_revisions_json text");
+  }
+}
+
 function uniqueNonEmpty(values: string[]): string[] {
   return [...new Set(values.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim()))];
 }
@@ -173,6 +212,9 @@ function equalHash(left: string, right: string): boolean {
 }
 
 function rowToClaims(row: Record<string, unknown>): ConnectionLeaseClaims {
+  const connectionRevisions = row.connection_revisions_json
+    ? (JSON.parse(String(row.connection_revisions_json)) as Record<string, number>)
+    : undefined;
   return {
     tenantId: String(row.tenant_id),
     workspaceId: String(row.workspace_id),
@@ -180,9 +222,23 @@ function rowToClaims(row: Record<string, unknown>): ConnectionLeaseClaims {
     invocationId: String(row.invocation_id),
     audience: String(row.audience),
     connectionIds: JSON.parse(String(row.connection_ids_json)) as string[],
+    connectionRevisions,
     allowedActions: JSON.parse(String(row.allowed_actions_json)) as string[],
     issuedAt: String(row.issued_at),
     expiresAt: String(row.expires_at),
     jti: String(row.jti),
   };
+}
+
+function normalizeConnectionRevisions(
+  connectionIds: string[],
+  revisions: Record<string, number> | undefined,
+): Record<string, number> | undefined {
+  if (!revisions) return undefined;
+  const output: Record<string, number> = {};
+  for (const connectionId of connectionIds) {
+    const revision = revisions[connectionId];
+    if (Number.isInteger(revision) && revision >= 0) output[connectionId] = revision;
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
 }

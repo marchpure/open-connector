@@ -45,6 +45,7 @@ export interface ConnectWithCredentialInput {
 
 export interface ConnectWithoutAuthInput {
   connectionName?: string;
+  persist?: boolean;
 }
 
 export interface ConnectionServiceOptions {
@@ -281,7 +282,13 @@ export class ConnectionService {
       throw new ConnectionError("unsupported_auth_type", `${service} does not support no_auth.`);
     }
 
-    return this.createNoAuthConnectionSummary(provider, normalizeConnectionName(input.connectionName));
+    const connectionName = normalizeConnectionName(input.connectionName);
+    if (!input.persist) {
+      return this.createNoAuthConnectionSummary(provider, connectionName);
+    }
+    const credential = { authType: "no_auth" } as const;
+    const stored = await this.store.set(service, connectionName, credential);
+    return this.createConfiguredConnectionSummary(provider, stored.id, connectionName, credential);
   }
 
   async connectWithApiKey(service: string, input: ConnectWithCredentialInput): Promise<ConnectionSummary> {

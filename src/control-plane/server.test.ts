@@ -19,10 +19,34 @@ const provider: ProviderDefinition = {
   auth: [
     {
       type: "custom_credential",
-      fields: [{ key: "secret", label: "Secret", inputType: "password", required: true, secret: true }],
+      fields: [
+        { key: "endpoint", label: "Endpoint", inputType: "text", required: true, secret: false },
+        { key: "secret", label: "Secret", inputType: "password", required: true, secret: true },
+      ],
     },
   ],
   actions: [],
+};
+
+const runtimeProvider: ProviderDefinition = {
+  ...provider,
+  actions: [
+    {
+      id: "fixture.read",
+      service: "fixture",
+      name: "read",
+      description: "Read fixture data.",
+      requiredScopes: [],
+      providerPermissions: [],
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+        additionalProperties: false,
+      },
+      outputSchema: { type: "object" },
+    },
+  ],
 };
 
 const principal = {
@@ -103,7 +127,11 @@ describe("connection control API", () => {
     const created = await app.request("/v1/connections", {
       method: "POST",
       headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
-      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "do-not-leak" } }),
+      body: JSON.stringify({
+        service: "fixture",
+        authType: "custom_credential",
+        values: { endpoint: "https://fixture.example.test", secret: "do-not-leak" },
+      }),
     });
     expect(created.status).toBe(201);
     const payload = (await created.json()) as { connection: Record<string, unknown> };
@@ -128,6 +156,435 @@ describe("connection control API", () => {
       }),
     });
     expect(lease.status).toBe(404);
+    database.close();
+  });
+
+  it("returns provider-owned connection field schemas from the enabled catalog", async () => {
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([provider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => undefined,
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+
+    const response = await app.request("/v1/catalog", {
+      headers: { authorization: `Bearer ${auth}` },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      items: [
+        {
+          service: "fixture",
+          configSchema: {
+            type: "object",
+            "x-auth-type": "custom_credential",
+            required: ["endpoint"],
+            properties: {
+              endpoint: { type: "string", title: "Endpoint" },
+            },
+          },
+          authSchema: {
+            type: "object",
+            required: ["secret"],
+            properties: {
+              _auth_type: { const: "custom_credential" },
+              secret: { type: "string", title: "Secret", format: "password" },
+            },
+          },
+        },
+      ],
+    });
+    database.close();
+  });
+
+  it("returns auth-linked config alternatives without leaking the auth discriminator into config", async () => {
+    const multiAuthProvider: ProviderDefinition = {
+      ...provider,
+      authTypes: ["no_auth", "api_key"],
+      auth: [
+        { type: "no_auth" },
+        {
+          type: "api_key",
+          label: "Fixture API key",
+          extraFields: [{ key: "baseUrl", label: "Base URL", inputType: "text", required: true, secret: false }],
+        },
+      ],
+    };
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([multiAuthProvider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => undefined,
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const response = await app.request("/v1/catalog", {
+      headers: { authorization: `Bearer ${createPrincipalToken(principal, "auth-secret")}` },
+    });
+    const item = ((await response.json()) as { items: Array<Record<string, unknown>> }).items[0] as {
+      configSchema: { oneOf: Array<{ "x-auth-type": string; properties: Record<string, unknown> }> };
+      authSchema: { oneOf: Array<{ properties: { _auth_type: { const: string } } }> };
+    };
+
+    expect(item.configSchema.oneOf.map((entry) => entry["x-auth-type"])).toEqual(["no_auth", "api_key"]);
+    expect(item.configSchema.oneOf[0].properties).not.toHaveProperty("_auth_type");
+    expect(item.configSchema.oneOf[1].properties).toHaveProperty("baseUrl");
+    expect(item.authSchema.oneOf.map((entry) => entry.properties._auth_type.const)).toEqual(["no_auth", "api_key"]);
+    database.close();
+  });
+
+  it("persists an explicitly created no-auth connection so it can be leased", async () => {
+    const noAuthProvider: ProviderDefinition = {
+      ...runtimeProvider,
+      authTypes: ["no_auth"],
+      auth: [{ type: "no_auth" }],
+    };
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([noAuthProvider], { executableActionIds: ["fixture.read"] }),
+      providerLoader: {
+        loadActionExecutor: async () => async () => ({ ok: true, output: {} }),
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => undefined,
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "https://connections.example.test",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "fixture", authType: "no_auth", connectionName: "public-data" }),
+    });
+    const createdBody = (await created.json()) as { connection: { id: string } };
+    expect(created.status).toBe(201);
+    expect(createdBody).toMatchObject({
+      connection: {
+        connectionName: "public-data",
+        visibility: "personal",
+        revision: 1,
+        status: "ready",
+      },
+    });
+    const listed = await app.request("/v1/connections", { headers: { authorization: `Bearer ${auth}` } });
+    expect(await listed.json()).toMatchObject({
+      items: [{ id: createdBody.connection.id, connectionName: "public-data" }],
+    });
+    const leased = await app.request(`/v1/connections/${createdBody.connection.id}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["fixture.read"],
+        invocationId: "inv-no-auth",
+        audience: "knowledge-runtime",
+      }),
+    });
+    expect(leased.status).toBe(201);
+    database.close();
+  });
+
+  it("continues a lease-scoped MCP session across Connection Service instances", async () => {
+    const root = await mkdtemp(join(tmpdir(), "connection-control-mcp-"));
+    tempRoots.push(root);
+    const databasePath = join(root, "control.sqlite");
+    const firstDatabase = new DatabaseSync(databasePath);
+    const secondDatabase = new DatabaseSync(databasePath);
+    const options = {
+      catalog: createCatalogStore([provider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => undefined,
+      },
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "https://connections.example.test",
+      enablement: [{ service: "fixture", tier: "beta" as const, connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    };
+    const first = createConnectionControlApp({ ...options, controlDatabase: firstDatabase });
+    const second = createConnectionControlApp({ ...options, controlDatabase: secondDatabase });
+    const auth = createPrincipalToken(principal, "auth-secret");
+    const created = await first.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        service: "fixture",
+        authType: "custom_credential",
+        values: { endpoint: "https://fixture.example.test", secret: "secret" },
+      }),
+    });
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+    const issued = await first.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["fixture.read"],
+        invocationId: "inv-restart",
+        audience: "knowledge-runtime",
+      }),
+    });
+    const leaseToken = String(((await issued.json()) as { token: string }).token);
+    const stream = await first.request(
+      `/v1/runtime/mcp/sse?connectionId=${connectionId}&invocationId=inv-restart&audience=knowledge-runtime`,
+      { headers: { "x-connection-lease": leaseToken } },
+    );
+    expect(stream.status).toBe(200);
+    expect(stream.headers.get("content-type")).toContain("text/event-stream");
+    const reader = stream.body!.getReader();
+    const endpointEvent = new TextDecoder().decode((await reader.read()).value);
+    const messageUrl = endpointEvent.match(/^event: endpoint\ndata: (.+)$/m)?.[1];
+    expect(messageUrl).toMatch(/^https:\/\/connections\.example\.test\/v1\/runtime\/mcp\/messages\//);
+
+    const initialize = await second.request(new URL(messageUrl!).pathname, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-connection-lease": leaseToken },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
+    });
+    expect(initialize.status).toBe(202);
+    const responseEvent = new TextDecoder().decode((await reader.read()).value);
+    expect(responseEvent).toContain('"id":1');
+    expect(responseEvent).toContain('"name":"connection-service"');
+
+    await reader.cancel();
+    firstDatabase.close();
+    secondDatabase.close();
+  });
+
+  it("executes an allowed connection action through MCP with a durable audit result", async () => {
+    const database = new DatabaseSync(":memory:");
+    const execute = vi.fn(async (input) => ({ ok: true, output: { rows: [{ query: input.query }] } }));
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([runtimeProvider], { executableActionIds: ["fixture.read"] }),
+      providerLoader: {
+        loadActionExecutor: async (_service, actionId) => (actionId === "fixture.read" ? execute : undefined),
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => undefined,
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "https://connections.example.test",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        service: "fixture",
+        authType: "custom_credential",
+        values: { endpoint: "https://fixture.example.test", secret: "secret" },
+      }),
+    });
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+    const issued = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["fixture.read"],
+        invocationId: "inv-action",
+        audience: "knowledge-runtime",
+      }),
+    });
+    const leaseToken = String(((await issued.json()) as { token: string }).token);
+    const stream = await app.request(
+      `/v1/runtime/mcp/sse?connectionId=${connectionId}&invocationId=inv-action&audience=knowledge-runtime`,
+      { headers: { "x-connection-lease": leaseToken } },
+    );
+    const reader = stream.body!.getReader();
+    const endpointEvent = new TextDecoder().decode((await reader.read()).value);
+    const messagePath = new URL(endpointEvent.match(/^event: endpoint\ndata: (.+)$/m)![1]).pathname;
+
+    await app.request(messagePath, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-connection-lease": leaseToken },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+    });
+    const listEvent = new TextDecoder().decode((await reader.read()).value);
+    const toolName = JSON.parse(listEvent.match(/^data: (.+)$/m)![1]).result.tools[0].name as string;
+    expect(toolName).toContain("fixture.read");
+
+    await app.request(messagePath, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-connection-lease": leaseToken },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: toolName, arguments: { query: "select-safe-data" } },
+      }),
+    });
+    const callEvent = new TextDecoder().decode((await reader.read()).value);
+    const callPayload = JSON.parse(callEvent.match(/^data: (.+)$/m)![1]);
+    expect(callPayload).toMatchObject({
+      id: 3,
+      result: {
+        structuredContent: {
+          auditPersisted: true,
+          ok: true,
+          result: { output: { rows: [{ query: "select-safe-data" }] } },
+        },
+        isError: false,
+      },
+    });
+    expect(execute).toHaveBeenCalledOnce();
+    expect(database.prepare("select invocation_id, action_id from control_execution_audit").get()).toMatchObject({
+      invocation_id: "inv-action",
+      action_id: "fixture.read",
+    });
+    const audit = await app.request("/v1/audit", {
+      headers: { authorization: `Bearer ${auth}` },
+    });
+    expect(audit.status).toBe(200);
+    expect(await audit.json()).toMatchObject({
+      items: [{ invocationId: "inv-action", actionId: "fixture.read", ok: true }],
+    });
+
+    await reader.cancel();
+    database.close();
+  });
+
+  it("rejects MCP messages after the invocation lease is revoked", async () => {
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([runtimeProvider], { executableActionIds: ["fixture.read"] }),
+      providerLoader: {
+        loadActionExecutor: async () => async () => ({ ok: true, output: {} }),
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => undefined,
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "https://connections.example.test",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        service: "fixture",
+        authType: "custom_credential",
+        values: { endpoint: "https://fixture.example.test", secret: "secret" },
+      }),
+    });
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+    const issued = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["fixture.read"],
+        invocationId: "inv-revoked",
+        audience: "knowledge-runtime",
+      }),
+    });
+    const lease = (await issued.json()) as { token: string; claims: { jti: string } };
+    const stream = await app.request(
+      `/v1/runtime/mcp/sse?connectionId=${connectionId}&invocationId=inv-revoked&audience=knowledge-runtime`,
+      { headers: { "x-connection-lease": lease.token } },
+    );
+    const reader = stream.body!.getReader();
+    const endpointEvent = new TextDecoder().decode((await reader.read()).value);
+    const messagePath = new URL(endpointEvent.match(/^event: endpoint\ndata: (.+)$/m)![1]).pathname;
+    await app.request(`/v1/leases/${lease.claims.jti}/revoke`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}` },
+    });
+
+    const rejected = await app.request(messagePath, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-connection-lease": lease.token },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/list", params: {} }),
+    });
+    expect(rejected.status).toBe(401);
+    expect(await rejected.json()).toMatchObject({ error: { code: "lease_revoked" } });
+
+    await reader.cancel();
+    database.close();
+  });
+
+  it("rejects MCP messages after the leased connection revision changes", async () => {
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([runtimeProvider], { executableActionIds: ["fixture.read"] }),
+      providerLoader: {
+        loadActionExecutor: async () => async () => ({ ok: true, output: {} }),
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => undefined,
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "https://connections.example.test",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        service: "fixture",
+        authType: "custom_credential",
+        values: { endpoint: "https://fixture.example.test", secret: "secret" },
+      }),
+    });
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+    const issued = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["fixture.read"],
+        invocationId: "inv-stale-revision",
+        audience: "knowledge-runtime",
+      }),
+    });
+    const leaseToken = String(((await issued.json()) as { token: string }).token);
+    const stream = await app.request(
+      `/v1/runtime/mcp/sse?connectionId=${connectionId}&invocationId=inv-stale-revision&audience=knowledge-runtime`,
+      { headers: { "x-connection-lease": leaseToken } },
+    );
+    const reader = stream.body!.getReader();
+    const endpointEvent = new TextDecoder().decode((await reader.read()).value);
+    const messagePath = new URL(endpointEvent.match(/^event: endpoint\ndata: (.+)$/m)![1]).pathname;
+
+    const changed = await app.request(`/v1/connections/${connectionId}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({ connectionName: "changed-after-lease" }),
+    });
+    expect(changed.status).toBe(200);
+    expect(await changed.json()).toMatchObject({ connection: { revision: 2 } });
+
+    const rejected = await app.request(messagePath, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-connection-lease": leaseToken },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 5, method: "tools/list", params: {} }),
+    });
+    expect(rejected.status).toBe(401);
+    expect(await rejected.json()).toMatchObject({ error: { code: "lease_scope_denied" } });
+
+    await reader.cancel();
     database.close();
   });
 
@@ -194,7 +651,11 @@ describe("connection control API", () => {
     const created = await app.request("/v1/connections", {
       method: "POST",
       headers: { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "secret" } }),
+      body: JSON.stringify({
+        service: "fixture",
+        authType: "custom_credential",
+        values: { endpoint: "https://fixture.example.test", secret: "secret" },
+      }),
     });
     const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
 
@@ -262,7 +723,11 @@ describe("connection control API", () => {
     const created = await app.request("/v1/connections", {
       method: "POST",
       headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
-      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "secret" } }),
+      body: JSON.stringify({
+        service: "fixture",
+        authType: "custom_credential",
+        values: { endpoint: "https://fixture.example.test", secret: "secret" },
+      }),
     });
     const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
     const leaseResponse = await app.request(`/v1/connections/${connectionId}/lease`, {
@@ -312,7 +777,11 @@ describe("connection control API", () => {
     const created = await app.request("/v1/connections", {
       method: "POST",
       headers: { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "secret" } }),
+      body: JSON.stringify({
+        service: "fixture",
+        authType: "custom_credential",
+        values: { endpoint: "https://fixture.example.test", secret: "secret" },
+      }),
     });
     const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
 
@@ -376,7 +845,11 @@ describe("connection control API", () => {
     const created = await app.request("/v1/connections", {
       method: "POST",
       headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
-      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "secret" } }),
+      body: JSON.stringify({
+        service: "fixture",
+        authType: "custom_credential",
+        values: { endpoint: "https://fixture.example.test", secret: "secret" },
+      }),
     });
     const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
 
@@ -429,7 +902,11 @@ describe("connection control API", () => {
     const created = await app.request("/v1/connections", {
       method: "POST",
       headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
-      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "secret" } }),
+      body: JSON.stringify({
+        service: "fixture",
+        authType: "custom_credential",
+        values: { endpoint: "https://fixture.example.test", secret: "secret" },
+      }),
     });
     const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
     const validation = await app.request(`/v1/connections/${connectionId}/validate`, {

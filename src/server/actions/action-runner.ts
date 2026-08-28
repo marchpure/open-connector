@@ -25,6 +25,7 @@ export interface RunActionInput {
   input: unknown;
   caller: RunLogCaller;
   connectionName?: string;
+  invocationId?: string;
   policy?: ActionPolicySnapshot;
   runtimeTokenId?: string;
   signal?: AbortSignal;
@@ -144,6 +145,7 @@ export class ActionRunner {
       ok: result.ok,
       connectionId: connection?.summary?.id,
       connectionProfile: connection?.summary?.profile,
+      invocationId: input.invocationId,
       runtimeTokenId: input.runtimeTokenId,
       policy,
       inputSummary: this.summarizeAuditValue(input.input, logContext),

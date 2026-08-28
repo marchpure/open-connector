@@ -20,6 +20,7 @@ import { CatalogEnablement } from "./catalog.ts";
 import { TenantFileAdapter } from "./file-adapter.ts";
 import { ConnectionJobStore } from "./job-store.ts";
 import { ConnectionLeaseService, LeaseError } from "./lease.ts";
+import { LegacySseRuntime } from "./legacy-sse-runtime.ts";
 import { ControlledMcpAdapter, TenantMcpDefinitionStore } from "./mcp-adapter.ts";
 import { OracleDatabaseAdapter } from "./oracle-adapter.ts";
 import { redactSecrets, safeConnectionProfile } from "./redaction.ts";
@@ -45,10 +46,11 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
   const app = new Hono();
   const catalog = new CatalogEnablement(options.catalog, options.enablement);
   const leases = new ConnectionLeaseService(options.controlDatabase);
+  const legacySseRuntime = new LegacySseRuntime(options);
 
   app.get("/health", (context) => context.json({ ok: true, service: "connection-service", version: "1.0.0" }));
   app.use("/v1/*", async (context, next) => {
-    if (context.req.path === "/v1/health") {
+    if (context.req.path === "/v1/health" || context.req.path.startsWith("/v1/runtime/mcp/")) {
       await next();
       return;
     }
@@ -243,11 +245,15 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
           values: recordOf(body.values),
         });
       } else if (authType === "no_auth") {
-        profile = await runtime.connectionService.connectWithoutAuth(service, { connectionName });
+        profile = await runtime.connectionService.connectWithoutAuth(service, { connectionName, persist: true });
       } else {
         return jsonError(context, 400, "unsupported_auth_type", "OAuth connections use the OAuth flow endpoint.");
       }
-      return context.json({ connection: redactConnection(profile as unknown as Record<string, unknown>) }, 201);
+      const record = runtime.connections.visibleRecord(profile.id);
+      if (!record) {
+        return jsonError(context, 500, "connection_persistence_failed", "Persisted connection could not be read.");
+      }
+      return context.json({ connection: redactConnection(record as unknown as Record<string, unknown>) }, 201);
     } catch (error) {
       return connectionError(context, error);
     }
@@ -301,13 +307,14 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     const body = await readJsonBody(context);
     const connectionId = context.req.param("connectionId");
     const runtime = tenantRuntime(options, principalOf(context));
-    const owned = (await runtime.records()).some((record) => record.id === connectionId && record.status !== "revoked");
-    if (!owned) {
+    const connection = runtime.connections.visibleRecord(connectionId);
+    if (!connection) {
       return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
     }
     try {
       const issued = leases.issue(principalOf(context), {
         connectionIds: [connectionId],
+        connectionRevisions: { [connectionId]: connection.revision },
         allowedActions: requiredStringArray(body.allowedActions),
         invocationId: requiredString(body.invocationId),
         audience: requiredString(body.audience),
@@ -323,6 +330,65 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     return revoked
       ? context.json({ revoked: true })
       : jsonError(context, 404, "lease_not_found", "Lease was not found.");
+  });
+  app.get("/v1/runtime/mcp/sse", (context) => {
+    const leaseToken = context.req.header("x-connection-lease");
+    if (!leaseToken) {
+      return jsonError(context, 401, "lease_required", "X-Connection-Lease is required.");
+    }
+    try {
+      const sessionId = legacySseRuntime.open(leaseToken, {
+        connectionId: requiredString(context.req.query("connectionId")),
+        invocationId: requiredString(context.req.query("invocationId")),
+        audience: requiredString(context.req.query("audience")),
+      });
+      const messageUrl = new URL(
+        `/v1/runtime/mcp/messages/${encodeURIComponent(sessionId)}`,
+        options.publicOrigin,
+      ).toString();
+      const encoder = new TextEncoder();
+      let timer: ReturnType<typeof setInterval> | undefined;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(`event: endpoint\ndata: ${messageUrl}\n\n`));
+          timer = setInterval(() => {
+            try {
+              for (const payload of legacySseRuntime.take(sessionId, leaseToken)) {
+                controller.enqueue(encoder.encode(`event: message\ndata: ${payload}\n\n`));
+              }
+            } catch (error) {
+              if (timer) clearInterval(timer);
+              controller.error(error);
+            }
+          }, 25);
+        },
+        cancel() {
+          if (timer) clearInterval(timer);
+          legacySseRuntime.close(sessionId);
+        },
+      });
+      return new Response(body, {
+        headers: {
+          "cache-control": "no-cache, no-transform",
+          connection: "keep-alive",
+          "content-type": "text/event-stream",
+        },
+      });
+    } catch (error) {
+      return leaseError(context, error);
+    }
+  });
+  app.post("/v1/runtime/mcp/messages/:sessionId", async (context) => {
+    const leaseToken = context.req.header("x-connection-lease");
+    if (!leaseToken) {
+      return jsonError(context, 401, "lease_required", "X-Connection-Lease is required.");
+    }
+    try {
+      await legacySseRuntime.receive(context.req.param("sessionId"), leaseToken, await readJsonBody(context));
+      return new Response(null, { status: 202 });
+    } catch (error) {
+      return leaseError(context, error);
+    }
   });
   app.post("/v1/runtime/actions/:actionId", async (context) => {
     const body = await readJsonBody(context);
@@ -346,6 +412,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     try {
       const claims = runtime.leases.verify(leaseToken, principalOf(context), {
         connectionId: selected.id,
+        connectionRevision: selected.revision,
         actionId,
         invocationId,
         audience,
@@ -355,6 +422,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         input: body.input,
         caller: "http",
         connectionName: selected.connectionName,
+        invocationId,
         policy: {
           evaluate: (action: ActionDefinition) =>
             claims.allowedActions.includes(action.id)
@@ -389,6 +457,10 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     } catch (error) {
       return leaseError(context, error);
     }
+  });
+  app.get("/v1/audit", async (context) => {
+    const runtime = tenantRuntime(options, principalOf(context));
+    return context.json({ items: (await runtime.actions.listRuns()).items });
   });
   app.post("/v1/adapters/rest/invoke", async (context) => {
     const body = await readJsonBody(context);
@@ -793,7 +865,7 @@ function connectionError(context: Context, error: unknown) {
 
 function leaseError(context: Context, error: unknown) {
   if (error instanceof LeaseError) {
-    const status = error.code === "lease_scope_denied" ? 401 : 400;
+    const status = error.code === "invalid_lease" ? 400 : 401;
     return jsonError(context, status, error.code, error.message);
   }
   return jsonError(context, 400, "invalid_lease", error instanceof Error ? error.message : "Lease operation failed.");

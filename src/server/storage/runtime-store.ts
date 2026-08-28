@@ -19,6 +19,7 @@ export interface RunLog {
   ok: boolean;
   connectionId?: string;
   connectionProfile?: CredentialProfile;
+  invocationId?: string;
   runtimeTokenId?: string;
   policy?: ActionPolicyDecision;
   inputSummary?: unknown;
