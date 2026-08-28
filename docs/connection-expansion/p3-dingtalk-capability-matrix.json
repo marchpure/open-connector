@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "auditedAt": "2026-08-29",
+  "providerId": "dingtalk",
+  "identityBoundary": {
+    "userAccessToken": "The canonical dingtalk connection. Reads only the authorizing user's or explicitly user-visible resources.",
+    "enterpriseInternalApplication": "A distinct organization/application identity. Its app access token and administrator-granted visibility must not be substituted for the user token.",
+    "customRobot": "The separate dingtalk_bot provider. It can send webhook messages and is not a data-reading identity."
+  },
+  "evidencePolicy": "Official API existence is not evidence that the current user OAuth identity, tenant entitlement, scope, or resource grant permits a call. Unsupported identities remain catalog-only.",
+  "officialSources": [
+    {
+      "kind": "documentation",
+      "url": "https://open.dingtalk.com/document/orgapp-server/api-reference",
+      "note": "DingTalk organization application server API reference."
+    },
+    {
+      "kind": "generated-sdk",
+      "package": "@alicloud/dingtalk",
+      "version": "2.2.46",
+      "url": "https://www.npmjs.com/package/@alicloud/dingtalk",
+      "note": "Audited request methods, paths, pagination fields, and x-acs-dingtalk-access-token header from the official generated TypeScript SDK."
+    },
+    {
+      "kind": "oauth",
+      "url": "https://open.dingtalk.com/document/orgapp/obtain-user-access-token",
+      "note": "User access-token acquisition and revocation boundary."
+    }
+  ],
+  "domains": [
+    {
+      "domain": "identity-and-contacts",
+      "tier": "beta",
+      "identity": "user_access_token",
+      "scopes": ["openid", "Contact.User.Read", "Contact.Department.Read"],
+      "actions": ["get_current_user", "get_user", "search_users", "list_departments"],
+      "paginationAndBounds": "At most 100 users per action page; discovery reads at most 100 users and three department pages.",
+      "revocation": "Every invocation resolves the current encrypted credential and lease; upstream scope/resource revocation is rechecked on the next provider call.",
+      "blocker": "No real DingTalk test tenant lifecycle evidence is available."
+    },
+    {
+      "domain": "calendar",
+      "tier": "beta",
+      "identity": "user_access_token",
+      "scopes": ["Calendar.Calendar.Read"],
+      "actions": ["list_calendars", "list_calendar_events"],
+      "officialPaths": [
+        "GET /v1.0/calendar/users/{authorizingUnionId}/calendars",
+        "GET /v1.0/calendar/users/{authorizingUnionId}/calendars/{calendarId}/events"
+      ],
+      "paginationAndBounds": "Calendar discovery is one bounded page; event pages are capped at 100 and require an ISO-8601 window no longer than 31 days.",
+      "authorization": "The user ID is derived from /v1.0/contact/users/me. Callers cannot select another user. Calendar event reads require a discovered calendar ResourceRef.",
+      "revocation": "Discovery and invocation each call DingTalk with the current token. Scope, resource, OAuth, connection, and lease revocation fail on the next call.",
+      "blocker": "No real tenant has proven scope grant, event visibility, rate-limit behavior, or revocation."
+    },
+    {
+      "domain": "todo",
+      "tier": "beta",
+      "identity": "user_access_token",
+      "scopes": ["Todo.Todo.Read"],
+      "actions": ["list_todo_tasks", "get_todo_task"],
+      "officialPaths": [
+        "POST /v1.0/todo/users/{authorizingUnionId}/tasks/list",
+        "GET /v1.0/todo/users/{authorizingUnionId}/tasks/{taskId}"
+      ],
+      "paginationAndBounds": "One page per call, capped to 100 returned records; optional due-time bounds must be paired and span at most 366 days.",
+      "authorization": "The user ID is derived from /v1.0/contact/users/me. Detail reads require a task ResourceRef from the latest discovery.",
+      "revocation": "Discovery and invocation recheck upstream access; connection and lease revocation are enforced by the Control Plane.",
+      "blocker": "No real tenant has proven personal/organization task visibility, scope grant, rate-limit behavior, or revocation."
+    },
+    {
+      "domain": "documents-and-knowledge",
+      "tier": "catalog",
+      "identity": "enterprise_internal_application",
+      "scopes": [],
+      "actions": [],
+      "officialApiFamilies": ["doc_1.0", "doc_2.0", "wiki_1.0", "wiki_2.0"],
+      "reason": "Official APIs exist, but their enterprise-application identity, resource authorization, export semantics, and tenant entitlements are not represented by the existing user OAuth credential.",
+      "blocker": "Requires a separately modeled internal-app credential and real tenant document/Wiki permission tests."
+    },
+    {
+      "domain": "drive-and-storage",
+      "tier": "catalog",
+      "identity": "enterprise_internal_application",
+      "scopes": [],
+      "actions": [],
+      "officialApiFamilies": ["drive_1.0", "storage_1.0", "storage_2.0"],
+      "reason": "Official storage APIs exist, but download grants, attachment size, redirect, tenant entitlement, and resource ACL behavior are not proven for user OAuth.",
+      "blocker": "Requires internal-app modeling and bounded real-file lifecycle evidence."
+    },
+    {
+      "domain": "tables",
+      "tier": "catalog",
+      "identity": "enterprise_internal_application",
+      "scopes": [],
+      "actions": [],
+      "reason": "No generally available, user-token, read-only DingTalk table contract was proven for this connection. Yida forms are tracked separately.",
+      "blocker": "Requires an official GA table API, permission model, schema pagination contract, and tenant entitlement."
+    },
+    {
+      "domain": "groups-and-conversations",
+      "tier": "officially-unavailable",
+      "identity": "custom_robot_or_enterprise_application",
+      "scopes": [],
+      "actions": [],
+      "officialApiFamilies": ["im_1.0", "im_2.0"],
+      "reason": "Custom robots are message-send identities. General historical conversation-content reads for a user OAuth identity were not established; bot delivery is not read authorization.",
+      "blocker": "No compliant user-visible history API and no real legal/tenant authorization evidence."
+    },
+    {
+      "domain": "meetings",
+      "tier": "catalog",
+      "identity": "enterprise_internal_application",
+      "scopes": [],
+      "actions": [],
+      "officialApiFamilies": ["conference_1.0", "minutes_1.0"],
+      "reason": "Official conference/minutes APIs exist but require separately authorized application/meeting access and may depend on product entitlement.",
+      "blocker": "Requires entitlement, organizer/participant visibility rules, and real transcript/minutes revocation evidence."
+    },
+    {
+      "domain": "approvals",
+      "tier": "catalog",
+      "identity": "enterprise_internal_application",
+      "scopes": [],
+      "actions": [],
+      "officialApiFamilies": ["workflow_1.0"],
+      "reason": "Approval APIs use organization application authorization. A user OAuth success does not authorize organization approval instances.",
+      "blocker": "Requires explicit process/instance allowlisting, field-level redaction policy, internal-app identity, and real tenant tests."
+    },
+    {
+      "domain": "yida",
+      "tier": "catalog",
+      "identity": "enterprise_internal_application",
+      "scopes": [],
+      "actions": [],
+      "officialApiFamilies": ["yida_1.0", "yida_2.0"],
+      "reason": "Official Yida form/process reads exist, but application/form authorization and commercial entitlement are independent of the user OAuth connection.",
+      "blocker": "Requires explicit app/form allowlists, Yida entitlement, internal-app credentials, and real form-instance permission tests."
+    }
+  ],
+  "defaultWritePolicy": {
+    "enabled": false,
+    "excludedActions": [
+      "send-message",
+      "create-group",
+      "edit-document",
+      "edit-calendar",
+      "approval-operation",
+      "write-yida"
+    ],
+    "futureRequirement": "Any write action must be separately owner-enabled, use a short-lived action-specific lease and idempotency key, and emit redacted audit evidence."
+  },
+  "rateLimits": {
+    "strategy": "No automatic retry is performed, preventing amplification. DingTalk 429 responses propagate as provider errors for caller-controlled backoff.",
+    "concurrency": "The shared Connection Service action policy and lease boundary apply; each action performs only its documented bounded provider calls."
+  }
+}
