@@ -3,6 +3,7 @@ import type { ExecutionContext, ResolvedCredential } from "../core/types.ts";
 import { describe, expect, it, vi } from "vitest";
 import { setPrivateNetworkAccessAllowed } from "../core/request.ts";
 import { discoverResources as discoverHuaweiObsResources } from "./huawei_obs/executors.ts";
+import { executors as minioExecutors } from "./minio/executors.ts";
 import { discoverResources as discoverMinioResources } from "./minio/executors.ts";
 import { discoverResources as discoverQiniuKodoResources } from "./qiniu_kodo/executors.ts";
 import { discoverResources as discoverTencentCosResources } from "./tencent_cos/executors.ts";
@@ -82,13 +83,17 @@ describe("P2 CN office and storage discovery", () => {
     },
     {
       service: "qiniu_kodo",
-      endpoint: "https://s3-cn-east-1.qiniucs.com",
+      endpoint: "https://rsf.qiniu.com",
       discover: discoverQiniuKodoResources,
     },
   ] as const) {
     it(`discovers only the configured ${profile.service} bucket`, async () => {
-      const fetcher = vi.fn<typeof fetch>(async () => new Response(null, { status: 200 }));
-      const credential = storageCredential(profile.endpoint);
+      const fetcher = vi.fn<typeof fetch>(async () =>
+        profile.service === "qiniu_kodo"
+          ? Response.json({ items: [], marker: "" })
+          : new Response(null, { status: 200 }),
+      );
+      const credential = storageCredential(profile.endpoint, profile.service === "qiniu_kodo");
       const resources = await profile.discover(contextFor(profile.service, credential), fetcher);
       expect(resources).toEqual([
         expect.objectContaining({
@@ -97,7 +102,18 @@ describe("P2 CN office and storage discovery", () => {
           schema: expect.objectContaining({ prefix: "knowledge/", allowlisted: true }),
         }),
       ]);
-      expect(new URL(String(fetcher.mock.calls[0]?.[0])).hostname).toBe(`documents.${new URL(profile.endpoint).host}`);
+      const request = fetcher.mock.calls[0]?.[0];
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      const headers = request instanceof Request ? request.headers : new Headers(fetcher.mock.calls[0]?.[1]?.headers);
+      if (profile.service === "qiniu_kodo") {
+        expect(url).toMatchObject({ hostname: "rsf.qiniu.com", pathname: "/list" });
+        expect(headers.get("authorization")).toMatch(/^Qiniu ACCESS_KEY:/u);
+      } else {
+        expect(url.hostname).toBe(`documents.${new URL(profile.endpoint).host}`);
+        expect(headers.get("authorization")).toMatch(
+          profile.service === "tencent_cos" ? /^q-sign-algorithm=sha1&/u : /^OBS ACCESS_KEY:/u,
+        );
+      }
     });
   }
 
@@ -130,9 +146,21 @@ describe("P2 CN office and storage discovery", () => {
       setPrivateNetworkAccessAllowed(false);
     }
   });
+
+  it("does not expose storage write, delete, or presign executors", () => {
+    expect(Object.keys(minioExecutors).sort()).toEqual([
+      "minio.download_object",
+      "minio.head_object",
+      "minio.list_buckets",
+      "minio.list_objects",
+    ]);
+  });
 });
 
-function storageCredential(endpoint: string): Extract<ResolvedCredential, { authType: "custom_credential" }> {
+function storageCredential(
+  endpoint: string,
+  qiniu = false,
+): Extract<ResolvedCredential, { authType: "custom_credential" }> {
   return {
     authType: "custom_credential",
     values: {
@@ -140,6 +168,7 @@ function storageCredential(endpoint: string): Extract<ResolvedCredential, { auth
       secretAccessKey: "secret",
       region: "cn-region-1",
       endpoint,
+      ...(qiniu ? { downloadDomain: "https://downloads.example.com" } : {}),
       bucket: "documents",
       prefix: "knowledge/",
     },

@@ -223,17 +223,10 @@ const startExportInputSchema = s.object(
   },
 );
 
-const exportProgressInputSchema = s.object(
-  "Input for checking Tencent Docs export progress. Provide exportHandle, or both fileID and operationID.",
-  {
-    exportHandle: nonEmptyString("The opaque export handle returned by start_export."),
-    fileID: nonEmptyString("The Tencent Docs file ID being exported."),
-    operationID: nonEmptyString("The export operation ID returned by start_export."),
-  },
-  {
-    optional: ["exportHandle", "fileID", "operationID"],
-  },
-);
+const exportProgressInputSchema = s.object("Input for checking Tencent Docs export progress.", {
+  fileID: nonEmptyString("The Tencent Docs file ID being exported."),
+  operationID: nonEmptyString("The export operation ID returned by start_export."),
+});
 
 const convertFileIdInputSchema = s.object("Input for converting Tencent Docs file IDs.", {
   type: s.integer("The conversion type. Use 1 for fileID to encodedID or 2 for encodedID to fileID.", {
@@ -343,7 +336,6 @@ export const tencentDocsActions: ActionDefinition[] = [
       ...apiResponseBaseSchema,
       fileID: s.string("The Tencent Docs file ID being exported."),
       operationID: s.string("The Tencent Docs export operation ID."),
-      exportHandle: s.string("An opaque handle that can be passed to get_export_progress."),
     }),
     resourceBindings: { fileID: [] },
   }),
@@ -358,9 +350,12 @@ export const tencentDocsActions: ActionDefinition[] = [
       ...apiResponseBaseSchema,
       status: s.stringEnum("The normalized export status.", ["running", "succeeded", "failed"]),
       progress: s.integer("The export progress from 0 to 100.", { minimum: 0, maximum: 100 }),
-      url: s.nullable(s.url("The temporary download URL when export has succeeded.")),
+      downloadReady: s.boolean(
+        "Whether Tencent Docs reports that the export is ready. Temporary provider URLs are not exposed.",
+      ),
       raw: rawObjectSchema,
     }),
+    resourceBindings: { fileID: [] },
   }),
   defineAction({
     service: "tencent_docs",

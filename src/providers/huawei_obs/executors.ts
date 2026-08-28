@@ -1,12 +1,16 @@
 import type { CredentialValidators, ProviderExecutors } from "../../core/types.ts";
 import type { ProviderResourceCandidate } from "../provider-loader.ts";
 
-import { createS3CompatibleExecutors } from "../aws_s3/executors.ts";
+import { createNativeObjectStorageRuntime, nativeEndpoint, obsSign } from "../native-object-storage-runtime.ts";
 
-const profile = createS3CompatibleExecutors({
+const profile = createNativeObjectStorageRuntime({
   service: "huawei_obs",
   displayName: "Huawei Cloud OBS",
-  defaultEndpoint: (values) => (values.region ? `https://obs.${values.region}.myhuaweicloud.com` : undefined),
+  bucketMimeType: "application/vnd.huawei.obs.bucket",
+  listDialect: "marker",
+  buildEndpoint: (values) =>
+    nativeEndpoint(values.endpoint, `https://obs.${values.region}.myhuaweicloud.com`, ["myhuaweicloud.com"]),
+  sign: obsSign,
 });
 export const executors: ProviderExecutors = profile.executors;
 export const credentialValidators: CredentialValidators = profile.credentialValidators;

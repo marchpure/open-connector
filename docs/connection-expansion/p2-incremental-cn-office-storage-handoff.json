@@ -90,44 +90,44 @@
     },
     {
       "providerId": "tencent_cos",
-      "implementation": "New canonical provider profile over the hardened S3-compatible SigV4 runtime; Tencent identity, region, endpoint, bucket, prefix, temporary token, ETag, and version remain explicit.",
+      "implementation": "New canonical provider using Tencent COS SHA-1 authorization semantics over the shared guarded, bounded transport; region, official endpoint, bucket, prefix, temporary token, ETag, and version remain explicit.",
       "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
       "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
       "tier": "beta",
-      "evidence": "Contract tests cover configured-bucket discovery, prefix enforcement, endpoint pinning, bounded download, MIME checks, and generated registry reachability.",
-      "externalBlocker": "No Tencent Cloud account/COS credential was available; native SDK/error parity and real revoke/rotation remain unverified."
+      "evidence": "Contract tests cover native q-sign authorization, configured-bucket discovery, prefix enforcement, official endpoint restriction, bounded download, MIME checks, and generated registry reachability.",
+      "externalBlocker": "No Tencent Cloud account/COS credential was available for real service, credential rotation, and revocation evidence."
     },
     {
       "providerId": "huawei_obs",
-      "implementation": "New canonical provider profile over the hardened S3-compatible SigV4 runtime; Huawei identity and endpoint remain explicit.",
+      "implementation": "New canonical provider using Huawei OBS authorization semantics over the shared guarded, bounded transport; Huawei region, official endpoint, bucket, prefix, temporary token, ETag, and version remain explicit.",
       "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
       "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
       "tier": "beta",
-      "evidence": "Same security contract matrix as Tencent COS with an OBS-specific endpoint and ResourceRef MIME.",
-      "externalBlocker": "No Huawei Cloud account/OBS credential was available; native SDK/error parity and real revoke/rotation remain unverified."
+      "evidence": "Contract tests cover native OBS authorization, OBS endpoint and ResourceRef MIME, allowlists, bounded reads, and vendor error mapping.",
+      "externalBlocker": "No Huawei Cloud account/OBS credential was available for real service, credential rotation, and revocation evidence."
     },
     {
       "providerId": "minio",
-      "implementation": "New self-hosted canonical profile reusing the AWS S3 security runtime with forced path-style addressing.",
+      "implementation": "New self-hosted canonical profile reusing the AWS S3 security runtime with forced path-style addressing and a connection-scoped custom X.509 CA transport.",
       "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
       "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
       "tier": "beta",
       "evidence": "Contract tests prove path-style request construction, configured bucket/prefix discovery, endpoint pinning, and shared bounded-read controls.",
       "limitations": [
         "Private endpoints require OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK and remain subject to metadata, loopback, link-local, redirect, and DNS guards.",
-        "Custom private CA injection is not implemented.",
+        "A custom PEM CA is supported on Node deployments and validated before use; Cloudflare cannot reach private MinIO networks.",
         "MinIO evidence does not promote AWS S3 or other vendors to verified."
       ],
       "externalBlocker": "No controlled TLS/private-CA MinIO deployment was available for a full credential rotation and revocation lifecycle."
     },
     {
       "providerId": "qiniu_kodo",
-      "implementation": "New canonical provider profile over the official Kodo S3-compatible endpoint and hardened SigV4 runtime.",
+      "implementation": "New canonical provider using Qiniu V2 authorization against native RSF list and RS stat APIs; private object downloads use a five-minute token against the configured bucket domain and never return that token to callers.",
       "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
       "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
       "tier": "beta",
-      "evidence": "Contract tests cover provider-specific endpoint construction, configured-bucket discovery, and shared object security controls.",
-      "externalBlocker": "No Qiniu account/Kodo credential was available; native SDK/error parity and real revoke/rotation remain unverified."
+      "evidence": "Contract tests cover the Qiniu authorization scheme, native management endpoint construction, configured-bucket discovery, and shared object security controls.",
+      "externalBlocker": "No Qiniu account/Kodo credential and bucket download domain were available for real service, credential rotation, and revocation evidence."
     }
   ],
   "security": {
@@ -144,16 +144,16 @@
     "The existing Feishu, DingTalk, WeCom, AWS S3, Aliyun OSS, and Volcengine TOS implementations are regression baselines."
   ],
   "verification": {
-    "generateCatalog": "passed; 1457 providers and 15237 actions",
+    "generateCatalog": "passed; 1457 providers and 15225 actions",
     "generateRegistry": "passed; 1457 Node providers and 1449 Cloudflare providers",
     "fixCheck": "passed; lint, format, registry generation, and src/scripts/examples typecheck",
     "focusedTests": "passed; P2 provider, prior office/storage, AWS S3, and Control Plane suites",
-    "fullTests": "passed; 171 files passed, 1 skipped; 1554 tests passed, 4 skipped",
+    "fullTests": "passed; 171 files passed, 1 skipped; 1555 tests passed, 4 skipped",
     "build": "passed",
     "npmAuditOmitDev": "passed; 0 vulnerabilities",
     "npmAudit": "passed; 0 vulnerabilities",
     "catalogVerifier": "passed; all seven canonical providers have actions and generated lazy registry entries",
     "gitDiffCheck": "passed",
-    "sbom": "Existing artifacts/npm-sbom-cyclonedx.json remains applicable because no dependency was added."
+    "sbom": "passed; CycloneDX 1.5 regenerated with 627 components and undici 7.29.0 as a direct MIT-licensed production component; SHA-256 af562e6a75e544d0b423c37d7a47e37f84242cdb47c0c841519b2d207f3473dc."
   }
 }

@@ -5,10 +5,10 @@ import { s3CompatibleDefinition } from "../s3-compatible-profile.ts";
 export const provider: ProviderDefinition = s3CompatibleDefinition({
   service: "qiniu_kodo",
   displayName: "Qiniu Kodo",
-  description:
-    "Read bounded objects from an allowlisted Qiniu Kodo bucket through its official S3-compatible endpoint.",
+  description: "Read bounded objects from an allowlisted Qiniu Kodo bucket using native Kodo APIs and signing.",
   homepageUrl: "https://www.qiniu.com/products/kodo",
-  endpointPlaceholder: "https://s3-cn-east-1.qiniucs.com",
-  endpointDescription: "Official regional Kodo S3 endpoint.",
+  endpointPlaceholder: "https://rsf.qiniu.com",
+  endpointDescription: "Official regional Qiniu RSF management endpoint.",
   regionPlaceholder: "cn-east-1",
+  supportsSessionToken: false,
 });

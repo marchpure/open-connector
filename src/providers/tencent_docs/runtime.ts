@@ -178,7 +178,7 @@ async function tencentDocsSearchFiles(input: Record<string, unknown>, context: T
         resultType: optionalString(input.resultType),
         folderID: optionalString(input.folderID),
         offset: optionalInteger(input.offset),
-        size: optionalInteger(input.size),
+        size: Math.min(optionalInteger(input.size) ?? 20, 50),
         sortType: optionalString(input.sortType),
         asc: optionalInteger(input.asc),
         byOwnership: optionalInteger(input.byOwnership),
@@ -194,7 +194,7 @@ async function tencentDocsSearchFiles(input: Record<string, unknown>, context: T
     next: normalizeNullableInteger(data.next),
     total: normalizeNullableInteger(data.total),
     hasMore: normalizeNullableBoolean(data.hasMore),
-    items: normalizeTencentDocsFileList(data.list),
+    items: normalizeTencentDocsFileList(data.list).slice(0, 50),
     raw: { bounded: true },
   };
 }
@@ -218,12 +218,14 @@ async function tencentDocsStartExport(input: Record<string, unknown>, context: T
     msg: normalizeTencentDocsMsg(envelope.msg),
     fileID,
     operationID,
-    exportHandle: createTencentDocsExportHandle(fileID, operationID),
   };
 }
 
 async function tencentDocsGetExportProgress(input: Record<string, unknown>, context: TencentDocsActionContext) {
-  const exportInput = resolveTencentDocsExportProgressInput(input);
+  const exportInput = {
+    fileID: requireActionInputString(input.fileID, "fileID"),
+    operationID: requireActionInputString(input.operationID, "operationID"),
+  };
   const envelope = await requestTencentDocsOpenApi(
     {
       path: `/openapi/drive/v2/files/${encodeURIComponent(exportInput.fileID)}/export-progress`,
@@ -241,8 +243,8 @@ async function tencentDocsGetExportProgress(input: Record<string, unknown>, cont
     msg: normalizeTencentDocsMsg(envelope.msg),
     status: progress >= 100 ? "succeeded" : "running",
     progress,
-    url: optionalString(data.url) ?? null,
-    raw: data,
+    downloadReady: progress >= 100 && Boolean(optionalString(data.url)),
+    raw: { bounded: true },
   };
 }
 
@@ -602,40 +604,6 @@ function normalizeTencentDocsSmartsheetSheets(value: unknown) {
       raw: sheet,
     };
   });
-}
-
-function createTencentDocsExportHandle(fileID: string, operationID: string) {
-  return JSON.stringify({ fileID, operationID });
-}
-
-function resolveTencentDocsExportProgressInput(input: Record<string, unknown>) {
-  const exportHandle = optionalString(input.exportHandle);
-  if (exportHandle) {
-    return parseTencentDocsExportHandle(exportHandle);
-  }
-
-  return {
-    fileID: requireActionInputString(input.fileID, "fileID"),
-    operationID: requireActionInputString(input.operationID, "operationID"),
-  };
-}
-
-function parseTencentDocsExportHandle(exportHandle: string) {
-  let payload: unknown;
-  try {
-    payload = JSON.parse(exportHandle);
-  } catch {
-    throw new ProviderRequestError(400, "tencent_docs exportHandle must be returned by start_export");
-  }
-
-  const record = optionalRecord(payload);
-  const fileID = optionalString(record?.fileID);
-  const operationID = optionalString(record?.operationID);
-  if (!fileID || !operationID) {
-    throw new ProviderRequestError(400, "tencent_docs exportHandle must include fileID and operationID");
-  }
-
-  return { fileID, operationID };
 }
 
 function normalizeTencentDocsRet(value: unknown) {

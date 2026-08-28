@@ -136,10 +136,7 @@ export const executors: ProviderExecutors = defineProviderExecutors<AwsActionCon
     return {
       values: credential.values,
       metadata: credential.metadata,
-      fetcher:
-        credential.values.allowPrivateNetwork === "true"
-          ? createProviderFetch({ allowPrivateNetwork: isPrivateNetworkAccessAllowed })
-          : fetcher,
+      fetcher: await createS3Fetcher(credential.values, fetcher),
       transitFiles: context.transitFiles,
       signal: context.signal,
     };
@@ -245,34 +242,35 @@ export function createS3CompatibleExecutors(profile: {
   >;
 } {
   const mappedExecutors: ProviderExecutors = Object.fromEntries(
-    Object.entries(executors).map(([actionId, executor]) => [
-      `${profile.service}.${actionId.slice("aws_s3.".length)}`,
-      (input: unknown, context: ExecutionContext) =>
-        executor(input, {
-          ...context,
-          getCredential: async (requestedService) => {
-            if (requestedService !== service) return context.getCredential(requestedService);
-            const credential = await context.getCredential(profile.service);
-            if (credential?.authType !== "custom_credential") return credential;
-            const values = profileValues(credential.values, profile);
-            return {
-              ...credential,
-              values,
-              metadata: profileMetadata(credential.metadata, values),
-            };
-          },
-        }),
-    ]),
+    Object.entries(executors)
+      .filter(([actionId]) =>
+        ["list_buckets", "list_objects", "head_object", "download_object"].includes(actionId.slice("aws_s3.".length)),
+      )
+      .map(([actionId, executor]) => [
+        `${profile.service}.${actionId.slice("aws_s3.".length)}`,
+        (input: unknown, context: ExecutionContext) =>
+          executor(input, {
+            ...context,
+            getCredential: async (requestedService) => {
+              if (requestedService !== service) return context.getCredential(requestedService);
+              const credential = await context.getCredential(profile.service);
+              if (credential?.authType !== "custom_credential") return credential;
+              const values = profileValues(credential.values, profile);
+              return {
+                ...credential,
+                values,
+                metadata: profileMetadata(credential.metadata, values),
+              };
+            },
+          }),
+      ]),
   );
   return {
     executors: mappedExecutors,
     credentialValidators: {
       async customCredential(input, options) {
         const values = profileValues(input.values, profile);
-        const fetcher =
-          values.allowPrivateNetwork === "true"
-            ? createProviderFetch({ allowPrivateNetwork: isPrivateNetworkAccessAllowed })
-            : options.fetcher;
+        const fetcher = await createS3Fetcher(values, options.fetcher);
         const result = await validateAwsCredential(values, fetcher);
         return {
           ...result,
@@ -301,7 +299,7 @@ export function createS3CompatibleExecutors(profile: {
           },
         },
         profile.service === "minio"
-          ? createProviderFetch({ fetch: fetcher, allowPrivateNetwork: isPrivateNetworkAccessAllowed })
+          ? await createS3Fetcher(await profileValuesForDiscovery(context, profile), fetcher)
           : fetcher,
       );
       return resources.map((resource) => ({
@@ -323,7 +321,34 @@ function profileMetadata(metadata: Record<string, unknown>, values: Record<strin
     prefix: values.prefix,
     forcePathStyle: values.forcePathStyle,
     allowPrivateNetwork: values.allowPrivateNetwork,
+    caCertificateConfigured: Boolean(values.caCertificate),
   };
+}
+
+async function createS3Fetcher(values: Record<string, string>, fallback: typeof fetch): Promise<typeof fetch> {
+  const caCertificate = optionalString(values.caCertificate);
+  if (!caCertificate || values.customCa !== "true") {
+    return values.allowPrivateNetwork === "true"
+      ? createProviderFetch({ allowPrivateNetwork: isPrivateNetworkAccessAllowed })
+      : fallback;
+  }
+  const { createMinioTlsFetch } = await import("../minio/tls-fetch.ts");
+  return createProviderFetch({
+    fetch: await createMinioTlsFetch(caCertificate),
+    allowPrivateNetwork: values.allowPrivateNetwork === "true" ? isPrivateNetworkAccessAllowed : undefined,
+  });
+}
+
+async function profileValuesForDiscovery(
+  context: ExecutionContext,
+  profile: {
+    service: string;
+    defaultEndpoint(values: Record<string, string>): string | undefined;
+    forcePathStyle?: boolean;
+  },
+): Promise<Record<string, string>> {
+  const credential = await context.getCredential(profile.service);
+  return credential?.authType === "custom_credential" ? profileValues(credential.values, profile) : {};
 }
 
 function profileValues(
@@ -339,7 +364,7 @@ function profileValues(
     ...values,
     ...(endpoint ? { endpoint } : {}),
     ...(profile.forcePathStyle ? { forcePathStyle: "true" } : {}),
-    ...(profile.service === "minio" ? { allowPrivateNetwork: "true" } : {}),
+    ...(profile.service === "minio" ? { customCa: "true" } : {}),
   };
 }
 

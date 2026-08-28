@@ -11,17 +11,20 @@ export interface S3CompatibleProfile {
   endpointDescription: string;
   regionPlaceholder: string;
   forcePathStyle?: boolean;
+  supportsSessionToken?: boolean;
 }
 
 export function s3CompatibleActions(profile: S3CompatibleProfile): ActionDefinition[] {
-  return awsActions.map((action) => ({
-    ...action,
-    id: `${profile.service}.${action.name}`,
-    service: profile.service,
-    description: action.description.replace(/Amazon S3|AWS S3|S3/gu, profile.displayName),
-    resourceBindings: remapBindings(action.resourceBindings, profile),
-    resourceBindingsOptional: remapBindings(action.resourceBindingsOptional, profile),
-  }));
+  return awsActions
+    .filter((action) => ["list_buckets", "list_objects", "head_object", "download_object"].includes(action.name))
+    .map((action) => ({
+      ...action,
+      id: `${profile.service}.${action.name}`,
+      service: profile.service,
+      description: action.description.replace(/Amazon S3|AWS S3|S3/gu, profile.displayName),
+      resourceBindings: remapBindings(action.resourceBindings, profile),
+      resourceBindingsOptional: remapBindings(action.resourceBindingsOptional, profile),
+    }));
 }
 
 export function s3CompatibleDefinition(profile: S3CompatibleProfile): ProviderDefinition {
@@ -37,16 +40,33 @@ export function s3CompatibleDefinition(profile: S3CompatibleProfile): ProviderDe
         fields: [
           field("accessKeyId", "Access Key ID", "text", true, false, "Provider-issued access key ID."),
           field("secretAccessKey", "Secret Access Key", "password", true, true, "Matching provider secret key."),
-          field(
-            "sessionToken",
-            "Temporary Security Token",
-            "password",
-            false,
-            true,
-            "Optional temporary credential token.",
-          ),
+          ...(profile.supportsSessionToken === false
+            ? []
+            : [
+                field(
+                  "sessionToken",
+                  "Temporary Security Token",
+                  "password",
+                  false,
+                  true,
+                  "Optional temporary credential token.",
+                ),
+              ]),
           field("region", "Region", "text", true, false, "Provider region.", profile.regionPlaceholder),
           field("endpoint", "Endpoint", "text", true, false, profile.endpointDescription, profile.endpointPlaceholder),
+          ...(profile.service === "qiniu_kodo"
+            ? [
+                field(
+                  "downloadDomain",
+                  "Bucket Download Domain",
+                  "text",
+                  true,
+                  false,
+                  "HTTPS origin bound to this Qiniu bucket. Signed download tokens remain server-side.",
+                  "https://downloads.example.com",
+                ),
+              ]
+            : []),
           field("bucket", "Allowlisted Bucket", "text", true, false, "Only this bucket may be discovered or read."),
           field(
             "prefix",
@@ -66,6 +86,14 @@ export function s3CompatibleDefinition(profile: S3CompatibleProfile): ProviderDe
                   false,
                   "Set to true only when the host also enables OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK.",
                   "true",
+                ),
+                field(
+                  "caCertificate",
+                  "Custom CA Certificate",
+                  "textarea",
+                  false,
+                  false,
+                  "Optional PEM-encoded CA certificate used only for this MinIO TLS connection.",
                 ),
               ]
             : []),

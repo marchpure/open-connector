@@ -10,4 +10,5 @@ export const actions: ActionDefinition[] = s3CompatibleActions({
   endpointPlaceholder: "",
   endpointDescription: "",
   regionPlaceholder: "",
+  supportsSessionToken: false,
 });

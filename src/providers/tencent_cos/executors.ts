@@ -1,12 +1,16 @@
 import type { CredentialValidators, ProviderExecutors } from "../../core/types.ts";
 import type { ProviderResourceCandidate } from "../provider-loader.ts";
 
-import { createS3CompatibleExecutors } from "../aws_s3/executors.ts";
+import { cosSign, createNativeObjectStorageRuntime, nativeEndpoint } from "../native-object-storage-runtime.ts";
 
-const profile = createS3CompatibleExecutors({
+const profile = createNativeObjectStorageRuntime({
   service: "tencent_cos",
   displayName: "Tencent Cloud COS",
-  defaultEndpoint: (values) => (values.region ? `https://cos.${values.region}.myqcloud.com` : undefined),
+  bucketMimeType: "application/vnd.tencent.cos.bucket",
+  listDialect: "v2",
+  buildEndpoint: (values) =>
+    nativeEndpoint(values.endpoint, `https://cos.${values.region}.myqcloud.com`, ["myqcloud.com"]),
+  sign: cosSign,
 });
 export const executors: ProviderExecutors = profile.executors;
 export const credentialValidators: CredentialValidators = profile.credentialValidators;
