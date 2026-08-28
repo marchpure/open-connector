@@ -95,8 +95,62 @@ export async function discoverResources(
     mimeType?: string;
     schema?: Record<string, unknown>;
   }> = [];
-  let cursor: string | undefined;
   const seen = new Set<string>();
+  try {
+    const currentUser = optionalRecord(
+      await request(
+        { accessToken: credential.accessToken, tokenType: credential.tokenType, fetcher, signal: context.signal },
+        "/v1.0/contact/users/me",
+      ),
+    );
+    if (currentUser) {
+      const resourceId =
+        optionalString(currentUser.unionId) ?? optionalString(currentUser.userId) ?? optionalString(currentUser.userid);
+      if (resourceId) {
+        resources.push({
+          sourceType: "dingtalk",
+          resourceId,
+          title: optionalString(currentUser.nick) ?? optionalString(currentUser.name),
+          mimeType: "application/vnd.dingtalk.user",
+          schema: boundedProviderResourceSchema(currentUser),
+        });
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof ProviderRequestError) || (error.status !== 403 && error.status !== 404)) throw error;
+  }
+  try {
+    const data = optionalRecord(
+      await request(
+        { accessToken: credential.accessToken, tokenType: credential.tokenType, fetcher, signal: context.signal },
+        "/v1.0/contact/users/search",
+        "POST",
+        { offset: 0, size: 100 },
+      ),
+    );
+    const users = Array.isArray(data?.users) ? data.users : Array.isArray(data?.list) ? data.list : [];
+    for (const item of users.slice(0, 100)) {
+      const record = optionalRecord(item);
+      if (!record) continue;
+      const resourceId =
+        optionalString(record.unionId) ??
+        optionalString(record.userId) ??
+        optionalString(record.userid) ??
+        optionalString(record.id);
+      if (!resourceId || seen.has(resourceId)) continue;
+      seen.add(resourceId);
+      resources.push({
+        sourceType: "dingtalk",
+        resourceId,
+        title: optionalString(record.name) ?? optionalString(record.nick),
+        mimeType: "application/vnd.dingtalk.user",
+        schema: boundedProviderResourceSchema(record),
+      });
+    }
+  } catch (error) {
+    if (!(error instanceof ProviderRequestError) || (error.status !== 403 && error.status !== 404)) throw error;
+  }
+  let cursor: string | undefined;
   for (let page = 0; page < 3 && resources.length < 500; page += 1) {
     const query = new URLSearchParams({
       max_results: "100",

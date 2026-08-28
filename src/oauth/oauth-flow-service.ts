@@ -21,6 +21,7 @@ export interface OAuthAuthorizationStartInput {
   service: string;
   connectionName?: string;
   clientConfig?: OAuthClientConfigInput;
+  actionIds?: string[];
 }
 
 export interface OAuthAuthorizationCompleteInput {
@@ -114,7 +115,7 @@ export class OAuthFlowService {
     );
     setAuthorizationParam(authorizationUrl, auth.authorizationRequestFields?.responseType, "response_type", "code");
     setAuthorizationParam(authorizationUrl, auth.authorizationRequestFields?.state, "state", state);
-    const effectiveScopes = this.clientConfigs.getEffectiveScopes(service, config);
+    const effectiveScopes = this.clientConfigs.getEffectiveScopes(service, config, input.actionIds);
     if (effectiveScopes.length > 0 && auth.authorizationRequestFields?.scope !== false) {
       authorizationUrl.searchParams.set(
         auth.authorizationRequestFields?.scope ?? "scope",

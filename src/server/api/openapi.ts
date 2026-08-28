@@ -1284,6 +1284,10 @@ function createOAuthAuthorizationPath(): Record<string, unknown> {
                   minItems: 1,
                   description: "Optional non-empty provider-declared scope subset to request.",
                 }),
+                actionIds: jsonSchema.array(jsonSchema.string(), {
+                  minItems: 1,
+                  description: "Optional action ids whose minimum OAuth scope union should be requested.",
+                }),
                 extra: {
                   type: "object",
                   additionalProperties: { type: "string" },

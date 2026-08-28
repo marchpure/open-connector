@@ -7,7 +7,8 @@ export type PolicyErrorCode =
   | "action_blocked"
   | "proxy_not_allowed"
   | "proxy_blocked"
-  | "connection_not_allowed";
+  | "connection_not_allowed"
+  | "resource_not_discovered";
 
 export interface PolicyCheck {
   source: PolicySource;

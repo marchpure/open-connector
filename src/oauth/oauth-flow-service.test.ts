@@ -37,7 +37,18 @@ const oauthProvider: ProviderDefinition = {
       ],
     },
   ],
-  actions: [],
+  actions: [
+    {
+      id: "example.read",
+      service: "example",
+      name: "read",
+      description: "Read.",
+      requiredScopes: ["read"],
+      providerPermissions: ["read"],
+      inputSchema: { type: "object" },
+      outputSchema: { type: "object" },
+    },
+  ],
 };
 
 const pkceOAuthProvider: ProviderDefinition = {
@@ -230,6 +241,20 @@ describe("OAuthFlowService", () => {
     });
 
     const started = await services.flow.startAuthorization({ service: "example" });
+
+    expect(new URL(started.authorizationUrl).searchParams.get("scope")).toBe("read");
+  });
+
+  it("derives the OAuth scope union from explicitly requested actions", async () => {
+    const services = createServices([oauthProvider]);
+    await services.clientConfigs.upsertConfig({
+      service: "example",
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      extra: { tenant: "default" },
+    });
+
+    const started = await services.flow.startAuthorization({ service: "example", actionIds: ["example.read"] });
 
     expect(new URL(started.authorizationUrl).searchParams.get("scope")).toBe("read");
   });
@@ -769,7 +794,9 @@ function createServices(
   flow: OAuthFlowService;
   states: MemoryOAuthStateStore;
 } {
-  const catalog = createCatalogStore(providers);
+  const catalog = createCatalogStore(providers, {
+    executableActionIds: providers.flatMap((provider) => provider.actions.map((action) => action.id)),
+  });
   const connections = new ConnectionService({
     catalog,
     providerLoader: new EmptyProviderLoader(),

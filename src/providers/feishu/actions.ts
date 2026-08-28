@@ -1,7 +1,6 @@
 import type { ActionDefinition, JsonSchema } from "../../core/types.ts";
 
 import { s } from "../../core/json-schema.ts";
-import { defineProviderAction } from "../../core/provider-definition.ts";
 import { feishuProviderScopes } from "./scopes.ts";
 import { createFeishuApplicationActions } from "./shared/application-actions.ts";
 import { createFeishuApprovalActions } from "./shared/approval-actions.ts";
@@ -24,6 +23,7 @@ import { createFeishuMarkdownActions } from "./shared/markdown-actions.ts";
 import { createFeishuMinutesActions } from "./shared/minutes-actions.ts";
 import { createFeishuNoteActions } from "./shared/note-actions.ts";
 import { createFeishuOkrActions } from "./shared/okr-actions.ts";
+import { defineFeishuResourceAction as defineProviderAction } from "./shared/resource-bindings.ts";
 import { createFeishuSheetsActions } from "./shared/sheets-actions.ts";
 import { createFeishuSheetsAdvancedActions } from "./shared/sheets-advanced-actions.ts";
 import { createFeishuSlidesActions } from "./shared/slides-actions.ts";
@@ -87,6 +87,7 @@ export const feishuActions: ActionDefinition[] = [
     description: "Get a Feishu docx document's basic metadata (title and revision) that the authorized user can read.",
     requiredScopes: [feishuProviderScopes.docxReadonly],
     providerPermissions: [feishuProviderScopes.docxReadonly],
+    resourceBindings: { documentId: [] },
     inputSchema: s.object("Identify the document to read.", { documentId: docxIdField }),
     outputSchema: feishuDocumentSchema,
   }),
@@ -95,6 +96,7 @@ export const feishuActions: ActionDefinition[] = [
     description: "Read the full plain-text content of a Feishu docx document the authorized user can access.",
     requiredScopes: [feishuProviderScopes.docxReadonly],
     providerPermissions: [feishuProviderScopes.docxReadonly],
+    resourceBindings: { documentId: [] },
     inputSchema: s.object(
       "Identify the document to read.",
       {
@@ -114,6 +116,7 @@ export const feishuActions: ActionDefinition[] = [
       "List a Feishu docx document's structured blocks (one page), for reading document structure and rich content.",
     requiredScopes: [feishuProviderScopes.docxReadonly],
     providerPermissions: [feishuProviderScopes.docxReadonly],
+    resourceBindings: { documentId: [] },
     inputSchema: s.object(
       "Identify the document and page through its blocks.",
       {

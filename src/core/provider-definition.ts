@@ -11,6 +11,8 @@ export interface DefineProviderActionInput<TName extends string = string> {
   outputSchema: JsonSchema;
   requiredScopes?: readonly string[];
   providerPermissions?: readonly string[];
+  resourceBindings?: Record<string, readonly string[]>;
+  resourceBindingsOptional?: Record<string, readonly string[]>;
   followUpActions?: readonly string[];
   asyncLifecycle?: ActionDefinition["asyncLifecycle"];
 }
@@ -34,6 +36,12 @@ export function defineProviderAction<const TName extends string>(
     description: input.description,
     requiredScopes: input.requiredScopes ? [...input.requiredScopes] : [],
     providerPermissions: input.providerPermissions ? [...input.providerPermissions] : [],
+    resourceBindings: input.resourceBindings
+      ? Object.fromEntries(Object.entries(input.resourceBindings).map(([field, kinds]) => [field, [...kinds]]))
+      : undefined,
+    resourceBindingsOptional: input.resourceBindingsOptional
+      ? Object.fromEntries(Object.entries(input.resourceBindingsOptional).map(([field, kinds]) => [field, [...kinds]]))
+      : undefined,
     inputSchema: input.inputSchema,
     outputSchema: input.outputSchema,
     followUpActions: input.followUpActions ? [...input.followUpActions] : undefined,

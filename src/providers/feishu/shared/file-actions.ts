@@ -1,7 +1,7 @@
 import type { ActionDefinition } from "../../../core/types.ts";
 
 import { s } from "../../../core/json-schema.ts";
-import { defineProviderAction } from "../../../core/provider-definition.ts";
+import { defineFeishuResourceAction as defineProviderAction } from "./resource-bindings.ts";
 export const feishuFileProviderPermissions = {
   driveUpload: "drive:file:upload",
   driveDownload: "drive:file:download",
@@ -118,6 +118,7 @@ export function createFeishuFileActions(service: string): readonly ActionDefinit
       description: "Download a Feishu Drive file into local transit storage.",
       requiredScopes: [feishuFileProviderPermissions.driveDownload],
       providerPermissions: [feishuFileProviderPermissions.driveDownload],
+      resourceBindings: { fileToken: [] },
       inputSchema: s.object(
         "Identify the Drive file and optionally override its downloaded name.",
         {

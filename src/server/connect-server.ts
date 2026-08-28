@@ -891,6 +891,7 @@ export class ConnectServer {
         service,
         connectionName,
         clientConfig: readOAuthClientConfigInput(body),
+        actionIds: readActionIds(body),
       });
       const authorizationUrl = new URL(authorization.authorizationUrl);
       this.options.logger?.info(
@@ -1177,6 +1178,15 @@ function readRequestedScopes(body: Record<string, unknown>): string[] | undefine
   return requiredStringArray(
     body.requestedScopes,
     "requestedScopes",
+    (message) => new HttpRequestError("invalid_input", `${message}.`),
+  );
+}
+
+function readActionIds(body: Record<string, unknown>): string[] | undefined {
+  if (!("actionIds" in body)) return undefined;
+  return requiredStringArray(
+    body.actionIds,
+    "actionIds",
     (message) => new HttpRequestError("invalid_input", `${message}.`),
   );
 }

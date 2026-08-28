@@ -15,6 +15,7 @@ export const provider: ProviderDefinition = {
       authorizationUrl: "https://login.dingtalk.com/oauth2/auth",
       tokenUrl: "https://api.dingtalk.com/v1.0/oauth2/userAccessToken",
       scopes: ["openid", "Contact.User.Read", "Contact.Department.Read"],
+      minimumScopes: ["openid"],
       tokenEndpointAuthMethod: "client_secret_post",
       tokenRequestFormat: "json",
       clientSetup: {

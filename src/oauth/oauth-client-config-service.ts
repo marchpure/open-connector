@@ -172,9 +172,45 @@ export class OAuthClientConfigService {
   }
 
   /** Resolve the scopes an authorization request should send. */
-  getEffectiveScopes(service: string, config: OAuthClientConfig): string[] {
+  getEffectiveScopes(service: string, config: OAuthClientConfig, actionIds?: string[]): string[] {
     const auth = this.getOAuthDefinition(service);
-    return filterDeclaredScopes(config.requestedScopes, auth.scopes) ?? [...auth.scopes];
+    const configured = filterDeclaredScopes(config.requestedScopes, auth.scopes);
+    if (actionIds === undefined) return configured ?? [...auth.scopes];
+    if (!Array.isArray(actionIds) || actionIds.length === 0) {
+      throw new OAuthClientConfigError("invalid_input", "actionIds must contain at least one action.");
+    }
+    const provider = this.catalog.providers.find((entry) => entry.service === service);
+    const requestedActions = [...new Set(actionIds.map((actionId) => actionId.trim()))];
+    const invalidAction = requestedActions.find(
+      (actionId) => !provider?.actions.some((action) => action.id === actionId),
+    );
+    if (invalidAction) {
+      throw new OAuthClientConfigError("invalid_input", `Unknown OAuth action for ${service}: ${invalidAction}.`);
+    }
+    const scopes = new Set(auth.minimumScopes ?? []);
+    for (const action of provider?.actions ?? []) {
+      if (requestedActions.includes(action.id)) {
+        for (const scope of action.requiredScopes) scopes.add(scope);
+      }
+    }
+    const undeclared = [...scopes].find((scope) => !auth.scopes.includes(scope));
+    if (undeclared) {
+      throw new OAuthClientConfigError(
+        "invalid_input",
+        `OAuth action scope is not declared by ${service}: ${undeclared}.`,
+      );
+    }
+    if (configured) {
+      const missing = [...scopes].filter((scope) => !configured.includes(scope));
+      if (missing.length > 0) {
+        throw new OAuthClientConfigError(
+          "invalid_input",
+          `requestedScopes is missing scopes required by the selected actions: ${missing.join(", ")}.`,
+        );
+      }
+      return configured;
+    }
+    return [...scopes];
   }
 
   private listOAuthProviders(): Array<{ service: string; auth: OAuth2AuthDefinition }> {

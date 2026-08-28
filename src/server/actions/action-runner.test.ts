@@ -3,6 +3,7 @@ import type { ActionDefinition, ActionExecutor, ProviderDefinition, ResolvedCred
 import type { IProviderLoader } from "../../providers/provider-loader.ts";
 import type { Logger } from "../logger.ts";
 import type { IRunLogStore, RunLog, RunLogListInput, RunLogPage } from "../storage/runtime-store.ts";
+import type { ActionRunnerOptions } from "./action-runner.ts";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCatalogStore } from "../../catalog-store.ts";
@@ -21,6 +22,17 @@ const echoAction: ActionDefinition = {
   inputSchema: { type: "object" },
   outputSchema: { type: "object" },
 };
+const resourceAction: ActionDefinition = {
+  id: "example.read_resource",
+  service: "example",
+  name: "read_resource",
+  description: "Read one discovered resource.",
+  requiredScopes: [],
+  providerPermissions: [],
+  resourceBindings: { resourceId: [] },
+  inputSchema: { type: "object", properties: { resourceId: { type: "string" } }, required: ["resourceId"] },
+  outputSchema: { type: "object" },
+};
 
 const exampleProvider: ProviderDefinition = {
   service: "example",
@@ -28,7 +40,7 @@ const exampleProvider: ProviderDefinition = {
   categories: ["Developer Tools"],
   authTypes: ["no_auth"],
   auth: [{ type: "no_auth" }],
-  actions: [echoAction],
+  actions: [echoAction, resourceAction],
 };
 const authenticatedProvider: ProviderDefinition = {
   ...exampleProvider,
@@ -76,6 +88,62 @@ describe("ActionRunner", () => {
         }),
       ]),
     );
+  });
+
+  it("rejects a guessed resource before loading or invoking the provider executor", async () => {
+    const runs = new MemoryRunLogStore();
+    const executor = vi.fn<ActionExecutor>(async () => ({ ok: true, output: { message: "must-not-run" } }));
+    const resourceAuthorization = {
+      authorize: vi.fn(() => ({
+        allowed: false as const,
+        code: "resource_not_discovered" as const,
+        message: "not discovered",
+      })),
+    };
+    const runner = createRunner({
+      runs,
+      logger: createTestLogger().logger,
+      providerLoader: new TestProviderLoader(executor),
+      resourceAuthorization,
+    });
+
+    const result = await runner.run({
+      actionId: resourceAction.id,
+      input: { resourceId: "guessed-id" },
+      caller: "http",
+    });
+
+    expect(result?.result).toMatchObject({ ok: false, error: { code: "resource_not_discovered" } });
+    expect(resourceAuthorization.authorize).toHaveBeenCalledWith(
+      "example:default",
+      "example",
+      resourceAction.id,
+      { resourceId: "guessed-id" },
+      { resourceId: [] },
+    );
+    expect(executor).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a resource-bound action is run without the control-plane authorizer", async () => {
+    const runs = new MemoryRunLogStore();
+    const executor = vi.fn<ActionExecutor>(async () => ({ ok: true, output: { message: "must-not-run" } }));
+    const runner = createRunner({
+      runs,
+      logger: createTestLogger().logger,
+      providerLoader: new TestProviderLoader(executor),
+    });
+
+    const result = await runner.run({
+      actionId: resourceAction.id,
+      input: { resourceId: "guessed-id" },
+      caller: "http",
+    });
+
+    expect(result?.result).toMatchObject({
+      ok: false,
+      error: { code: "resource_not_discovered" },
+    });
+    expect(executor).not.toHaveBeenCalled();
   });
 
   it("does not replace a successful action result when audit storage fails", async () => {
@@ -384,8 +452,12 @@ function createRunner(options: {
   actionPolicy?: ActionPolicyService;
   provider?: ProviderDefinition;
   store?: IConnectionStore;
+  resourceAuthorization?: ActionRunnerOptions["resourceAuthorization"];
 }): ActionRunner {
-  const catalog = createCatalogStore([options.provider ?? exampleProvider], { executableActionIds: [echoAction.id] });
+  const selectedProvider = options.provider ?? exampleProvider;
+  const catalog = createCatalogStore([selectedProvider], {
+    executableActionIds: selectedProvider.actions.map((action) => action.id),
+  });
   const providerLoader =
     options.providerLoader ?? new TestProviderLoader(async () => ({ ok: true, output: { message: "ok" } }));
   return new ActionRunner({
@@ -399,6 +471,7 @@ function createRunner(options: {
     runs: options.runs,
     actionPolicy: options.actionPolicy,
     logger: options.logger,
+    resourceAuthorization: options.resourceAuthorization,
   });
 }
 

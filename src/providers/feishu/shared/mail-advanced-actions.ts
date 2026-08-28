@@ -1,7 +1,7 @@
 import type { ActionDefinition } from "../../../core/types.ts";
 
 import { s } from "../../../core/json-schema.ts";
-import { defineProviderAction } from "../../../core/provider-definition.ts";
+import { defineFeishuResourceAction as defineProviderAction } from "./resource-bindings.ts";
 export const feishuMailAdvancedProviderPermissions = {
   mailboxRead: "mail:user_mailbox:readonly",
   messageRead: "mail:user_mailbox.message:readonly",

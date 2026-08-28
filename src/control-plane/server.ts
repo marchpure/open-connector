@@ -252,6 +252,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
             connectionId,
           }),
         );
+        runtime.resources.replace(connectionId, connection.revision, resources);
         jobs.succeed(job.id, {
           service: provider.service,
           definitionVersion: connection.connectorDefinitionVersion,
@@ -342,6 +343,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       const authorization = await runtime.oauthFlow.startAuthorization({
         service: requiredString(body.service),
         connectionName: optionalString(body.connectionName),
+        actionIds: Array.isArray(body.actionIds) ? body.actionIds.map(String) : undefined,
       });
       return context.json(authorization);
     } catch (error) {

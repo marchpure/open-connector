@@ -109,8 +109,46 @@ export async function discoverResources(
     url?: string;
   }> = [];
   const seen = new Set<string>();
+  const addResource = (
+    resourceId: string,
+    options: {
+      resourceToken?: string;
+      title?: string;
+      mimeType?: string;
+      record?: Record<string, unknown>;
+    } = {},
+  ) => {
+    if (resources.length >= 500 || seen.has(resourceId)) return;
+    seen.add(resourceId);
+    const record = options.record;
+    resources.push({
+      sourceType: "feishu",
+      resourceId,
+      resourceToken: options.resourceToken,
+      title: options.title,
+      mimeType: options.mimeType,
+      schema: record ? boundedProviderResourceSchema(record) : undefined,
+      version: record ? (optionalString(record.version) ?? optionalString(record.revision_id)) : undefined,
+      etag: record ? optionalString(record.etag) : undefined,
+      owner:
+        record && optionalString(record.owner_id)
+          ? { id: optionalString(record.owner_id)!, displayName: optionalString(record.owner_name) }
+          : undefined,
+      aclSummary: record
+        ? (() => {
+            const visibility = optionalString(record.visibility);
+            return visibility
+              ? {
+                  visibility: normalizeFeishuVisibility(visibility),
+                  subjectCount: optionalNumber(record.subject_count),
+                }
+              : undefined;
+          })()
+        : undefined,
+      url: record ? safeFeishuResourceUrl(record.url) : undefined,
+    });
+  };
   const add = (record: Record<string, unknown>, defaults: { mimeType?: string } = {}) => {
-    if (resources.length >= 500) return;
     const resourceId =
       optionalString(record.document_id) ??
       optionalString(record.obj_token) ??
@@ -118,14 +156,14 @@ export async function discoverResources(
       optionalString(record.file_token) ??
       optionalString(record.chat_id) ??
       optionalString(record.minute_token) ??
+      optionalString(record.app_token) ??
+      optionalString(record.base_token) ??
+      optionalString(record.spreadsheet_token) ??
       optionalString(record.token) ??
       optionalString(record.id) ??
       optionalString(record.space_id);
     if (!resourceId || seen.has(resourceId)) return;
-    seen.add(resourceId);
-    resources.push({
-      sourceType: "feishu",
-      resourceId,
+    addResource(resourceId, {
       resourceToken:
         optionalString(record.obj_token) ??
         optionalString(record.node_token) ??
@@ -134,29 +172,16 @@ export async function discoverResources(
         optionalString(record.minute_token) ??
         optionalString(record.token),
       title: optionalString(record.title) ?? optionalString(record.name) ?? optionalString(record.topic),
-      mimeType:
+      mimeType: normalizeFeishuMimeType(
         optionalString(record.mime_type) ??
-        optionalString(record.mimeType) ??
-        optionalString(record.obj_type) ??
-        defaults.mimeType ??
-        optionalString(record.type),
-      schema: boundedProviderResourceSchema(record),
-      version: optionalString(record.version) ?? optionalString(record.revision_id),
-      etag: optionalString(record.etag),
-      owner: optionalString(record.owner_id)
-        ? {
-            id: optionalString(record.owner_id)!,
-            displayName: optionalString(record.owner_name),
-          }
-        : undefined,
-      aclSummary: (() => {
-        const visibility = optionalString(record.visibility);
-        return visibility
-          ? { visibility: normalizeFeishuVisibility(visibility), subjectCount: optionalNumber(record.subject_count) }
-          : undefined;
-      })(),
-      url: safeFeishuResourceUrl(record.url),
+          optionalString(record.mimeType) ??
+          optionalString(record.obj_type) ??
+          defaults.mimeType ??
+          optionalString(record.type),
+      ),
+      record,
     });
+    addKnownResources(record, addResource);
   };
 
   // Search is Feishu's visibility-aware cross-product index. It returns
@@ -283,7 +308,91 @@ export async function discoverResources(
       pageToken = next;
     }
   });
+
+  // Expand only visibility-approved Base apps into bounded child resources.
+  await optionalDiscovery(async () => {
+    const apps = resources
+      .filter((resource) => resource.mimeType === "application/vnd.feishu.bitable")
+      .map((resource) => resource.resourceToken ?? resource.resourceId)
+      .slice(0, 10);
+    for (const appToken of apps) {
+      await collectFeishuBaseResources(request, appToken, addResource);
+    }
+  });
   return resources;
+}
+
+function addKnownResources(
+  record: Record<string, unknown>,
+  addResource: (
+    resourceId: string,
+    options?: { resourceToken?: string; title?: string; mimeType?: string; record?: Record<string, unknown> },
+  ) => void,
+): void {
+  const add = (key: string, mimeType: string, resourceToken?: string) => {
+    const resourceId = optionalString(record[key]);
+    if (resourceId) {
+      addResource(resourceId, {
+        resourceToken: resourceToken ? optionalString(record[resourceToken]) : undefined,
+        title: optionalString(record.title) ?? optionalString(record.name),
+        mimeType,
+        record,
+      });
+    }
+  };
+  add("app_token", "application/vnd.feishu.bitable");
+  add("base_token", "application/vnd.feishu.bitable");
+  add("spreadsheet_token", "application/vnd.feishu.sheet");
+  add("table_id", "application/vnd.feishu.bitable.table", "app_token");
+  add("field_id", "application/vnd.feishu.bitable.field", "table_id");
+  add("view_id", "application/vnd.feishu.bitable.view", "table_id");
+  add("record_id", "application/vnd.feishu.bitable.record", "table_id");
+  add("sheet_id", "application/vnd.feishu.sheet", "spreadsheet_token");
+}
+
+async function collectFeishuBaseResources(
+  request: ReturnType<typeof createFeishuJsonRequest>,
+  appToken: string,
+  addResource: (
+    resourceId: string,
+    options?: { resourceToken?: string; title?: string; mimeType?: string; record?: Record<string, unknown> },
+  ) => void,
+): Promise<void> {
+  addResource(appToken, { mimeType: "application/vnd.feishu.bitable" });
+  const data = await request({
+    path: `/bitable/v1/apps/${encodeURIComponent(appToken)}/tables`,
+    query: { page_size: 50 },
+  });
+  const tables = Array.isArray(data.items) ? data.items : Array.isArray(data.tables) ? data.tables : [];
+  for (const itemValue of tables.slice(0, 50)) {
+    const table = optionalRecord(itemValue);
+    const tableId = table && (optionalString(table.table_id) ?? optionalString(table.id));
+    if (!table || !tableId) continue;
+    addResource(tableId, {
+      resourceToken: appToken,
+      title: optionalString(table.name) ?? optionalString(table.title),
+      mimeType: "application/vnd.feishu.bitable.table",
+      record: table,
+    });
+    const tablePath = `/bitable/v1/apps/${encodeURIComponent(appToken)}/tables/${encodeURIComponent(tableId)}`;
+    const [fields, views, records] = await Promise.all([
+      request({ path: `${tablePath}/fields`, query: { page_size: 100 } }),
+      request({ path: `${tablePath}/views`, query: { page_size: 100 } }),
+      request({ path: `${tablePath}/records`, query: { page_size: 100 } }),
+    ]);
+    for (const [payload, key, mimeType, idKey] of [
+      [fields, "items", "application/vnd.feishu.bitable.field", "field_id"],
+      [views, "items", "application/vnd.feishu.bitable.view", "view_id"],
+      [records, "items", "application/vnd.feishu.bitable.record", "record_id"],
+    ] as const) {
+      const items = Array.isArray(payload[key]) ? payload[key] : [];
+      for (const value of items.slice(0, 100)) {
+        const item = optionalRecord(value);
+        const id = item && optionalString(item[idKey]);
+        if (item && id) addResource(id, { resourceToken: tableId, mimeType, record: item });
+      }
+    }
+  }
 }
 
 async function collectFeishuWikiNodes(
@@ -339,6 +448,15 @@ function normalizeFeishuVisibility(value: string): "private" | "shared" | "team"
   if (normalized === "private") return "private";
   if (normalized === "team" || normalized === "organization" || normalized === "org") return "team";
   return "shared";
+}
+
+function normalizeFeishuMimeType(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "base" || normalized === "bitable") return "application/vnd.feishu.bitable";
+  if (normalized === "sheet" || normalized === "spreadsheet") return "application/vnd.feishu.sheet";
+  if (normalized === "doc" || normalized === "docx") return "application/vnd.feishu.document";
+  return value;
 }
 
 function createFeishuSharedHandlers(

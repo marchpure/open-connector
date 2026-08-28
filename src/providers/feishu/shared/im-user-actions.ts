@@ -1,7 +1,7 @@
 import type { ActionDefinition } from "../../../core/types.ts";
 
 import { s } from "../../../core/json-schema.ts";
-import { defineProviderAction } from "../../../core/provider-definition.ts";
+import { defineFeishuResourceAction as defineProviderAction } from "./resource-bindings.ts";
 const userIdType = s.stringEnum("The user identifier type returned by Feishu.", ["open_id", "union_id", "user_id"]);
 const pageSize = s.positiveInteger("The maximum number of results on this page.", {
   maximum: 100,
@@ -73,6 +73,7 @@ export function createFeishuImUserActions(service: string): readonly ActionDefin
       description: "Get the metadata of one Feishu chat visible to the authorized user.",
       requiredScopes: ["im:chat:read"],
       providerPermissions: ["im:chat:read"],
+      resourceBindings: { chatId: ["application/vnd.feishu.chat"] },
       inputSchema: s.object(
         "Identify the chat.",
         {
@@ -98,6 +99,7 @@ export function createFeishuImUserActions(service: string): readonly ActionDefin
       description: "List members of one Feishu chat visible to the authorized user.",
       requiredScopes: ["im:chat.members:read"],
       providerPermissions: ["im:chat.members:read"],
+      resourceBindings: { chatId: ["application/vnd.feishu.chat"] },
       inputSchema: s.object(
         "Identify the chat and configure member pagination.",
         {
@@ -131,6 +133,7 @@ export function createFeishuImUserActions(service: string): readonly ActionDefin
         "im:message.p2p_msg:get_as_user",
         "im:message.reactions:read",
       ],
+      resourceBindings: { containerId: ["application/vnd.feishu.chat"] },
       inputSchema: s.object(
         "Identify the message container and configure the time range and pagination.",
         {
