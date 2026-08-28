@@ -1,0 +1,189 @@
+{
+  "schemaVersion": 1,
+  "status": "CONNECTION_INCREMENTAL_P3_FROZEN_WITH_EXTERNAL_BLOCKERS",
+  "recordedAt": "2026-08-29T01:40:00+08:00",
+  "baseSha": "3bbd44624933300487a54ee3acba23190b66ee98",
+  "implementationSha": "cdac74ea7f628413390b40a8be2c8c02f002f3cc",
+  "branch": "feat/connection-expansion-p3-dingtalk-ecosystem",
+  "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-expansion-p3-dingtalk-ecosystem-20260829-010827",
+  "sourceWorktree": {
+    "path": "/Users/bytedance/.codex/worktrees/knowledge-connection-expansion-integration",
+    "branch": "feat/connection-expansion-integration",
+    "localSha": "3bbd44624933300487a54ee3acba23190b66ee98",
+    "remote": "fork/feat/connection-expansion-integration",
+    "remoteSha": "3bbd44624933300487a54ee3acba23190b66ee98",
+    "clean": true,
+    "modified": false
+  },
+  "scope": {
+    "canonicalProvider": "dingtalk",
+    "reused": [
+      "Existing DingTalk OAuth connection and token refresh",
+      "Control Plane encrypted credential_ref",
+      "tenant/workspace ACL and visibility",
+      "revision-bound ConnectionLease",
+      "discovery ResourceRef allowlist",
+      "redacted execution audit"
+    ],
+    "unchanged": ["dingtalk_bot", "frontend", "BFF", "AutoSkill", "other providers"],
+    "duplicateProviderCreated": false
+  },
+  "identityModel": {
+    "userAccessToken": "Executable canonical provider identity. User ID is derived from /v1.0/contact/users/me and cannot be supplied by the caller.",
+    "enterpriseInternalApplication": "Catalog-only in this increment. Organization-wide app visibility is not represented by the user OAuth credential.",
+    "customRobot": "Existing independent dingtalk_bot message-send provider; never used for reads or discovery."
+  },
+  "capabilityMatrix": "docs/connection-expansion/p3-dingtalk-capability-matrix.json",
+  "domains": [
+    {
+      "domain": "identity-and-contacts",
+      "tier": "beta",
+      "identity": "user_access_token",
+      "scopes": ["openid", "Contact.User.Read", "Contact.Department.Read"],
+      "actions": ["get_current_user", "get_user", "search_users", "list_departments"],
+      "evidence": [
+        "src/providers/dingtalk/actions.ts",
+        "src/providers/dingtalk/executors.ts",
+        "src/providers/office-discovery.test.ts"
+      ],
+      "blocker": "Real DingTalk test organization lifecycle unavailable."
+    },
+    {
+      "domain": "calendar",
+      "tier": "beta",
+      "identity": "user_access_token",
+      "scopes": ["Calendar.Calendar.Read"],
+      "actions": ["list_calendars", "list_calendar_events"],
+      "evidence": [
+        "src/providers/dingtalk/ecosystem.test.ts",
+        "Official @alicloud/dingtalk 2.2.46 calendar_1.0 generated request contracts"
+      ],
+      "blocker": "Real scope, resource visibility, rate limit, token refresh, and revocation matrix unavailable."
+    },
+    {
+      "domain": "todo",
+      "tier": "beta",
+      "identity": "user_access_token",
+      "scopes": ["Todo.Todo.Read"],
+      "actions": ["list_todo_tasks", "get_todo_task"],
+      "evidence": [
+        "src/providers/dingtalk/ecosystem.test.ts",
+        "Official @alicloud/dingtalk 2.2.46 todo_1.0 generated request contracts"
+      ],
+      "blocker": "Real personal/organization task visibility, scope, rate limit, token refresh, and revocation matrix unavailable."
+    },
+    {
+      "domain": "documents-and-knowledge",
+      "tier": "catalog",
+      "identity": "enterprise_internal_application",
+      "actions": [],
+      "blocker": "Requires separately modeled internal-app credentials, explicit resource permissions, export bounds, and real tenant evidence."
+    },
+    {
+      "domain": "drive-and-storage",
+      "tier": "catalog",
+      "identity": "enterprise_internal_application",
+      "actions": [],
+      "blocker": "Requires internal-app identity, download/redirect/size controls, entitlement, and real ACL evidence."
+    },
+    {
+      "domain": "tables",
+      "tier": "catalog",
+      "identity": "enterprise_internal_application",
+      "actions": [],
+      "blocker": "No compatible generally available user-token table-read contract was proven."
+    },
+    {
+      "domain": "groups-and-conversations",
+      "tier": "officially-unavailable",
+      "identity": "custom_robot_or_enterprise_application",
+      "actions": [],
+      "blocker": "No general user-token historical conversation-content read contract; robot send capability is not read authorization."
+    },
+    {
+      "domain": "meetings",
+      "tier": "catalog",
+      "identity": "enterprise_internal_application",
+      "actions": [],
+      "blocker": "Requires meeting entitlement and explicit organizer/participant resource authorization."
+    },
+    {
+      "domain": "approvals",
+      "tier": "catalog",
+      "identity": "enterprise_internal_application",
+      "actions": [],
+      "blocker": "Requires process/instance allowlisting, field redaction policy, internal-app credentials, and real tenant evidence."
+    },
+    {
+      "domain": "yida",
+      "tier": "catalog",
+      "identity": "enterprise_internal_application",
+      "actions": [],
+      "blocker": "Requires explicit app/form allowlists, commercial entitlement, internal-app credentials, and real instance evidence."
+    }
+  ],
+  "security": [
+    "All new actions are read-only; no messaging, mutation, approval, or Yida write action was added.",
+    "Calendar and todo calls derive the authorizing union ID from the current user token; arbitrary cross-user IDs are not accepted.",
+    "Calendar event reads require a calendar ResourceRef from current discovery; todo detail reads require a todo-task ResourceRef.",
+    "Provider result objects are depth/size bounded and credential-like fields are removed.",
+    "Source URLs are accepted only as HTTPS dingtalk.com subdomains and query/fragment material is stripped.",
+    "Calendar pages cap at 100 items and 31 days; todo pages cap at 100 and optional due-time windows at 366 days.",
+    "401 and 429 discovery failures propagate. Optional ungranted domains may be absent only on 403/404.",
+    "The existing Control Plane enforces discovery and invocation authorization, tenant isolation, connection revision, lease expiry, revoke/delete, and redacted audits."
+  ],
+  "verification": {
+    "passed": [
+      "npm run generate:catalog: 1453 apps and 15213 actions",
+      "npm run fix-check",
+      "npm run typecheck",
+      "npm exec vitest run src/providers/dingtalk/ecosystem.test.ts src/providers/office-discovery.test.ts: 16 tests passed",
+      "npm exec vitest run src/providers/dingtalk_bot src/providers/dingtalk src/providers/office-discovery.test.ts: 15 tests passed before the final added 401/429 regression",
+      "npm exec vitest run src/providers/dingtalk/ecosystem.test.ts src/providers/office-discovery.test.ts src/control-plane/resource-store.test.ts src/control-plane/server.test.ts: 29 tests passed before the final added 401/429 regression",
+      "npm test after final source hardening: 171 files passed, 1 skipped; 1551 tests passed, 4 skipped",
+      "npm run build",
+      "npm audit --audit-level=high: 0 vulnerabilities",
+      "LICENSE.txt and NOTICE.md present and unchanged",
+      "Existing CycloneDX SBOM sha256 c035a5babcc5ce01acfc4b4da509a5a881105cb8d024be04f58ea08288e013a0",
+      "git diff --check"
+    ],
+    "dependencyInventory": {
+      "path": "/tmp/connection-p3-dingtalk-sbom.json",
+      "sha256": "b570f5a13d983d1f4175a5f0d6cc8bf64f235c52a934c6fccb1a25c6cb6524c2",
+      "status": "generated_with_nonzero_npm_ls_exit",
+      "note": "The isolated worktree reused the source worktree node_modules through a temporary symlink. npm ls reported the pre-existing shared tree's extraneous/mismatched packages; no manifest dependency changed in this increment."
+    },
+    "realLifecycle": {
+      "status": "blocked",
+      "reason": "No DingTalk credential or test-organization environment variables were present. No fixture or mocked HTTP result is claimed as verified.",
+      "required": [
+        "configure/authorize/create/validate/discover/bounded-read/lease-invoke/audit/revoke/delete",
+        "insufficient scope",
+        "guessed resource ID",
+        "member departure",
+        "resource revocation",
+        "token expiry and refresh",
+        "rate limiting",
+        "cross-tenant IDOR",
+        "lease expiry",
+        "restart recovery"
+      ]
+    }
+  },
+  "sharedFiles": [],
+  "integrationNotes": [
+    "Keep dingtalk at beta until the complete real lifecycle and negative matrix passes.",
+    "Do not enable catalog-only domains by adding their scopes to the user OAuth provider; model internal-application identity separately first.",
+    "Do not use dingtalk_bot delivery as evidence for group/history read access.",
+    "Generated catalog and registry files are gitignored; regenerate after integration.",
+    "The handoff artifact commit follows the verified implementation commit; finalSha identifies the exact implementation under test."
+  ],
+  "externalBlockers": [
+    "No real DingTalk test organization, internal application, OAuth callback, user grant, or test resources were available.",
+    "No enterprise internal-app credential model exists on the canonical dingtalk connection for documents, drive, meetings, approvals, or Yida.",
+    "Product/commercial entitlements for DingTalk documents, meetings/minutes, and Yida were unavailable.",
+    "The real rate-limit, token-refresh, resource-revocation, membership-removal, cross-tenant, and restart-recovery matrix could not be executed."
+  ],
+  "finalSha": "cdac74ea7f628413390b40a8be2c8c02f002f3cc",
+  "finalShaMeaning": "Exact implementation commit that passed the recorded automated gates; the handoff-only commit follows it."
+}
