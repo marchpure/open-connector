@@ -751,6 +751,17 @@ export function boundedProviderResourceSchema(
   };
 }
 
+/**
+ * Bound provider-owned action payloads before they cross the executor
+ * boundary. The same redaction rules as ResourceRef schema hints apply, but
+ * arrays are preserved as bounded lists for action contracts.
+ */
+export function boundedProviderActionResult(value: unknown, maxCharacters: number = 128 * 1024): unknown {
+  const sanitized = sanitizeProviderValue(value, 0);
+  const serialized = JSON.stringify(sanitized);
+  return serialized.length <= maxCharacters ? sanitized : { truncated: true };
+}
+
 const resourceSchemaSensitiveKey =
   /(access[_-]?token|refresh[_-]?token|authorization|cookie|credential|password|secret|session[_-]?token|security[_-]?token|token)/iu;
 
@@ -779,6 +790,22 @@ function sanitizeResourceSchemaChild(value: unknown, depth: number): unknown {
   if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
   if (Array.isArray(value)) return value.slice(0, 8).map((item) => sanitizeResourceSchemaChild(item, depth + 1));
   if (value && typeof value === "object") return sanitizeResourceSchemaValue(value, depth);
+  return undefined;
+}
+
+function sanitizeProviderValue(value: unknown, depth: number): unknown {
+  if (depth > 3) return undefined;
+  if (typeof value === "string") return value.length > 4096 ? `${value.slice(0, 4096)}[truncated]` : value;
+  if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
+  if (Array.isArray(value)) return value.slice(0, 100).map((item) => sanitizeProviderValue(item, depth + 1));
+  if (value && typeof value === "object") {
+    const output: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value).slice(0, 64)) {
+      if (resourceSchemaSensitiveKey.test(key)) continue;
+      output[key] = sanitizeProviderValue(child, depth + 1);
+    }
+    return output;
+  }
   return undefined;
 }
 

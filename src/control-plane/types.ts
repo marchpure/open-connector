@@ -58,6 +58,7 @@ export interface ConnectionLeaseClaims {
   invocationId: string;
   audience: string;
   connectionIds: string[];
+  connectionRevisions?: Record<string, number>;
   allowedActions: string[];
   issuedAt: string;
   expiresAt: string;

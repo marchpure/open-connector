@@ -211,6 +211,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     try {
       runtime.leases.verify(leaseToken, principalOf(context), {
         connectionId,
+        connectionRevision: connection.revision,
         actionId: `${connection.service}.discover_resources`,
         invocationId,
         audience,
@@ -366,8 +367,8 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     const body = await readJsonBody(context);
     const connectionId = context.req.param("connectionId");
     const runtime = tenantRuntime(options, principalOf(context));
-    const owned = (await runtime.records()).some((record) => record.id === connectionId && record.status !== "revoked");
-    if (!owned) {
+    const connection = runtime.connections.visibleRecord(connectionId);
+    if (!connection) {
       return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
     }
     const requestedActions = requiredStringArray(body.allowedActions);
@@ -382,6 +383,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     try {
       const issued = leases.issue(principalOf(context), {
         connectionIds: [connectionId],
+        connectionRevisions: { [connectionId]: connection.revision },
         allowedActions: requestedActions,
         invocationId: requiredString(body.invocationId),
         audience: requiredString(body.audience),
@@ -434,6 +436,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     try {
       const claims = runtime.leases.verify(leaseToken, principalOf(context), {
         connectionId: selected.id,
+        connectionRevision: selected.revision,
         actionId,
         invocationId,
         audience,

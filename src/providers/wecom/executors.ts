@@ -9,6 +9,7 @@ import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import { optionalBoolean, optionalRecord, optionalString } from "../../core/cast.ts";
 import {
   boundedProviderResourceSchema,
+  boundedProviderActionResult,
   defineProviderExecutors,
   ProviderRequestError,
   readProviderJsonBody,
@@ -29,7 +30,7 @@ export const wecomActionHandlers: ProviderActionHandlers<"wecom", WeComHandler> 
   },
   list_departments: async (_input, context) => {
     const payload = await api(context, "/cgi-bin/department/list");
-    return Array.isArray(payload.department) ? payload.department : [];
+    return boundedProviderItems(payload.department, 500);
   },
   list_users: async (input, context) => {
     const departmentId = optionalString(input.departmentId) ?? optionalString(context.values.departmentId) ?? "1";
@@ -37,12 +38,12 @@ export const wecomActionHandlers: ProviderActionHandlers<"wecom", WeComHandler> 
       department_id: departmentId,
       fetch_child: optionalBoolean(input.fetchChild) === true ? "1" : "0",
     });
-    const items = Array.isArray(payload.userlist) ? payload.userlist : [];
-    return { items: items.slice(0, 1000), total: items.length };
+    const items = boundedProviderItems(payload.userlist, 1000);
+    return { items, total: items.length };
   },
   get_group_chat: async (input, context) => {
     const chatId = required(input.chatId, "chatId");
-    return api(context, "/cgi-bin/appchat/get", { chatid: chatId });
+    return boundedProviderActionResult(await api(context, "/cgi-bin/appchat/get", { chatid: chatId }));
   },
 };
 
@@ -56,6 +57,14 @@ export const executors: ProviderExecutors = defineProviderExecutors<WeComContext
     return { values: credential.values, fetcher, signal: context.signal };
   },
 });
+
+function boundedProviderItems(value: unknown, maxItems: number): Array<Record<string, unknown>> {
+  return (Array.isArray(value) ? value : [])
+    .slice(0, maxItems)
+    .map((item) => optionalRecord(item))
+    .filter((item): item is Record<string, unknown> => item !== undefined)
+    .map((item) => boundedProviderResourceSchema(item));
+}
 
 export const credentialValidators: CredentialValidators = {
   async customCredential(input, { fetcher, signal }): Promise<CredentialValidationResult> {

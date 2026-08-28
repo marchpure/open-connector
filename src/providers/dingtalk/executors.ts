@@ -9,6 +9,7 @@ import type { OAuthProviderContext, ProviderActionHandlers } from "../provider-r
 import { compactObject, optionalInteger, optionalRecord, optionalString } from "../../core/cast.ts";
 import {
   boundedProviderResourceSchema,
+  boundedProviderActionResult,
   defineOAuthProviderExecutors,
   ProviderRequestError,
   readProviderJsonBody,
@@ -18,9 +19,12 @@ const service = "dingtalk";
 type DingTalkHandler = (input: Record<string, unknown>, context: OAuthProviderContext) => Promise<unknown>;
 
 export const dingtalkActionHandlers: ProviderActionHandlers<"dingtalk", DingTalkHandler> = {
-  get_current_user: (_input, context) => request(context, "/v1.0/contact/users/me"),
-  get_user: (input, context) =>
-    request(context, `/v1.0/contact/users/${encodeURIComponent(required(input.userId, "userId"))}`),
+  get_current_user: async (_input, context) =>
+    boundedProviderActionResult(await request(context, "/v1.0/contact/users/me")),
+  get_user: async (input, context) =>
+    boundedProviderActionResult(
+      await request(context, `/v1.0/contact/users/${encodeURIComponent(required(input.userId, "userId"))}`),
+    ),
   search_users: async (input, context) => {
     const payload = await request(
       context,
@@ -34,7 +38,10 @@ export const dingtalkActionHandlers: ProviderActionHandlers<"dingtalk", DingTalk
     );
     const record = optionalRecord(payload);
     return {
-      items: Array.isArray(record?.users) ? record.users : Array.isArray(record?.list) ? record.list : [],
+      items: boundedProviderItems(
+        Array.isArray(record?.users) ? record.users : Array.isArray(record?.list) ? record.list : [],
+        100,
+      ),
       nextCursor: optionalString(record?.nextCursor),
       hasMore: record?.hasMore === true,
     };
@@ -47,7 +54,10 @@ export const dingtalkActionHandlers: ProviderActionHandlers<"dingtalk", DingTalk
     const payload = await request(context, `/v1.0/contact/departments?${query}`);
     const record = optionalRecord(payload);
     return {
-      items: Array.isArray(record?.departments) ? record.departments : Array.isArray(record?.list) ? record.list : [],
+      items: boundedProviderItems(
+        Array.isArray(record?.departments) ? record.departments : Array.isArray(record?.list) ? record.list : [],
+        100,
+      ),
       nextCursor: optionalString(record?.nextCursor),
       hasMore: record?.hasMore === true,
     };
@@ -55,6 +65,14 @@ export const dingtalkActionHandlers: ProviderActionHandlers<"dingtalk", DingTalk
 };
 
 export const executors: ProviderExecutors = defineOAuthProviderExecutors(service, dingtalkActionHandlers);
+
+function boundedProviderItems(value: unknown[], maxItems: number): Array<Record<string, unknown>> {
+  return value
+    .slice(0, maxItems)
+    .map((item) => optionalRecord(item))
+    .filter((item): item is Record<string, unknown> => item !== undefined)
+    .map((item) => boundedProviderResourceSchema(item));
+}
 
 export async function discoverResources(
   context: ExecutionContext,
