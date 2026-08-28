@@ -8,6 +8,8 @@ const service = "aws_s3";
 const regionField = s.nonEmptyString(
   "The AWS region, for example `us-east-1`. Connections can omit it on each call to reuse the connected default region.",
 );
+const endpointField = s.string("Optional HTTPS-compatible S3 endpoint.", { minLength: 1 });
+const prefixField = s.string("Optional object-key prefix allowlist.", { minLength: 1 });
 const bucketNameField = s.nonEmptyString("The S3 bucket name.");
 const objectKeyField = s.nonEmptyString("The S3 object key.");
 const maxBucketKeysField = s.integer("The maximum number of buckets to return.", { minimum: 1, maximum: 10000 });
@@ -78,6 +80,8 @@ const putObjectInputSchema = s.object(
     bucket: bucketNameField,
     objectKey: objectKeyField,
     region: regionField,
+    endpoint: endpointField,
+    prefix: prefixField,
     sourceUrl: s.url("A public URL that the connector can fetch and upload to S3."),
     contentText: s.string("The plain-text content to upload."),
     contentBase64: s.string("Base64-encoded binary content to upload."),
@@ -114,11 +118,12 @@ export const awsActions: ActionDefinition[] = [
       "The input payload for this action.",
       {
         region: regionField,
+        endpoint: endpointField,
         prefix: s.string("Filter buckets by name prefix."),
         marker: s.string("Continue listing buckets from the continuation token returned by S3."),
         maxKeys: maxBucketKeysField,
       },
-      { optional: ["region", "prefix", "marker", "maxKeys"] },
+      { optional: ["region", "endpoint", "prefix", "marker", "maxKeys"] },
     ),
     outputSchema: s.object("The output payload for this action.", {
       buckets: s.array("The returned bucket summaries.", bucketSchema),
@@ -135,6 +140,7 @@ export const awsActions: ActionDefinition[] = [
       {
         bucket: bucketNameField,
         region: regionField,
+        endpoint: endpointField,
         prefix: s.string("Filter objects by key prefix."),
         delimiter: s.string("Group keys by this delimiter, for example `/` to emulate folders."),
         continuationToken: s.string("Continue listing from the continuation token returned by S3."),
@@ -143,7 +149,16 @@ export const awsActions: ActionDefinition[] = [
         maxKeys: maxObjectKeysField,
       },
       {
-        optional: ["region", "prefix", "delimiter", "continuationToken", "startAfter", "fetchOwner", "maxKeys"],
+        optional: [
+          "region",
+          "endpoint",
+          "prefix",
+          "delimiter",
+          "continuationToken",
+          "startAfter",
+          "fetchOwner",
+          "maxKeys",
+        ],
       },
     ),
     outputSchema: s.object("The output payload for this action.", {
@@ -166,9 +181,10 @@ export const awsActions: ActionDefinition[] = [
         bucket: bucketNameField,
         objectKey: objectKeyField,
         region: regionField,
+        endpoint: endpointField,
         versionId: s.string("The optional object version ID."),
       },
-      { optional: ["bucket", "region", "versionId"] },
+      { optional: ["bucket", "region", "endpoint", "versionId"] },
     ),
     outputSchema: s.object("The output payload for this action.", {
       object: objectMetadataSchema,
@@ -183,10 +199,11 @@ export const awsActions: ActionDefinition[] = [
         bucket: bucketNameField,
         objectKey: s.nonEmptyString("The complete S3 object key. Slashes are preserved as key delimiters."),
         region: regionField,
+        endpoint: endpointField,
         versionId: s.string("The optional object version ID."),
         fileName: s.nonEmptyString("An optional filename override for the local transit file."),
       },
-      { optional: ["bucket", "region", "versionId", "fileName"] },
+      { optional: ["bucket", "region", "endpoint", "versionId", "fileName"] },
     ),
     outputSchema: downloadedObjectSchema,
   }),
@@ -210,9 +227,10 @@ export const awsActions: ActionDefinition[] = [
         bucket: bucketNameField,
         objectKey: objectKeyField,
         region: regionField,
+        endpoint: endpointField,
         versionId: s.string("The optional object version ID."),
       },
-      { optional: ["bucket", "region", "versionId"] },
+      { optional: ["bucket", "region", "endpoint", "versionId"] },
     ),
     outputSchema: s.object("The output payload for this action.", {
       bucket: s.string("The bucket that contained the deleted object."),
@@ -229,6 +247,7 @@ export const awsActions: ActionDefinition[] = [
         bucket: bucketNameField,
         objectKey: objectKeyField,
         region: regionField,
+        endpoint: endpointField,
         method: s.stringEnum("The HTTP method that the signed URL should allow.", ["GET", "PUT", "DELETE"]),
         expiresSeconds: s.integer("How long the signed URL remains valid, in seconds.", {
           minimum: 1,
@@ -236,7 +255,7 @@ export const awsActions: ActionDefinition[] = [
         }),
         contentType: s.string("The Content-Type that must be used with the signed request."),
       },
-      { optional: ["bucket", "region", "method", "expiresSeconds", "contentType"] },
+      { optional: ["bucket", "region", "endpoint", "method", "expiresSeconds", "contentType"] },
     ),
     outputSchema: s.object("The output payload for this action.", {
       bucket: s.string("The bucket used to build the signed URL."),

@@ -80,6 +80,42 @@ function readEnablement(value: string | undefined): EnablementEntry[] {
         tier: "beta",
         connectorDefinitionVersion: "1.0.0",
         owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/w2-office-storage-handoff.json#/connections/0",
+      },
+      {
+        service: "dingtalk",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/w2-office-storage-handoff.json#/connections/1",
+      },
+      {
+        service: "wecom",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/w2-office-storage-handoff.json#/connections/2",
+      },
+      {
+        service: "aws_s3",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/w2-office-storage-handoff.json#/connections/3",
+      },
+      {
+        service: "aliyun_oss",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/w2-office-storage-handoff.json#/connections/4",
+      },
+      {
+        service: "volcengine_tos",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/w2-office-storage-handoff.json#/connections/5",
       },
     ];
   }

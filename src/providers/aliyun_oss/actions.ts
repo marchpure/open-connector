@@ -11,6 +11,7 @@ const endpointSchema = s.string(
 );
 const bucketNameSchema = s.string("The OSS bucket name.", { minLength: 1 });
 const objectKeySchema = s.string("The OSS object key.", { minLength: 1 });
+const prefixSchema = s.string("Optional object-key prefix allowlist.", { minLength: 1 });
 const maxKeysSchema = s.integer("The maximum number of items to return.", { minimum: 1, maximum: 1000 });
 
 const ownerSchema = s.object("The bucket or object owner.", {
@@ -130,9 +131,10 @@ export const aliyunOssActions: ActionDefinition[] = [
         bucket: bucketNameSchema,
         objectKey: objectKeySchema,
         endpoint: endpointSchema,
+        prefix: prefixSchema,
         versionId: s.string("The optional object version ID."),
       },
-      { optional: ["bucket", "endpoint", "versionId"] },
+      { optional: ["bucket", "endpoint", "prefix", "versionId"] },
     ),
     outputSchema: s.object("The output payload for this action.", {
       object: { ...objectMetadataSchema, description: "The normalized OSS object metadata." },
@@ -147,10 +149,11 @@ export const aliyunOssActions: ActionDefinition[] = [
         bucket: bucketNameSchema,
         objectKey: s.nonEmptyString("The complete OSS object key. Slashes are preserved as key delimiters."),
         endpoint: endpointSchema,
+        prefix: prefixSchema,
         versionId: s.string("The optional object version ID."),
         fileName: s.nonEmptyString("An optional filename override for the local transit file."),
       },
-      { optional: ["bucket", "endpoint", "versionId", "fileName"] },
+      { optional: ["bucket", "endpoint", "prefix", "versionId", "fileName"] },
     ),
     outputSchema: downloadedObjectSchema,
   }),
@@ -164,6 +167,7 @@ export const aliyunOssActions: ActionDefinition[] = [
           bucket: bucketNameSchema,
           objectKey: objectKeySchema,
           endpoint: endpointSchema,
+          prefix: prefixSchema,
           sourceUrl: s.url("A public URL that the connector can fetch and upload to OSS."),
           contentText: s.string("The plain-text content to upload."),
           contentBase64: s.string("Base64-encoded binary content to upload."),
@@ -178,6 +182,7 @@ export const aliyunOssActions: ActionDefinition[] = [
           optional: [
             "bucket",
             "endpoint",
+            "prefix",
             "sourceUrl",
             "contentText",
             "contentBase64",
@@ -206,9 +211,10 @@ export const aliyunOssActions: ActionDefinition[] = [
         bucket: bucketNameSchema,
         objectKey: objectKeySchema,
         endpoint: endpointSchema,
+        prefix: prefixSchema,
         versionId: s.string("The optional object version ID."),
       },
-      { optional: ["bucket", "endpoint", "versionId"] },
+      { optional: ["bucket", "endpoint", "prefix", "versionId"] },
     ),
     outputSchema: s.object("The output payload for this action.", {
       bucket: s.string("The bucket that contained the deleted object."),
@@ -225,6 +231,7 @@ export const aliyunOssActions: ActionDefinition[] = [
         bucket: bucketNameSchema,
         objectKey: objectKeySchema,
         endpoint: endpointSchema,
+        prefix: prefixSchema,
         method: s.stringEnum("The HTTP method that the signed URL should allow.", ["GET", "PUT", "DELETE"]),
         expiresSeconds: s.integer("How long the signed URL remains valid, in seconds.", {
           minimum: 1,
@@ -232,7 +239,7 @@ export const aliyunOssActions: ActionDefinition[] = [
         }),
         contentType: s.string("The Content-Type that must be used with the signed request."),
       },
-      { optional: ["bucket", "endpoint", "method", "expiresSeconds", "contentType"] },
+      { optional: ["bucket", "endpoint", "prefix", "method", "expiresSeconds", "contentType"] },
     ),
     outputSchema: s.object("The output payload for this action.", {
       bucket: s.string("The bucket used to build the signed URL."),
