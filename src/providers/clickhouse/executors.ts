@@ -7,7 +7,7 @@ import type {
 import type { ClickhouseActionName } from "./actions.ts";
 import type { ClickhouseActionContext } from "./runtime.ts";
 
-import { mapDatabaseError } from "../../core/database/runtime.ts";
+import { mapDatabaseError, providerRequestError } from "../../core/database/runtime.ts";
 import { isPrivateNetworkAccessAllowed } from "../../core/request.ts";
 import { createProviderFetch, defineProviderExecutors, requireCustomCredential } from "../provider-runtime.ts";
 import { clickhouseActionHandlers, createClickhouseContext, validateClickhouseCredential } from "./runtime.ts";
@@ -27,9 +27,13 @@ export const executors: ProviderExecutors = defineProviderExecutors<ClickhouseAc
 });
 
 export const credentialValidators: CredentialValidators = {
-  customCredential(input, { fetcher, signal }): Promise<CredentialValidationResult> {
+  async customCredential(input, { fetcher, signal }): Promise<CredentialValidationResult> {
     const guardedFetcher = createProviderFetch({ fetch: fetcher, allowPrivateNetwork: isPrivateNetworkAccessAllowed });
-    return validateClickhouseCredential(input.values, guardedFetcher, signal);
+    try {
+      return await validateClickhouseCredential(input.values, guardedFetcher, signal);
+    } catch (error) {
+      throw providerRequestError(error);
+    }
   },
 };
 

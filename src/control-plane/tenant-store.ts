@@ -14,6 +14,7 @@ import type { ConnectionRecord, TenantPrincipal } from "./types.ts";
 import type { DatabaseSync } from "node:sqlite";
 
 import { randomUUID } from "node:crypto";
+import { ConnectionError } from "../connection-service.ts";
 import { redactSecrets, safeConnectionProfile } from "./redaction.ts";
 
 export class TenantConnectionStore implements IConnectionStore {
@@ -104,18 +105,21 @@ export class TenantConnectionStore implements IConnectionStore {
   }
 
   async set(service: string, connectionName: string, credential: ResolvedCredential): Promise<StoredConnection> {
+    const existingRow = this.database
+      .prepare(
+        `select id, owner_id, status, revision
+           from tenant_connections
+          where tenant_id=? and workspace_id=? and service=? and connection_name=?`,
+      )
+      .get(this.principal.tenantId, this.principal.workspaceId, service, connectionName) as
+      | { id?: unknown; owner_id?: unknown; status?: unknown; revision?: unknown }
+      | undefined;
+    if (existingRow && String(existingRow.owner_id) !== this.principal.ownerId) {
+      throw new ConnectionError("connection_forbidden", "Only the connection owner may replace this connection.");
+    }
     const existing = await this.get(service, connectionName);
     const now = new Date().toISOString();
-    const revoked = existing
-      ? undefined
-      : (this.database
-          .prepare(
-            `select id, revision from tenant_connections
-              where tenant_id=? and workspace_id=? and service=? and connection_name=?`,
-          )
-          .get(this.principal.tenantId, this.principal.workspaceId, service, connectionName) as
-          | { id?: unknown; revision?: unknown }
-          | undefined);
+    const revoked = existing ? undefined : existingRow;
     const id = existing?.id ?? (revoked?.id ? String(revoked.id) : randomUUID());
     const revision = existing ? Number(existing.revision) + 1 : Number(revoked?.revision ?? 0) + 1;
     const profile =
