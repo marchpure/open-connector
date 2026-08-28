@@ -1,6 +1,7 @@
 import type { TransitFileWriter } from "../../../core/types.ts";
 
 import { optionalRecord, optionalString } from "../../../core/cast.ts";
+import { readBoundedResponseBytes } from "../../../core/request.ts";
 import { createProviderTimeout, ProviderRequestError, providerUserAgent } from "../../provider-runtime.ts";
 
 export type FeishuIdentity = "user" | "tenant";
@@ -59,6 +60,8 @@ interface FeishuEnvelope {
 
 const feishuOpenBaseUrl = "https://open.feishu.cn/open-apis";
 const feishuRequestTimeoutMs = 30_000;
+const feishuJsonResponseMaxBytes = 2 * 1024 * 1024;
+const feishuErrorResponseMaxBytes = 64 * 1024;
 const feishuRateLimitedErrorCodes = new Set([11232, 11233, 11247, 230020, 230047, 99991400, 1000004, 1000005]);
 const feishuCredentialExpiredErrorCodes = new Set([
   4001, 10005, 10012, 10013, 10014, 10015, 20002, 20005, 20013, 20014, 99991543, 99991661, 99991663, 99991664, 99991665,
@@ -84,7 +87,7 @@ export function createFeishuJsonRequest(input: CreateFeishuJsonRequestInput): Fe
         body: request.body == null ? undefined : JSON.stringify(request.body),
         signal: timeout.signal,
       });
-      const rawText = await response.text();
+      const rawText = await readFeishuResponseText(response, "Feishu JSON response", timeout.signal);
       const envelope = readFeishuEnvelope(rawText);
       const code = typeof envelope.code === "number" ? envelope.code : 0;
       if (!response.ok || code !== 0) {
@@ -123,7 +126,7 @@ export async function requestFeishuMultipart(input: FeishuMultipartRequestInput)
       body: input.body,
       signal: timeout.signal,
     });
-    const rawText = await response.text();
+    const rawText = await readFeishuResponseText(response, "Feishu multipart response", timeout.signal);
     const envelope = readFeishuEnvelope(rawText);
     const code = typeof envelope.code === "number" ? envelope.code : 0;
     if (!response.ok || code !== 0) {
@@ -164,7 +167,12 @@ export async function withFeishuRawResponse<T>(
       signal: timeout.signal,
     });
     if (!response.ok) {
-      const rawText = await response.text();
+      const rawText = await readFeishuResponseText(
+        response,
+        "Feishu error response",
+        timeout.signal,
+        feishuErrorResponseMaxBytes,
+      );
       let envelope: FeishuEnvelope = {};
       try {
         envelope = readFeishuEnvelope(rawText);
@@ -190,6 +198,21 @@ export async function withFeishuRawResponse<T>(
   } finally {
     timeout.cleanup();
   }
+}
+
+async function readFeishuResponseText(
+  response: Response,
+  fieldName: string,
+  signal: AbortSignal | undefined,
+  maxBytes: number = feishuJsonResponseMaxBytes,
+): Promise<string> {
+  const bytes = await readBoundedResponseBytes(response, {
+    maxBytes,
+    fieldName,
+    signal,
+    createError: (message) => new ProviderRequestError(413, message),
+  });
+  return new TextDecoder().decode(bytes);
 }
 
 function appendQuery(url: URL, query: FeishuJsonRequestInput["query"]) {

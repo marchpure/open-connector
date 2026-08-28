@@ -712,6 +712,9 @@ export function createOpenApiDocument(
             caller: jsonSchema.string({
               description: "Runtime entry point that executed the run.",
             }),
+            invocationId: jsonSchema.string({
+              description: "Caller invocation identifier bound to the connection lease, when present.",
+            }),
             startedAt: jsonSchema.string({ description: "Start timestamp." }),
             completedAt: jsonSchema.string({ description: "Completion timestamp." }),
             durationMs: jsonSchema.number({ description: "Run duration in milliseconds." }),

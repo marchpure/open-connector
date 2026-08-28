@@ -561,6 +561,7 @@ function rowToRun(row: Record<string, unknown>): RunLog {
     service: String(row.action_id).split(".")[0] ?? "",
     actionId: String(row.action_id),
     caller: "http",
+    invocationId: String(row.invocation_id) || undefined,
     startedAt: String(row.started_at),
     completedAt: String(row.completed_at),
     durationMs: new Date(String(row.completed_at)).getTime() - new Date(String(row.started_at)).getTime(),

@@ -100,51 +100,215 @@ export async function discoverResources(
     url?: string;
   }> = [];
   const seen = new Set<string>();
-  let pageToken: string | undefined;
-
-  // Discovery is deliberately bounded. The caller can use the regular
-  // search_documents action for an explicit continuation token.
-  for (let page = 0; page < 5; page += 1) {
-    const data = await request({
-      method: "POST",
-      path: "/search/v2/doc_wiki/search",
-      body: {
-        query: "",
-        doc_filter: {},
-        wiki_filter: {},
-        page_size: 20,
-        page_token: pageToken,
-      },
-    });
-    const results = Array.isArray(data.res_units) ? data.res_units : [];
-    for (const item of results) {
-      const record = optionalRecord(item);
-      if (!record) continue;
-      const resourceId =
-        optionalString(record.document_id) ??
+  const add = (record: Record<string, unknown>, defaults: { mimeType?: string } = {}) => {
+    if (resources.length >= 500) return;
+    const resourceId =
+      optionalString(record.document_id) ??
+      optionalString(record.obj_token) ??
+      optionalString(record.node_token) ??
+      optionalString(record.file_token) ??
+      optionalString(record.chat_id) ??
+      optionalString(record.minute_token) ??
+      optionalString(record.token) ??
+      optionalString(record.id) ??
+      optionalString(record.space_id);
+    if (!resourceId || seen.has(resourceId)) return;
+    seen.add(resourceId);
+    resources.push({
+      sourceType: "feishu",
+      resourceId,
+      resourceToken:
         optionalString(record.obj_token) ??
         optionalString(record.node_token) ??
-        optionalString(record.token) ??
-        optionalString(record.id);
-      if (!resourceId || seen.has(resourceId)) continue;
-      seen.add(resourceId);
-      resources.push({
-        sourceType: "feishu",
-        resourceId,
-        resourceToken:
-          optionalString(record.obj_token) ?? optionalString(record.node_token) ?? optionalString(record.token),
-        title: optionalString(record.title) ?? optionalString(record.name),
-        mimeType: optionalString(record.obj_type) ?? optionalString(record.type),
-        schema: record,
-        url: optionalString(record.url),
+        optionalString(record.file_token) ??
+        optionalString(record.chat_id) ??
+        optionalString(record.minute_token) ??
+        optionalString(record.token),
+      title: optionalString(record.title) ?? optionalString(record.name) ?? optionalString(record.topic),
+      mimeType:
+        optionalString(record.mime_type) ??
+        optionalString(record.mimeType) ??
+        optionalString(record.obj_type) ??
+        defaults.mimeType ??
+        optionalString(record.type),
+      schema: record,
+      url: safeFeishuResourceUrl(record.url),
+    });
+  };
+
+  // Search is Feishu's visibility-aware cross-product index. It returns
+  // documents, Wiki nodes, Drive files, Sheets, Bases, and Slides according
+  // to the authorized user's current visibility and granted scopes.
+  await optionalDiscovery(async () => {
+    let pageToken: string | undefined;
+    for (let page = 0; page < 5; page += 1) {
+      const data = await request({
+        method: "POST",
+        path: "/search/v2/doc_wiki/search",
+        body: {
+          query: "",
+          doc_filter: {},
+          wiki_filter: {},
+          page_size: 20,
+          page_token: pageToken,
+        },
       });
+      for (const item of Array.isArray(data.res_units) ? data.res_units : []) {
+        const record = optionalRecord(item);
+        if (record) add(record);
+      }
+      if (data.has_more !== true) break;
+      const next = optionalString(data.page_token);
+      if (!next || next === pageToken) break;
+      pageToken = next;
+    }
+  });
+
+  // Drive listing covers files and folders which are not returned by the
+  // cross-product search index. Only the caller's root is listed and the
+  // continuation budget is intentionally small.
+  await optionalDiscovery(async () => {
+    let pageToken: string | undefined;
+    for (let page = 0; page < 3; page += 1) {
+      const data = await request({
+        path: "/drive/v1/files",
+        query: { page_size: 100, page_token: pageToken },
+      });
+      for (const item of Array.isArray(data.files) ? data.files : Array.isArray(data.items) ? data.items : []) {
+        const record = optionalRecord(item);
+        if (record) add(record, { mimeType: "application/vnd.feishu.drive-resource" });
+      }
+      if (data.has_more !== true) break;
+      const next = optionalString(data.page_token) ?? optionalString(data.next_page_token);
+      if (!next || next === pageToken) break;
+      pageToken = next;
+    }
+  });
+
+  // Wiki spaces and nodes have a dedicated visibility-aware API. The nested
+  // traversal is bounded so a large knowledge base cannot become an agent
+  // context dump.
+  await optionalDiscovery(async () => {
+    let spacePageToken: string | undefined;
+    for (let page = 0; page < 2; page += 1) {
+      const data = await request({
+        path: "/wiki/v2/spaces",
+        query: { page_size: 50, page_token: spacePageToken },
+      });
+      const spaces = Array.isArray(data.items) ? data.items : [];
+      for (const item of spaces.slice(0, 20)) {
+        const space = optionalRecord(item);
+        if (!space) continue;
+        add(space, { mimeType: "application/vnd.feishu.wiki-space" });
+        const spaceId = optionalString(space.space_id) ?? optionalString(space.id);
+        if (!spaceId) continue;
+        await collectFeishuWikiNodes(request, spaceId, add);
+      }
+      if (data.has_more !== true) break;
+      const next = optionalString(data.page_token);
+      if (!next || next === spacePageToken) break;
+      spacePageToken = next;
+    }
+  });
+
+  // Chat listing is the official user-visible group discovery surface. The
+  // message history itself is never fetched during discovery.
+  await optionalDiscovery(async () => {
+    let pageToken: string | undefined;
+    for (let page = 0; page < 3; page += 1) {
+      const data = await request({
+        path: "/im/v1/chats",
+        query: { page_size: 100, page_token: pageToken },
+      });
+      for (const item of Array.isArray(data.items) ? data.items : []) {
+        const record = optionalRecord(item);
+        if (record) add(record, { mimeType: "application/vnd.feishu.chat" });
+      }
+      if (data.has_more !== true) break;
+      const next = optionalString(data.page_token);
+      if (!next || next === pageToken) break;
+      pageToken = next;
+    }
+  });
+
+  // Minutes search requires a query or owner filter. Restrict it to the
+  // authorized user's own records, which is an explicit upstream visibility
+  // boundary rather than an unbounded guessed-token read.
+  await optionalDiscovery(async () => {
+    const user = await fetchFeishuUserInfo({
+      accessToken: credential.accessToken,
+      fetcher,
+      signal: context.signal,
+    });
+    const openId = optionalString(user.open_id);
+    if (!openId) return;
+    let pageToken: string | undefined;
+    for (let page = 0; page < 3; page += 1) {
+      const data = await request({
+        method: "POST",
+        path: "/minutes/v1/minutes/search",
+        query: { page_size: 50, page_token: pageToken },
+        body: { filter: { owner_ids: [openId] } },
+      });
+      for (const item of Array.isArray(data.items) ? data.items : []) {
+        const record = optionalRecord(item);
+        if (record) add(record, { mimeType: "application/vnd.feishu.minutes" });
+      }
+      if (data.has_more !== true) break;
+      const next = optionalString(data.page_token);
+      if (!next || next === pageToken) break;
+      pageToken = next;
+    }
+  });
+  return resources;
+}
+
+async function collectFeishuWikiNodes(
+  request: ReturnType<typeof createFeishuJsonRequest>,
+  spaceId: string,
+  add: (record: Record<string, unknown>, defaults?: { mimeType?: string }) => void,
+): Promise<void> {
+  let pageToken: string | undefined;
+  for (let page = 0; page < 2; page += 1) {
+    const data = await request({
+      path: `/wiki/v2/spaces/${encodeURIComponent(spaceId)}/nodes`,
+      query: { page_size: 100, page_token: pageToken },
+    });
+    for (const item of Array.isArray(data.items) ? data.items : []) {
+      const record = optionalRecord(item);
+      if (record) add(record, { mimeType: "application/vnd.feishu.wiki-node" });
     }
     if (data.has_more !== true) break;
     const next = optionalString(data.page_token);
     if (!next || next === pageToken) break;
     pageToken = next;
   }
-  return resources;
+}
+
+async function optionalDiscovery(operation: () => Promise<void>): Promise<void> {
+  try {
+    await operation();
+  } catch (error) {
+    // A user token may legitimately omit one product scope. Preserve the
+    // visibility of the other products, while expired/invalid credentials
+    // still fail the complete discovery operation.
+    if (error instanceof ProviderRequestError && (error.status === 403 || error.status === 404)) return;
+    throw error;
+  }
+}
+
+function safeFeishuResourceUrl(value: unknown): string | undefined {
+  const raw = optionalString(value);
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return undefined;
+  }
 }
 
 function createFeishuSharedHandlers(

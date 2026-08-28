@@ -25,6 +25,7 @@ export interface RunActionInput {
   invocationId?: string;
   input: unknown;
   caller: RunLogCaller;
+  invocationId?: string;
   connectionName?: string;
   policy?: ActionPolicySnapshot;
   runtimeTokenId?: string;
@@ -140,6 +141,7 @@ export class ActionRunner {
       service: action.service,
       actionId: input.actionId,
       caller: input.caller,
+      invocationId: input.invocationId,
       startedAt,
       completedAt: new Date(completedAtMs).toISOString(),
       durationMs,
