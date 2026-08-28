@@ -221,6 +221,26 @@ describe("Alibaba Cloud OSS download_object", () => {
   });
 });
 
+describe("Alibaba Cloud OSS bucket authorization and defaults", () => {
+  it("uses the configured bucket when list_objects omits bucket", async () => {
+    const requests = stubResponses([
+      new Response(
+        "<ListBucketResult><Contents><Key>report.pdf</Key><LastModified>2024-01-01T00:00:00Z</LastModified><ETag>&quot;etag-1&quot;</ETag><Size>12</Size></Contents><IsTruncated>false</IsTruncated><KeyCount>1</KeyCount></ListBucketResult>",
+      ),
+    ]);
+
+    const result = await executeListObjects({});
+
+    expect(result).toMatchObject({
+      ok: true,
+      output: {
+        objects: [expect.objectContaining({ name: "report.pdf" })],
+      },
+    });
+    expect(requests[0]?.url.hostname).toBe("documents.oss-cn-hangzhou.aliyuncs.com");
+  });
+});
+
 describe("Alibaba Cloud OSS put_object sourceUrl", () => {
   it("rejects a cloud-metadata sourceUrl before any outbound fetch", async () => {
     const fetch = vi.fn();
@@ -329,8 +349,16 @@ async function executePut(input: Record<string, unknown>) {
   return executeAction("aliyun_oss.put_object", input);
 }
 
+async function executeListObjects(input: Record<string, unknown>) {
+  return executeAction("aliyun_oss.list_objects", input);
+}
+
 async function executeAction(
-  action: "aliyun_oss.download_object" | "aliyun_oss.put_object" | "aliyun_oss.generate_presigned_url",
+  action:
+    | "aliyun_oss.download_object"
+    | "aliyun_oss.put_object"
+    | "aliyun_oss.generate_presigned_url"
+    | "aliyun_oss.list_objects",
   input: Record<string, unknown>,
   transitFiles?: TransitFileStore,
   prefix?: string,

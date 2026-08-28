@@ -1,12 +1,12 @@
 {
   "status": "CONNECTION_W2_FROZEN_WITH_EXTERNAL_BLOCKERS",
-  "recordedAt": "2026-08-28T06:38:00Z",
+  "recordedAt": "2026-08-28T06:50:00Z",
   "baseline": {
     "sourceCommit": "69ad6f8028eaf3a34b706012c72dc3f099a348e2",
     "branch": "feat/connection-expansion-w2-office-storage",
     "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-w2-office-storage",
     "sourceWorktreeUnmodified": true,
-    "implementationCommit": "94eadd6"
+    "implementationCommit": "pending-final-commit"
   },
   "scope": {
     "included": ["feishu", "dingtalk", "wecom", "aws_s3", "aliyun_oss", "volcengine_tos"],
@@ -180,7 +180,8 @@
           "src/providers/aws_s3/actions.ts",
           "src/providers/aws_s3/executors.ts",
           "src/providers/aws_s3/executors.test.ts",
-          "src/providers/office-discovery.test.ts"
+          "src/providers/office-discovery.test.ts",
+          "src/providers/provider-loader.ts"
         ],
         "automated": ["AWS S3 executor and storage discovery tests", "npm run fix-check"],
         "real": "Blocked: no real AWS account closed-loop evidence in this worktree; MinIO/S3-compatible behavior cannot be marked verified."
@@ -223,7 +224,8 @@
           "src/providers/aliyun_oss/actions.ts",
           "src/providers/aliyun_oss/executors.ts",
           "src/providers/aliyun_oss/executors.test.ts",
-          "src/providers/office-discovery.test.ts"
+          "src/providers/office-discovery.test.ts",
+          "src/providers/provider-loader.ts"
         ],
         "automated": ["Alibaba OSS executor and storage discovery tests", "npm run fix-check"],
         "real": "Blocked: no real Alibaba Cloud account closed-loop evidence in this worktree."
@@ -297,8 +299,8 @@
     "passed": [
       "npm run generate:catalog",
       "npm run fix-check",
-      "npm exec vitest run src/core/request.test.ts src/control-plane/server.test.ts src/providers/office-discovery.test.ts src/providers/aws_s3/executors.test.ts src/providers/aliyun_oss/executors.test.ts src/providers/volcengine_tos/executors.test.ts src/control-plane/resource-store.test.ts (7 files, 85 tests passed)",
-      "npm exec vitest run (166 files passed, 1 skipped; 1497 tests passed, 4 skipped)",
+      "npm exec vitest run src/core/request.test.ts src/control-plane/server.test.ts src/providers/office-discovery.test.ts src/providers/aws_s3/executors.test.ts src/providers/aliyun_oss/executors.test.ts src/providers/volcengine_tos/executors.test.ts src/control-plane/resource-store.test.ts (7 files, 89 tests passed)",
+      "npm exec vitest run (166 files passed, 1 skipped; 1502 tests passed, 4 skipped)",
       "npm run build (typecheck passed)",
       "npm audit --audit-level=high (0 vulnerabilities)",
       "npm ls --all --json > artifacts/npm-sbom.json (release-time SBOM; local install reports six extraneous optional WASM packages and no vulnerabilities)",

@@ -330,7 +330,7 @@ export async function discoverResources(
     fetcher,
     signal: context.signal,
   };
-  const result = (await aliyunListBuckets({}, actionContext)) as Record<string, unknown>;
+  const result = (await aliyunListBuckets({ maxKeys: 100 }, actionContext)) as Record<string, unknown>;
   const buckets = Array.isArray(result.buckets) ? result.buckets : [];
   const endpoint = resolveEndpoint({}, actionContext);
   return buckets

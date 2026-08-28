@@ -83,6 +83,25 @@ describe("office provider resource discovery", () => {
     ]);
   });
 
+  it("bounds unconfigured AWS S3 bucket discovery at the provider request", async () => {
+    const credentialWithoutBucket = {
+      ...awsCredential,
+      values: Object.fromEntries(Object.entries(awsCredential.values).filter(([key]) => key !== "bucket")),
+      metadata: { region: "us-east-1" },
+    };
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
+      expect(url.searchParams.get("max-buckets")).toBe("100");
+      return new Response(
+        "<ListAllMyBucketsResult><Buckets><Bucket><Name>visible</Name><CreationDate>2024-01-01</CreationDate></Bucket></Buckets></ListAllMyBucketsResult>",
+        { status: 200, headers: { "content-type": "application/xml" } },
+      );
+    });
+    await expect(discoverAwsS3Resources(contextFor("aws_s3", credentialWithoutBucket), fetcher)).resolves.toEqual([
+      expect.objectContaining({ resourceId: "visible", sourceType: "aws_s3" }),
+    ]);
+  });
+
   it("discovers the configured OSS bucket using the native bucket-info path", async () => {
     const fetcher = vi.fn<typeof fetch>(
       async () =>
@@ -98,6 +117,25 @@ describe("office provider resource discovery", () => {
         mimeType: "application/vnd.aliyun.oss.bucket",
       }),
     ]);
+  });
+
+  it("bounds unconfigured OSS bucket discovery at the provider request", async () => {
+    const credentialWithoutBucket = {
+      ...ossCredential,
+      values: Object.fromEntries(Object.entries(ossCredential.values).filter(([key]) => key !== "bucket")),
+      metadata: { endpoint: "https://oss-cn-hangzhou.aliyuncs.com" },
+    };
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
+      expect(url.searchParams.get("max-keys")).toBe("100");
+      return new Response(
+        "<ListAllMyBucketsResult><Owner><ID>owner-1</ID><DisplayName>Owner</DisplayName></Owner><Buckets><Bucket><Name>visible</Name><Location>oss-cn-hangzhou</Location></Bucket></Buckets></ListAllMyBucketsResult>",
+        { status: 200, headers: { "content-type": "application/xml" } },
+      );
+    });
+    await expect(
+      discoverAliyunOssResources(contextFor("aliyun_oss", credentialWithoutBucket), fetcher),
+    ).resolves.toEqual([expect.objectContaining({ resourceId: "visible", sourceType: "aliyun_oss" })]);
   });
 
   it("discovers and validates the explicitly configured TOS bucket", async () => {

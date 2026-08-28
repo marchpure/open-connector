@@ -217,6 +217,39 @@ describe("AWS S3 download_object", () => {
   });
 });
 
+describe("AWS S3 bucket authorization and defaults", () => {
+  it("uses the configured bucket when list_objects omits bucket", async () => {
+    const requests = stubResponses([
+      new Response(
+        "<ListBucketResult><Contents><Key>report.pdf</Key><LastModified>2024-01-01T00:00:00Z</LastModified><ETag>&quot;etag-1&quot;</ETag><Size>12</Size></Contents><IsTruncated>false</IsTruncated><KeyCount>1</KeyCount></ListBucketResult>",
+      ),
+    ]);
+
+    const result = await executeListObjects({});
+
+    expect(result).toMatchObject({
+      ok: true,
+      output: {
+        objects: [expect.objectContaining({ name: "report.pdf" })],
+      },
+    });
+    expect(requests[0]?.url.hostname).toBe("documents.s3.us-east-1.amazonaws.com");
+  });
+
+  it("rejects an explicit bucket outside the connection allowlist before egress", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+
+    const result = await executeListObjects({ bucket: "other-bucket" });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "authorization_failed", message: "bucket is outside the AWS S3 connection allowlist" },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
 describe("AWS S3 put_object sourceUrl", () => {
   it("rejects a cloud-metadata sourceUrl before any outbound fetch", async () => {
     const fetch = vi.fn();
@@ -292,8 +325,12 @@ async function executePut(input: Record<string, unknown>) {
   return executeAction("aws_s3.put_object", input);
 }
 
+async function executeListObjects(input: Record<string, unknown>) {
+  return executeAction("aws_s3.list_objects", input);
+}
+
 async function executeAction(
-  action: "aws_s3.download_object" | "aws_s3.put_object",
+  action: "aws_s3.download_object" | "aws_s3.put_object" | "aws_s3.list_objects",
   input: Record<string, unknown>,
   transitFiles?: TransitFileStore,
 ) {

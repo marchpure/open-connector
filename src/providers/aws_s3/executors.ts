@@ -237,7 +237,7 @@ export async function discoverResources(
     fetcher,
     signal: context.signal,
   };
-  const result = await awsListBuckets({}, actionContext);
+  const result = await awsListBuckets({ maxKeys: 100 }, actionContext);
   const buckets = Array.isArray(result.buckets) ? result.buckets : [];
   return buckets
     .slice(0, 100)
