@@ -175,7 +175,7 @@ export class OAuthClientConfigService {
   getEffectiveScopes(service: string, config: OAuthClientConfig, actionIds?: string[]): string[] {
     const auth = this.getOAuthDefinition(service);
     const configured = filterDeclaredScopes(config.requestedScopes, auth.scopes);
-    if (actionIds === undefined) return configured ?? [...auth.scopes];
+    if (actionIds === undefined) return configured ?? defaultOAuthScopes(service, auth);
     if (!Array.isArray(actionIds) || actionIds.length === 0) {
       throw new OAuthClientConfigError("invalid_input", "actionIds must contain at least one action.");
     }
@@ -235,7 +235,7 @@ export class OAuthClientConfigService {
       expectedRedirectUri: this.expectedRedirectUri(service),
       auth,
       requestedScopes: config?.requestedScopes ?? null,
-      effectiveScopes: filterDeclaredScopes(config?.requestedScopes, auth.scopes) ?? [...auth.scopes],
+      effectiveScopes: filterDeclaredScopes(config?.requestedScopes, auth.scopes) ?? defaultOAuthScopes(service, auth),
       extra: config?.extra ?? {},
     };
   }
@@ -346,6 +346,22 @@ function normalizeRequestedScopes(
     );
   }
 
+  return normalized;
+}
+
+function defaultOAuthScopes(service: string, auth: OAuth2AuthDefinition): string[] {
+  if (auth.defaultScopes === undefined) return [...auth.scopes];
+  const normalized = [...new Set(auth.defaultScopes.map((scope) => scope.trim()))];
+  if (normalized.length === 0) {
+    throw new OAuthClientConfigError("invalid_input", `OAuth default scopes must not be empty for ${service}.`);
+  }
+  const undeclaredScope = normalized.find((scope) => !scope || !auth.scopes.includes(scope));
+  if (undeclaredScope !== undefined) {
+    throw new OAuthClientConfigError(
+      "invalid_input",
+      `OAuth default scope is not declared by ${service}: ${undeclaredScope || "(empty)"}.`,
+    );
+  }
   return normalized;
 }
 

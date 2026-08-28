@@ -39,6 +39,7 @@ export interface OAuthAuthorizationState {
   connectionName?: string;
   state: string;
   createdAt: string;
+  requestedScopes?: string[];
   pkceCodeVerifier?: string;
   clientConfig?: OAuthClientConfig;
 }
@@ -93,11 +94,13 @@ export class OAuthFlowService {
 
     const state = crypto.randomUUID();
     const pkceCodeVerifier = auth.pkce ? createPkceCodeVerifier() : undefined;
+    const effectiveScopes = this.clientConfigs.getEffectiveScopes(service, config, input.actionIds);
     await this.states.set({
       service,
       connectionName,
       state,
       createdAt: new Date().toISOString(),
+      requestedScopes: effectiveScopes,
       pkceCodeVerifier,
       clientConfig: input.clientConfig ? config : undefined,
     });
@@ -115,7 +118,6 @@ export class OAuthFlowService {
     );
     setAuthorizationParam(authorizationUrl, auth.authorizationRequestFields?.responseType, "response_type", "code");
     setAuthorizationParam(authorizationUrl, auth.authorizationRequestFields?.state, "state", state);
-    const effectiveScopes = this.clientConfigs.getEffectiveScopes(service, config, input.actionIds);
     if (effectiveScopes.length > 0 && auth.authorizationRequestFields?.scope !== false) {
       authorizationUrl.searchParams.set(
         auth.authorizationRequestFields?.scope ?? "scope",
@@ -172,6 +174,7 @@ export class OAuthFlowService {
         Object.keys(refreshParameters).length > 0 ? { oauthRefreshParameters: refreshParameters } : undefined,
       metadata: {
         ...tokenResponse.metadata,
+        scope: tokenResponse.metadata.scope ?? pending.requestedScopes?.join(auth.scopeSeparator ?? " "),
         oauthClientId: config.clientId,
         oauthClientExtra: config.extra,
         oauthClientSecretExtra: config.secretExtra,

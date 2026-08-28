@@ -381,7 +381,7 @@ export const tencentDocsActions: ActionDefinition[] = [
     name: "get_sheet_range",
     description: "Read cell values and metadata from a Tencent Docs spreadsheet range.",
     requiredScopes: [tencentDocsConnectorScopes.sheetRead],
-    providerPermissions: [tencentDocsProviderScopes.sheet],
+    providerPermissions: [tencentDocsProviderScopes.sheetReadonly],
     inputSchema: sheetRangeInputSchema,
     outputSchema: s.object("The Tencent Docs spreadsheet range response.", {
       ...apiResponseBaseSchema,
@@ -395,7 +395,7 @@ export const tencentDocsActions: ActionDefinition[] = [
     name: "batch_update_sheet",
     description: "Apply up to five Tencent Docs spreadsheet V3 batch update operations.",
     requiredScopes: [tencentDocsConnectorScopes.sheetWrite],
-    providerPermissions: [tencentDocsProviderScopes.sheet],
+    providerPermissions: [tencentDocsProviderScopes.sheetEditable],
     inputSchema: batchUpdateSheetInputSchema,
     outputSchema: s.object("The Tencent Docs spreadsheet batch update response.", {
       ...apiResponseBaseSchema,
@@ -408,7 +408,7 @@ export const tencentDocsActions: ActionDefinition[] = [
     name: "get_doc_content",
     description: "Get the structured content and version of a Tencent Docs document.",
     requiredScopes: [tencentDocsConnectorScopes.docRead],
-    providerPermissions: [tencentDocsProviderScopes.doc],
+    providerPermissions: [tencentDocsProviderScopes.docReadonly],
     inputSchema: fileIdInputSchema,
     outputSchema: s.object("The Tencent Docs document content response.", {
       ...apiResponseBaseSchema,

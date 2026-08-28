@@ -47,6 +47,29 @@ const authenticatedProvider: ProviderDefinition = {
   authTypes: ["no_auth", "api_key"],
   auth: [{ type: "no_auth" }, { type: "api_key" }],
 };
+const scopedAction: ActionDefinition = {
+  ...echoAction,
+  id: "tencent_docs.read",
+  service: "tencent_docs",
+  requiredScopes: ["connector.read"],
+  providerPermissions: ["provider.read"],
+};
+const scopedProvider: ProviderDefinition = {
+  service: "tencent_docs",
+  displayName: "Scoped",
+  categories: ["Developer Tools"],
+  authTypes: ["oauth2"],
+  auth: [
+    {
+      type: "oauth2",
+      authorizationUrl: "https://example.com/oauth/authorize",
+      tokenUrl: "https://example.com/oauth/token",
+      scopes: ["provider.read"],
+      tokenEndpointAuthMethod: "client_secret_post",
+    },
+  ],
+  actions: [scopedAction],
+};
 const credential: Extract<ResolvedCredential, { authType: "api_key" }> = {
   authType: "api_key",
   apiKey: "example-key",
@@ -143,6 +166,31 @@ describe("ActionRunner", () => {
       ok: false,
       error: { code: "resource_not_discovered" },
     });
+    expect(executor).not.toHaveBeenCalled();
+  });
+
+  it("rejects an action when known OAuth grants omit its provider permission", async () => {
+    const runs = new MemoryRunLogStore();
+    const executor = vi.fn<ActionExecutor>(async () => ({ ok: true, output: {} }));
+    const store = new MemoryConnectionStore();
+    await store.set("tencent_docs", "default", {
+      authType: "oauth2",
+      accessToken: "token",
+      tokenType: "Bearer",
+      profile: { accountId: "account", displayName: "Account", grantedScopes: ["provider.other"] },
+      metadata: { scope: "provider.other" },
+    });
+    const runner = createRunner({
+      runs,
+      logger: createTestLogger().logger,
+      providerLoader: new TestProviderLoader(executor),
+      provider: scopedProvider,
+      store,
+    });
+
+    const result = await runner.run({ actionId: scopedAction.id, input: {}, caller: "http" });
+
+    expect(result?.result).toMatchObject({ ok: false, error: { code: "insufficient_scope" } });
     expect(executor).not.toHaveBeenCalled();
   });
 

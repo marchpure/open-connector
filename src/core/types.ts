@@ -130,6 +130,8 @@ export type OAuth2AuthDefinition = {
   refreshTokenUrl?: string;
   /** OAuth scopes joined with spaces into the authorization URL `scope` parameter. */
   scopes: string[];
+  /** Least-privilege scopes used when the caller does not select actions or configure an explicit subset. */
+  defaultScopes?: string[];
   /** Scopes needed by every action-scoped authorization request. */
   minimumScopes?: string[];
   /** Separator used when joining OAuth scopes. Defaults to a space. */

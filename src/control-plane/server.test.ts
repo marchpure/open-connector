@@ -624,6 +624,7 @@ describe("connection control API", () => {
       body: JSON.stringify({
         allowedActions: [
           "tencent_docs.batch_update_doc",
+          "tencent_docs.convert_file_id",
           "wps_mcp.list_tools",
           "wps_mcp.call_tool",
           "baidu_netdisk.create_share_link",

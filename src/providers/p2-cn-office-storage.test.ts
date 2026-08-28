@@ -16,6 +16,7 @@ import { executors as qiniuKodoExecutors } from "./qiniu_kodo/executors.ts";
 import { qiniuAuthorization } from "./qiniu_kodo/executors.ts";
 import { actions as tencentCosActions } from "./tencent_cos/actions.ts";
 import { discoverResources as discoverTencentCosResources } from "./tencent_cos/executors.ts";
+import { provider as tencentDocsProvider } from "./tencent_docs/definition.ts";
 import { credentialValidators as tencentDocsValidators } from "./tencent_docs/executors.ts";
 import { discoverResources as discoverTencentDocsResources } from "./tencent_docs/executors.ts";
 import { wpsMcpActions } from "./wps_mcp/actions.ts";
@@ -96,6 +97,23 @@ describe("P2 CN office and storage discovery", () => {
         signal: controller.signal,
       }),
     ).rejects.toMatchObject({ status: 413 });
+  });
+
+  it("defaults Tencent Docs OAuth authorization to read-only provider scopes", () => {
+    const auth = tencentDocsProvider.auth.find((entry) => entry.type === "oauth2");
+    expect(auth?.defaultScopes).toEqual([
+      "scope.user.info.base",
+      "scope.drive.readonly",
+      "scope.drive.file.metadata",
+      "scope.drive.file.metadata.readonly",
+      "scope.drive.exportable",
+      "scope.doc.readonly",
+      "scope.sheet.readonly",
+      "scope.smartsheet.readonly",
+    ]);
+    expect(auth?.defaultScopes).not.toContain("scope.drive.creatable");
+    expect(auth?.defaultScopes).not.toContain("scope.drive.editable");
+    expect(auth?.defaultScopes).not.toContain("scope.form");
   });
 
   it("keeps WPS on the canonical MCP identity and binds content reads to discovery", () => {

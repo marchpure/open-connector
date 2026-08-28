@@ -25,7 +25,7 @@
       "implementation": "Hardened the existing OAuth provider; no duplicate provider was created.",
       "auth": "OAuth 2.0 with state stored by Connection Service; official Tencent Docs scopes remain provider-native.",
       "scopes": {
-        "requestedByDefault": [
+        "supported": [
           "scope.user.info.base",
           "scope.drive.creatable",
           "scope.drive.editable",
@@ -34,9 +34,22 @@
           "scope.drive.readonly",
           "scope.drive.exportable",
           "scope.doc",
+          "scope.doc.readonly",
           "scope.sheet",
+          "scope.sheet.readonly",
+          "scope.sheet.editable",
           "scope.smartsheet.readonly",
           "scope.form"
+        ],
+        "requestedByDefault": [
+          "scope.user.info.base",
+          "scope.drive.readonly",
+          "scope.drive.file.metadata",
+          "scope.drive.file.metadata.readonly",
+          "scope.drive.exportable",
+          "scope.doc.readonly",
+          "scope.sheet.readonly",
+          "scope.smartsheet.readonly"
         ],
         "agentLeaseRead": [
           "tencent_docs.user.read",
@@ -62,6 +75,7 @@
         "notDelegable": [
           "create_file",
           "rename_file",
+          "convert_file_id",
           "batch_update_sheet",
           "batch_update_doc",
           "update_form_collection_deadline",
@@ -199,8 +213,8 @@
     "generateCatalog": "passed; 1457 providers and 15225 actions",
     "generateRegistry": "passed; 1457 Node providers and 1449 Cloudflare providers",
     "fixCheck": "passed; lint, format, registry generation, and src/scripts/examples typecheck",
-    "focusedTests": "passed; 9 files and 99 tests across P2 providers, Baidu Netdisk, AWS S3/MinIO, OAuth refresh/configuration, ResourceStore, Connection Service, and Control Plane",
-    "fullTests": "passed; 172 files passed, 1 skipped; 1577 tests passed, 4 skipped",
+    "focusedTests": "passed; 11 files and 139 tests across P2 providers, Baidu Netdisk, AWS S3/MinIO, OAuth refresh/configuration, ActionRunner scope enforcement, ResourceStore, Connection Service, and Control Plane",
+    "fullTests": "passed; 172 files passed, 1 skipped; 1583 tests passed, 4 skipped",
     "build": "passed",
     "npmAuditOmitDev": "passed; 0 vulnerabilities",
     "npmAudit": "passed; 0 vulnerabilities",

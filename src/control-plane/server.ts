@@ -903,7 +903,7 @@ function isOwnerControlledStorageAction(actionId: string): boolean {
 }
 
 function isProhibitedAgentLeaseAction(actionId: string): boolean {
-  return /^(?:(?:tencent_docs)\.(?:create_file|rename_file|batch_update_sheet|batch_update_doc|update_form_collection_deadline|generate_form_result)|(?:wps_mcp)\.(?:list_tools|call_tool|create_file_with_content|create_folder)|(?:baidu_netdisk)\.(?:upload_file_from_url|create_text_file|create_folder|create_share_link|copy|move|rename)|(?:aws_s3|aliyun_oss|volcengine_tos|tencent_cos|huawei_obs|minio|qiniu_kodo)\.(?:put_object|delete_object|generate_presigned_url))$/u.test(
+  return /^(?:(?:tencent_docs)\.(?:create_file|rename_file|convert_file_id|batch_update_sheet|batch_update_doc|update_form_collection_deadline|generate_form_result)|(?:wps_mcp)\.(?:list_tools|call_tool|create_file_with_content|create_folder)|(?:baidu_netdisk)\.(?:upload_file_from_url|create_text_file|create_folder|create_share_link|copy|move|rename)|(?:aws_s3|aliyun_oss|volcengine_tos|tencent_cos|huawei_obs|minio|qiniu_kodo)\.(?:put_object|delete_object|generate_presigned_url))$/u.test(
     actionId,
   );
 }
