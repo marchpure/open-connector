@@ -1,7 +1,7 @@
 import type { ActionDefinition } from "../../../core/types.ts";
 
 import { s } from "../../../core/json-schema.ts";
-import { defineProviderAction } from "../../../core/provider-definition.ts";
+import { defineFeishuResourceAction as defineProviderAction } from "./resource-bindings.ts";
 const noteId = s.string("The Feishu meeting note ID.", { minLength: 1 });
 export function createFeishuNoteActions(service: string): readonly ActionDefinition[] {
   return [

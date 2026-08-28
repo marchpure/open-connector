@@ -1,7 +1,7 @@
 import type { ActionDefinition } from "../../../core/types.ts";
 
 import { s } from "../../../core/json-schema.ts";
-import { defineProviderAction } from "../../../core/provider-definition.ts";
+import { defineFeishuResourceAction as defineProviderAction } from "./resource-bindings.ts";
 export const feishuDocsProviderScopes = {
   create: "docx:document:create",
   read: "docx:document:readonly",
@@ -93,6 +93,7 @@ export function createFeishuDocsActions(service: string): readonly ActionDefinit
         "Fetch a Feishu document as Docx XML or Markdown, with optional structural detail and partial-read selection.",
       requiredScopes: [feishuDocsProviderScopes.read],
       providerPermissions: [feishuDocsProviderScopes.read],
+      resourceBindings: { documentId: [] },
       inputSchema: s.object(
         "Identify the document and choose how much content to fetch.",
         {

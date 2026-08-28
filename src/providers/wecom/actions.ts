@@ -47,6 +47,7 @@ export const wecomActions: ActionDefinition[] = [
     description: "Read one WeCom group chat visible to the enterprise application.",
     requiredScopes: ["chat:read"],
     providerPermissions: ["chat:read"],
+    resourceBindings: { chatId: ["application/vnd.wecom.group-chat"] },
     inputSchema: s.object("Identify a group chat.", { chatId: s.nonEmptyString("The WeCom group chat ID.") }),
     outputSchema: s.looseObject("The visible group chat."),
   }),

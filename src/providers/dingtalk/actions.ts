@@ -21,6 +21,7 @@ export const dingtalkActions: ActionDefinition[] = [
     description: "Read one DingTalk user by the provider user ID after authorization checks.",
     requiredScopes: ["Contact.User.Read"],
     providerPermissions: ["Contact.User.Read"],
+    resourceBindings: { userId: ["application/vnd.dingtalk.user"] },
     inputSchema: s.object("Identify a visible DingTalk user.", {
       userId: s.nonEmptyString("The DingTalk user ID returned by discovery."),
     }),

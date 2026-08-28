@@ -102,8 +102,15 @@ describe("office provider resource discovery", () => {
   });
 
   it("discovers bounded DingTalk directory ResourceRefs", async () => {
-    const fetcher = vi.fn<typeof fetch>(async () =>
-      Response.json({
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
+      if (url.pathname.endsWith("/users/me")) {
+        return Response.json({ userId: "user-1", nick: "Ada" });
+      }
+      if (url.pathname.endsWith("/users/search")) {
+        return Response.json({ users: [{ userId: "user-2", name: "Grace" }], hasMore: false });
+      }
+      return Response.json({
         departments: [
           {
             deptId: "dept-1",
@@ -113,9 +120,15 @@ describe("office provider resource discovery", () => {
           },
         ],
         hasMore: false,
-      }),
-    );
+      });
+    });
     await expect(discoverDingTalkResources(contextFor("dingtalk", oauthCredential), fetcher)).resolves.toEqual([
+      expect.objectContaining({
+        resourceId: "user-1",
+        title: "Ada",
+        mimeType: "application/vnd.dingtalk.user",
+      }),
+      expect.objectContaining({ resourceId: "user-2", mimeType: "application/vnd.dingtalk.user" }),
       expect.objectContaining({
         resourceId: "dept-1",
         title: "Engineering",

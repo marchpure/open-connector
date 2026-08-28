@@ -9,6 +9,7 @@ export type JsonRequestBody = {
   clientId?: unknown;
   clientSecret?: unknown;
   requestedScopes?: unknown;
+  actionIds?: unknown;
   extra?: unknown;
   [key: string]: unknown;
 };

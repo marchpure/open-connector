@@ -1,6 +1,11 @@
 import type { CatalogStore } from "../../catalog-store.ts";
 import type { ConnectionService, ConnectionSummary, ExecutionConnection } from "../../connection-service.ts";
-import type { ActionPolicyDecision, ActionPolicyService, ActionPolicySnapshot } from "../../core/action-policy.ts";
+import type {
+  ActionPolicyDecision,
+  ActionPolicyService,
+  ActionPolicySnapshot,
+  PolicyErrorCode,
+} from "../../core/action-policy.ts";
 import type { ExecutionContext, ExecutionResult, TransitFileWriter } from "../../core/types.ts";
 import type { IProviderLoader } from "../../providers/provider-loader.ts";
 import type { Logger } from "../logger.ts";
@@ -18,6 +23,22 @@ export interface ActionRunnerOptions {
   transitFiles?: TransitFileWriter;
   actionPolicy?: ActionPolicyService;
   logger?: Logger;
+  resourceAuthorization?: ResourceAuthorization;
+}
+
+export interface ResourceAuthorization {
+  authorize(
+    connectionId: string,
+    service: string,
+    actionId: string,
+    input: unknown,
+    bindings:
+      | {
+          required?: Record<string, readonly string[]>;
+          optional?: Record<string, readonly string[]>;
+        }
+      | Record<string, readonly string[]>,
+  ): { allowed: true } | { allowed: false; code: PolicyErrorCode; message: string };
 }
 
 export interface RunActionInput {
@@ -76,6 +97,7 @@ export class ActionRunner {
     const snapshot = input.policy ?? this.options.actionPolicy?.createSnapshot();
     let policy: ActionPolicyDecision = snapshot?.evaluate(action) ?? { allowed: true, checks: [] };
     let connection: ExecutionConnection | undefined;
+    let auditConnectionId: string | undefined;
     let result: ExecutionResult;
     if (!policy.allowed) {
       result = { ok: false, error: { code: policy.code, message: policy.message } };
@@ -84,6 +106,7 @@ export class ActionRunner {
     } else {
       try {
         const summary = await this.options.connections.getConnectionSummary(action.service, input.connectionName);
+        auditConnectionId = summary?.id;
         input.signal?.throwIfAborted();
         const connectionPolicy =
           summary?.authType === "no_auth" ? undefined : snapshot?.evaluateConnection(summary?.id);
@@ -91,24 +114,55 @@ export class ActionRunner {
           policy = connectionPolicy;
           result = { ok: false, error: { code: policy.code, message: policy.message } };
         } else {
-          connection = await this.options.connections.resolveForExecution(action.service, input.connectionName);
-          input.signal?.throwIfAborted();
-          const executor = action.execution.locallyExecutable
-            ? await this.options.providerLoader.loadActionExecutor(
-                action.service,
-                action.id,
-                this.options.catalog.providers.find((provider) => provider.service === action.service)?.displayName,
-              )
-            : undefined;
-          input.signal?.throwIfAborted();
-          result = await executeProviderAction(
-            action,
-            executor,
-            input.input,
-            this.createExecutionContext(connection.getCredential, input.signal),
-          );
-          if (input.signal?.aborted) {
-            result = cancelledExecutionResult();
+          const resourcePolicy =
+            summary?.id &&
+            (action.resourceBindings || action.resourceBindingsOptional) &&
+            (Object.keys(action.resourceBindings ?? {}).length > 0 ||
+              Object.keys(action.resourceBindingsOptional ?? {}).length > 0) &&
+            (this.options.resourceAuthorization?.authorize(
+              summary.id,
+              action.service,
+              action.id,
+              input.input,
+              action.resourceBindingsOptional
+                ? {
+                    required: action.resourceBindings,
+                    optional: action.resourceBindingsOptional,
+                  }
+                : action.resourceBindings!,
+            ) ?? {
+              allowed: false as const,
+              code: "resource_not_discovered" as const,
+              message: "Resource-bound actions require the tenant control-plane discovery allowlist.",
+            });
+          if (resourcePolicy && !resourcePolicy.allowed) {
+            policy = {
+              allowed: false,
+              code: resourcePolicy.code,
+              message: resourcePolicy.message,
+              checks: [],
+            };
+            result = { ok: false, error: { code: resourcePolicy.code, message: resourcePolicy.message } };
+          } else {
+            connection = await this.options.connections.resolveForExecution(action.service, input.connectionName);
+            input.signal?.throwIfAborted();
+            const executor = action.execution.locallyExecutable
+              ? await this.options.providerLoader.loadActionExecutor(
+                  action.service,
+                  action.id,
+                  this.options.catalog.providers.find((provider) => provider.service === action.service)?.displayName,
+                )
+              : undefined;
+            input.signal?.throwIfAborted();
+            result = await executeProviderAction(
+              action,
+              executor,
+              input.input,
+              this.createExecutionContext(connection.getCredential, input.signal),
+            );
+            if (input.signal?.aborted) {
+              result = cancelledExecutionResult();
+            }
           }
         }
       } catch (error) {
@@ -146,7 +200,7 @@ export class ActionRunner {
       completedAt: new Date(completedAtMs).toISOString(),
       durationMs,
       ok: result.ok,
-      connectionId: connection?.summary?.id,
+      connectionId: connection?.summary?.id ?? auditConnectionId,
       connectionProfile: connection?.summary?.profile,
       runtimeTokenId: input.runtimeTokenId,
       policy,
@@ -168,7 +222,7 @@ export class ActionRunner {
 
     const completedLogContext = {
       ...logContext,
-      connectionId: connection?.summary?.id,
+      connectionId: connection?.summary?.id ?? auditConnectionId,
       durationMs,
       ok: result.ok,
       errorCode: result.error?.code,

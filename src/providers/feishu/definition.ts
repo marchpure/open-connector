@@ -9,6 +9,7 @@ const feishuOAuthScopes = [
   feishuProviderScopes.userIdRead,
   ...new Set(feishuActions.flatMap((action) => action.providerPermissions)),
 ];
+const feishuMinimumOAuthScopes = [feishuProviderScopes.offlineAccess, feishuProviderScopes.userIdRead];
 
 /**
  * Feishu provider backed by the user_access_token, so an agent reads the
@@ -27,6 +28,7 @@ export const provider: ProviderDefinition = {
       authorizationUrl: "https://accounts.feishu.cn/open-apis/authen/v1/authorize",
       tokenUrl: "https://open.feishu.cn/open-apis/authen/v2/oauth/token",
       scopes: feishuOAuthScopes,
+      minimumScopes: feishuMinimumOAuthScopes,
       tokenEndpointAuthMethod: "client_secret_post",
       // Feishu's v2 token endpoint requires an application/json body; the
       // framework otherwise defaults to form encoding and the exchange fails.

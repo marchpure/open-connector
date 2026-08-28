@@ -13,6 +13,7 @@ import { OAuthClientConfigService } from "../oauth/oauth-client-config-service.t
 import { OAuthFlowService } from "../oauth/oauth-flow-service.ts";
 import { ActionRunner } from "../server/actions/action-runner.ts";
 import { ConnectionLeaseService } from "./lease.ts";
+import { TenantResourceStore } from "./resource-store.ts";
 import {
   TenantConnectionStore as ConnectionStore,
   TenantOAuthClientConfigStore,
@@ -39,6 +40,7 @@ export interface TenantRuntime {
   records: () => Promise<ConnectionRecord[]>;
   oauthFlow: OAuthFlowService;
   oauthClientConfigs: OAuthClientConfigService;
+  resources: TenantResourceStore;
 }
 
 export function createTenantRuntime(deps: ControlPlaneDependencies, principal: TenantPrincipal): TenantRuntime {
@@ -55,12 +57,14 @@ export function createTenantRuntime(deps: ControlPlaneDependencies, principal: T
     store: connections,
   });
   const runs = new TenantRunLogStore(deps.controlDatabase, principal);
+  const resources = new TenantResourceStore(deps.controlDatabase, principal);
   const actions = new ActionRunner({
     catalog: deps.catalog,
     providerLoader: deps.providerLoader,
     connections: connectionService,
     runs,
     transitFiles: deps.transitFiles,
+    resourceAuthorization: resources,
   });
   return {
     principal,
@@ -78,6 +82,7 @@ export function createTenantRuntime(deps: ControlPlaneDependencies, principal: T
     leases: new ConnectionLeaseService(deps.controlDatabase),
     records: () => connections.listRecords(),
     oauthClientConfigs,
+    resources,
   };
 }
 

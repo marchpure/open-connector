@@ -130,6 +130,8 @@ export type OAuth2AuthDefinition = {
   refreshTokenUrl?: string;
   /** OAuth scopes joined with spaces into the authorization URL `scope` parameter. */
   scopes: string[];
+  /** Scopes needed by every action-scoped authorization request. */
+  minimumScopes?: string[];
   /** Separator used when joining OAuth scopes. Defaults to a space. */
   scopeSeparator?: " " | ",";
   /** How the runtime sends client credentials to the token endpoint. */
@@ -213,6 +215,10 @@ export type ActionDefinition = {
   requiredScopes: string[];
   /** Provider-native permissions or scopes users must grant. */
   providerPermissions: string[];
+  /** Input fields whose values must be present in the connection's latest ResourceRef set. */
+  resourceBindings?: Record<string, string[]>;
+  /** Input fields that are checked when supplied, but are optional in the action input. */
+  resourceBindingsOptional?: Record<string, string[]>;
   /** JSON Schema used to validate HTTP/tool input before executor invocation. */
   inputSchema: JsonSchema;
   /** JSON Schema describing the executor output payload. */
