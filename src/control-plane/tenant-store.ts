@@ -393,7 +393,7 @@ export class TenantRunLogStore implements IRunLogStore {
         this.principal.tenantId,
         this.principal.workspaceId,
         this.principal.subject,
-        run.id,
+        run.invocationId ?? run.id,
         run.connectionId ?? "",
         run.actionId,
         run.ok ? 1 : 0,
@@ -543,6 +543,7 @@ function rowToRun(row: Record<string, unknown>): RunLog {
   const detail = JSON.parse(String(row.detail_json)) as Record<string, unknown>;
   return {
     id: String(row.id),
+    invocationId: String(row.invocation_id),
     service: String(row.action_id).split(".")[0] ?? "",
     actionId: String(row.action_id),
     caller: "http",

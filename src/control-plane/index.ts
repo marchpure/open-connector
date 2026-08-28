@@ -5,6 +5,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { loadCatalog } from "../catalog-store.ts";
+import { parsePrivateNetworkAccessFlag, setPrivateNetworkAccessAllowed } from "../core/request.ts";
 import { ProviderLoader } from "../providers/provider-loader.ts";
 import { executorModules } from "../providers/registry.generated.ts";
 import { withNodeStagedFile } from "../server/files/node-transit-file-upload.ts";
@@ -19,6 +20,7 @@ const dataDir = process.env.CONNECTION_SERVICE_DATA_DIR ?? join(process.cwd(), "
 const authSecret = requiredEnv("CONNECTION_SERVICE_AUTH_SECRET");
 const encryptionKey = requiredEnv("CONNECTION_SERVICE_ENCRYPTION_KEY");
 const enablement = readEnablement(process.env.CONNECTION_SERVICE_ENABLEMENT_JSON);
+setPrivateNetworkAccessAllowed(parsePrivateNetworkAccessFlag(process.env.OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK));
 
 await mkdir(dataDir, { recursive: true });
 const catalog = await loadCatalog(undefined, { executableServices: Object.keys(executorModules) });

@@ -230,6 +230,12 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       return jsonError(context, 404, "connector_not_enabled", "Connector is not enabled for this service.");
     }
     const runtime = tenantRuntime(options, principalOf(context));
+    const existing = (await runtime.records()).find(
+      (record) => record.service === service && record.connectionName === connectionName,
+    );
+    if (existing && existing.ownerId !== principalOf(context).ownerId) {
+      return jsonError(context, 403, "connection_forbidden", "Only the connection owner may replace it.");
+    }
     try {
       let profile;
       if (authType === "api_key") {
@@ -246,6 +252,9 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         profile = await runtime.connectionService.connectWithoutAuth(service, { connectionName });
       } else {
         return jsonError(context, 400, "unsupported_auth_type", "OAuth connections use the OAuth flow endpoint.");
+      }
+      if (existing) {
+        leases.revokeForConnection(existing.id, principalOf(context));
       }
       return context.json({ connection: redactConnection(profile as unknown as Record<string, unknown>) }, 201);
     } catch (error) {
@@ -352,6 +361,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       });
       const result = await runtime.actions.run({
         actionId,
+        invocationId,
         input: body.input,
         caller: "http",
         connectionName: selected.connectionName,
@@ -389,6 +399,10 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     } catch (error) {
       return leaseError(context, error);
     }
+  });
+  app.get("/v1/audit", async (context) => {
+    const runtime = tenantRuntime(options, principalOf(context));
+    return context.json({ items: (await runtime.actions.listRuns()).items });
   });
   app.post("/v1/adapters/rest/invoke", async (context) => {
     const body = await readJsonBody(context);
