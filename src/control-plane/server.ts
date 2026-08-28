@@ -316,7 +316,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
           values: recordOf(body.values),
         });
       } else if (authType === "no_auth") {
-        profile = await runtime.connectionService.connectWithoutAuth(service, { connectionName });
+        profile = await runtime.connectionService.connectAndPersistWithoutAuth(service, { connectionName });
       } else {
         return jsonError(context, 400, "unsupported_auth_type", "OAuth connections use the OAuth flow endpoint.");
       }

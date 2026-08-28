@@ -284,6 +284,27 @@ export class ConnectionService {
     return this.createNoAuthConnectionSummary(provider, normalizeConnectionName(input.connectionName));
   }
 
+  /**
+   * Persist a no-auth connection when an API client explicitly creates one.
+   *
+   * Local discovery keeps no-auth providers virtual, but the tenant control
+   * plane needs a durable record for visibility, validation, leases, and
+   * revision-bound runtime authorization.
+   */
+  async connectAndPersistWithoutAuth(
+    service: string,
+    input: ConnectWithoutAuthInput = {},
+  ): Promise<ConnectionSummary> {
+    const provider = this.getAvailableProvider(service);
+    if (!this.supportsAuth(provider, "no_auth")) {
+      throw new ConnectionError("unsupported_auth_type", `${service} does not support no_auth.`);
+    }
+
+    const connectionName = normalizeConnectionName(input.connectionName);
+    const stored = await this.store.set(service, connectionName, { authType: "no_auth" });
+    return this.createConfiguredConnectionSummary(provider, stored.id, connectionName, { authType: "no_auth" });
+  }
+
   async connectWithApiKey(service: string, input: ConnectWithCredentialInput): Promise<ConnectionSummary> {
     const provider = this.getAvailableProvider(service);
     if (!this.supportsAuth(provider, "api_key")) {
