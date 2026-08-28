@@ -16,7 +16,7 @@ export interface ExecutorModule {
 }
 
 export interface ProviderResourceCandidate {
-  sourceType: "feishu" | "dingtalk" | "wecom";
+  sourceType: "feishu" | "dingtalk" | "wecom" | "aws_s3" | "aliyun_oss" | "volcengine_tos";
   resourceId: string;
   resourceToken?: string;
   version?: string;

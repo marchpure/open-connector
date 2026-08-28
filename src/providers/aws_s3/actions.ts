@@ -152,6 +152,7 @@ export const awsActions: ActionDefinition[] = [
       },
       {
         optional: [
+          "bucket",
           "region",
           "endpoint",
           "prefix",
@@ -173,6 +174,7 @@ export const awsActions: ActionDefinition[] = [
         s.string("The continuation token for the next page, or null when the list is complete."),
       ),
     }),
+    resourceBindingsOptional: { bucket: ["application/vnd.aws.s3.bucket"] },
   }),
   defineProviderAction(service, {
     name: "head_object",
@@ -192,6 +194,7 @@ export const awsActions: ActionDefinition[] = [
     outputSchema: s.object("The output payload for this action.", {
       object: objectMetadataSchema,
     }),
+    resourceBindingsOptional: { bucket: ["application/vnd.aws.s3.bucket"] },
   }),
   defineProviderAction(service, {
     name: "download_object",
@@ -210,6 +213,7 @@ export const awsActions: ActionDefinition[] = [
       { optional: ["bucket", "region", "endpoint", "versionId", "ifMatch", "fileName"] },
     ),
     outputSchema: downloadedObjectSchema,
+    resourceBindingsOptional: { bucket: ["application/vnd.aws.s3.bucket"] },
   }),
   defineProviderAction(service, {
     name: "put_object",
@@ -221,6 +225,7 @@ export const awsActions: ActionDefinition[] = [
       url: s.string("The canonical S3 URL for the uploaded object."),
       etag: s.nullable(s.string("The uploaded object ETag, or null when S3 omitted it.")),
     }),
+    resourceBindingsOptional: { bucket: ["application/vnd.aws.s3.bucket"] },
   }),
   defineProviderAction(service, {
     name: "delete_object",
@@ -241,6 +246,7 @@ export const awsActions: ActionDefinition[] = [
       objectKey: s.string("The deleted object key."),
       deleted: s.boolean("Whether the delete request completed successfully."),
     }),
+    resourceBindingsOptional: { bucket: ["application/vnd.aws.s3.bucket"] },
   }),
   defineProviderAction(service, {
     name: "generate_presigned_url",
@@ -268,5 +274,6 @@ export const awsActions: ActionDefinition[] = [
       expiresSeconds: s.integer("The URL validity duration in seconds."),
       url: s.string("The generated pre-signed URL."),
     }),
+    resourceBindingsOptional: { bucket: ["application/vnd.aws.s3.bucket"] },
   }),
 ];

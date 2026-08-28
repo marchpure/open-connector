@@ -1,9 +1,12 @@
 import type { ExecutionContext, ResolvedCredential } from "../core/types.ts";
 
 import { describe, expect, it, vi } from "vitest";
+import { discoverResources as discoverAliyunOssResources } from "./aliyun_oss/executors.ts";
+import { discoverResources as discoverAwsS3Resources } from "./aws_s3/executors.ts";
 import { discoverResources as discoverDingTalkResources } from "./dingtalk/executors.ts";
 import { dingtalkActionHandlers } from "./dingtalk/executors.ts";
 import { discoverResources as discoverFeishuResources } from "./feishu/executors.ts";
+import { discoverResources as discoverVolcengineTosResources } from "./volcengine_tos/executors.ts";
 import { discoverResources as discoverWeComResources } from "./wecom/executors.ts";
 import { wecomActionHandlers } from "./wecom/executors.ts";
 
@@ -22,7 +25,95 @@ const wecomCredential: Extract<ResolvedCredential, { authType: "custom_credentia
   metadata: {},
 };
 
+const awsCredential: Extract<ResolvedCredential, { authType: "custom_credential" }> = {
+  authType: "custom_credential",
+  values: {
+    accessKeyId: "AKIAEXAMPLE",
+    secretAccessKey: "secret",
+    region: "us-east-1",
+    bucket: "documents",
+    prefix: "knowledge/",
+  },
+  profile: { accountId: "AKIAEXAMPLE", displayName: "AWS S3", grantedScopes: [] },
+  metadata: { region: "us-east-1", bucket: "documents", prefix: "knowledge/" },
+};
+
+const ossCredential: Extract<ResolvedCredential, { authType: "custom_credential" }> = {
+  authType: "custom_credential",
+  values: {
+    accessKeyId: "LTAIEXAMPLE",
+    accessKeySecret: "secret",
+    endpoint: "oss-cn-hangzhou.aliyuncs.com",
+    bucket: "documents",
+    prefix: "knowledge/",
+  },
+  profile: { accountId: "LTAIEXAMPLE", displayName: "OSS", grantedScopes: [] },
+  metadata: { endpoint: "https://oss-cn-hangzhou.aliyuncs.com", bucket: "documents", prefix: "knowledge/" },
+};
+
+const tosCredential: Extract<ResolvedCredential, { authType: "custom_credential" }> = {
+  authType: "custom_credential",
+  values: {
+    accessKeyId: "AKLTEXAMPLE",
+    secretAccessKey: "secret",
+    region: "cn-beijing",
+    endpoint: "https://tos-cn-beijing.volces.com",
+    bucket: "documents",
+    prefix: "knowledge/",
+  },
+  profile: { accountId: "AKLTEXAMPLE", displayName: "TOS", grantedScopes: [] },
+  metadata: {
+    region: "cn-beijing",
+    endpoint: "https://tos-cn-beijing.volces.com",
+    bucket: "documents",
+    prefix: "knowledge/",
+  },
+};
+
 describe("office provider resource discovery", () => {
+  it("discovers the configured AWS S3 bucket with its prefix boundary", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(null, { status: 200 }));
+    await expect(discoverAwsS3Resources(contextFor("aws_s3", awsCredential), fetcher)).resolves.toEqual([
+      expect.objectContaining({
+        sourceType: "aws_s3",
+        resourceId: "documents",
+        mimeType: "application/vnd.aws.s3.bucket",
+        schema: expect.objectContaining({ prefix: "knowledge/", allowlisted: true }),
+      }),
+    ]);
+  });
+
+  it("discovers the configured OSS bucket using the native bucket-info path", async () => {
+    const fetcher = vi.fn<typeof fetch>(
+      async () =>
+        new Response("<BucketInfo><Bucket><Name>documents</Name></Bucket></BucketInfo>", {
+          status: 200,
+          headers: { "content-type": "application/xml" },
+        }),
+    );
+    await expect(discoverAliyunOssResources(contextFor("aliyun_oss", ossCredential), fetcher)).resolves.toEqual([
+      expect.objectContaining({
+        sourceType: "aliyun_oss",
+        resourceId: "documents",
+        mimeType: "application/vnd.aliyun.oss.bucket",
+      }),
+    ]);
+  });
+
+  it("discovers and validates the explicitly configured TOS bucket", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(null, { status: 200 }));
+    await expect(discoverVolcengineTosResources(contextFor("volcengine_tos", tosCredential), fetcher)).resolves.toEqual(
+      [
+        expect.objectContaining({
+          sourceType: "volcengine_tos",
+          resourceId: "documents",
+          mimeType: "application/vnd.volcengine.tos.bucket",
+          schema: expect.objectContaining({ prefix: "knowledge/", validated: true }),
+        }),
+      ],
+    );
+  });
+
   it("paginates Feishu document/Wiki resources and stops at the bounded page budget", async () => {
     const fetcher = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);

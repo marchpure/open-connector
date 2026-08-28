@@ -10,7 +10,7 @@ export type CatalogTier = "catalog" | "beta" | "verified";
  * this stable reference and re-check upstream authorization.
  */
 export interface ResourceRef {
-  sourceType: "feishu" | "dingtalk" | "wecom";
+  sourceType: "feishu" | "dingtalk" | "wecom" | "aws_s3" | "aliyun_oss" | "volcengine_tos";
   tenantId: string;
   workspaceId: string;
   connectionId: string;
