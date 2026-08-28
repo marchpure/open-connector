@@ -1,4 +1,9 @@
-import type { CredentialValidationResult, CredentialValidators, ProviderExecutors } from "../../core/types.ts";
+import type {
+  CredentialValidationResult,
+  CredentialValidators,
+  ExecutionContext,
+  ProviderExecutors,
+} from "../../core/types.ts";
 import type { OAuthProviderContext, ProviderActionHandlers } from "../provider-runtime.ts";
 
 import { compactObject, optionalInteger, optionalRecord, optionalString } from "../../core/cast.ts";
@@ -45,6 +50,23 @@ export const dingtalkActionHandlers: ProviderActionHandlers<"dingtalk", DingTalk
 };
 
 export const executors: ProviderExecutors = defineOAuthProviderExecutors(service, dingtalkActionHandlers);
+
+export async function discoverResources(
+  context: ExecutionContext,
+  fetcher: typeof fetch,
+): Promise<Array<{ sourceType: "dingtalk"; resourceId: string; title?: string; schema?: Record<string, unknown> }>> {
+  const credential = await context.getCredential(service);
+  if (credential?.authType !== "oauth2") throw new ProviderRequestError(401, "Configure dingtalk OAuth first.");
+  const payload = optionalRecord(
+    await request(
+      { accessToken: credential.accessToken, tokenType: credential.tokenType, fetcher, signal: context.signal },
+      "/v1.0/contact/users/me",
+    ),
+  );
+  const resourceId = optionalString(payload?.userId) ?? optionalString(payload?.unionId);
+  if (!resourceId) return [];
+  return [{ sourceType: "dingtalk", resourceId, title: optionalString(payload?.nick), schema: payload }];
+}
 
 export const credentialValidators: CredentialValidators = {
   async oauth2(input, { fetcher, signal }): Promise<CredentialValidationResult> {

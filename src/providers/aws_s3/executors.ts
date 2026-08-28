@@ -617,6 +617,7 @@ function awsPresignUrl(
     region: client.region,
     bucket: input.bucket,
     objectKey: input.objectKey,
+    endpoint: client.endpoint,
   });
   const headers = new Headers();
   for (const [key, value] of Object.entries(input.headers ?? {})) {
@@ -702,7 +703,7 @@ function buildRequestTarget(input: {
   objectKey?: string;
   query?: Record<string, string | number | boolean | undefined>;
 }) {
-  const url = createAwsS3BaseUrl(input.region, input.bucket);
+  const url = createAwsS3BaseUrl(input.region, input.bucket, input.endpoint);
   url.pathname = input.objectKey ? `/${encodeS3Key(input.objectKey)}` : "/";
   for (const [key, value] of Object.entries(input.query ?? {})) {
     if (value == null) {

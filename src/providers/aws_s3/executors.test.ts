@@ -32,6 +32,18 @@ afterEach(() => {
 });
 
 describe("AWS S3 download_object", () => {
+  it("uses the configured compatible endpoint for signed requests", async () => {
+    const requests = stubResponses([new Response("ok")]);
+    const { store } = createTransitFileStore(1024);
+    const result = await executeDownload(
+      { bucket: "documents", objectKey: "report.pdf", endpoint: "https://s3.compat.example.test" },
+      store,
+    );
+
+    expect(result).toMatchObject({ ok: true });
+    expect(requests[0]?.url.origin).toBe("https://documents.s3.compat.example.test");
+  });
+
   it("downloads an object byte-for-byte into transit storage", async () => {
     const content = new Uint8Array([83, 51, 0, 255]);
     const requests = stubResponses([

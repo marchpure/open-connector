@@ -2,7 +2,7 @@ import type { CredentialValidationResult, CredentialValidators, ProviderExecutor
 import type { OAuthProviderContext } from "../provider-runtime.ts";
 import type { FeishuActionRuntimeContext } from "./shared/client.ts";
 
-import { optionalString } from "../../core/cast.ts";
+import { optionalRecord, optionalString } from "../../core/cast.ts";
 import {
   defineOAuthProviderExecutors,
   getProviderActionHandler,
@@ -67,6 +67,59 @@ const allFeishuActionHandlers = mapProviderActionHandlers(
 );
 
 export const executors: ProviderExecutors = defineOAuthProviderExecutors(service, allFeishuActionHandlers);
+
+export async function discoverResources(
+  context: import("../../core/types.ts").ExecutionContext,
+  fetcher: typeof fetch,
+): Promise<
+  Array<{
+    sourceType: "feishu";
+    resourceId: string;
+    resourceToken?: string;
+    title?: string;
+    mimeType?: string;
+    schema?: Record<string, unknown>;
+    url?: string;
+  }>
+> {
+  const credential = await context.getCredential(service);
+  if (credential?.authType !== "oauth2") throw new ProviderRequestError(401, "Configure feishu OAuth first.");
+  const request = createFeishuJsonRequest({
+    accessToken: credential.accessToken,
+    fetcher,
+    signal: context.signal,
+    phase: "execute",
+  });
+  const data = await request({
+    method: "POST",
+    path: "/search/v2/doc_wiki/search",
+    body: { query: "", doc_filter: {}, wiki_filter: {}, page_size: 20 },
+  });
+  const results = Array.isArray(data.res_units) ? data.res_units : [];
+  return results.flatMap((item) => {
+    const record = optionalRecord(item);
+    if (!record) return [];
+    const resourceId =
+      optionalString(record.document_id) ??
+      optionalString(record.obj_token) ??
+      optionalString(record.node_token) ??
+      optionalString(record.token) ??
+      optionalString(record.id);
+    if (!resourceId) return [];
+    return [
+      {
+        sourceType: "feishu" as const,
+        resourceId,
+        resourceToken:
+          optionalString(record.obj_token) ?? optionalString(record.node_token) ?? optionalString(record.token),
+        title: optionalString(record.title) ?? optionalString(record.name),
+        mimeType: optionalString(record.obj_type) ?? optionalString(record.type),
+        schema: record,
+        url: optionalString(record.url),
+      },
+    ];
+  });
+}
 
 function createFeishuSharedHandlers(
   context: OAuthProviderContext,
