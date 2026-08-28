@@ -1,11 +1,32 @@
-import type { ActionExecutor, CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../core/types.ts";
+import type {
+  ActionExecutor,
+  CredentialValidators,
+  ExecutionContext,
+  ProviderExecutors,
+  ProviderProxyExecutor,
+} from "../core/types.ts";
 
-import { withProviderFallbackMessage } from "./provider-runtime.ts";
+import { providerFetch, withProviderFallbackMessage } from "./provider-runtime.ts";
 
 export interface ExecutorModule {
   credentialValidators?: CredentialValidators;
   executors: ProviderExecutors;
   proxy?: ProviderProxyExecutor;
+  discoverResources?: (context: ExecutionContext, fetcher: typeof fetch) => Promise<ProviderResourceCandidate[]>;
+}
+
+export interface ProviderResourceCandidate {
+  sourceType: "feishu" | "dingtalk" | "wecom";
+  resourceId: string;
+  resourceToken?: string;
+  version?: string;
+  etag?: string;
+  title?: string;
+  mimeType?: string;
+  schema?: Record<string, unknown>;
+  owner?: { id: string; displayName?: string };
+  aclSummary?: { visibility: "private" | "shared" | "team"; subjectCount?: number };
+  url?: string;
 }
 
 export interface ExecutorModules {
@@ -38,6 +59,16 @@ export interface IProviderLoader {
    * Load a provider credential validator only when a connection is created.
    */
   loadCredentialValidators(service: string): Promise<CredentialValidators | undefined>;
+
+  /**
+   * Discover provider-owned resources only when the provider implements an
+   * upstream visibility-aware discovery operation.
+   */
+  discoverResources?(
+    service: string,
+    context: ExecutionContext,
+    signal?: AbortSignal,
+  ): Promise<ProviderResourceCandidate[]>;
 }
 
 /**
@@ -83,6 +114,18 @@ export class ProviderLoader implements IProviderLoader {
 
     const module = await loadExecutors();
     return module.credentialValidators;
+  }
+
+  async discoverResources(
+    service: string,
+    context: ExecutionContext,
+    signal?: AbortSignal,
+  ): Promise<ProviderResourceCandidate[]> {
+    const loadExecutors = this.executorModules[service];
+    if (!loadExecutors) return [];
+    const module = await loadExecutors();
+    if (!module.discoverResources) return [];
+    return module.discoverResources({ ...context, signal }, providerFetch);
   }
 
   private _findActionExecutor(

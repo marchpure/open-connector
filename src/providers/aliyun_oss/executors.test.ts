@@ -214,6 +214,40 @@ describe("Alibaba Cloud OSS put_object sourceUrl", () => {
   });
 });
 
+describe("Alibaba Cloud OSS allowlists", () => {
+  it("rejects presigned URLs outside the bucket and prefix allowlists", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+
+    const bucketResult = await executeAction("aliyun_oss.generate_presigned_url", {
+      bucket: "other-bucket",
+      objectKey: "documents/report.pdf",
+    });
+    const prefixResult = await executeAction(
+      "aliyun_oss.generate_presigned_url",
+      {
+        bucket: "documents",
+        objectKey: "private/report.pdf",
+      },
+      undefined,
+      "documents/",
+    );
+
+    expect(bucketResult).toMatchObject({
+      ok: false,
+      error: { code: "authorization_failed", message: "bucket is outside the Alibaba Cloud OSS connection allowlist" },
+    });
+    expect(prefixResult).toMatchObject({
+      ok: false,
+      error: {
+        code: "authorization_failed",
+        message: "objectKey is outside the Alibaba Cloud OSS connection allowlist",
+      },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
 function stubResponses(responses: Response[]): CapturedRequest[] {
   const requests: CapturedRequest[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -267,14 +301,21 @@ async function executePut(input: Record<string, unknown>) {
 }
 
 async function executeAction(
-  action: "aliyun_oss.download_object" | "aliyun_oss.put_object",
+  action: "aliyun_oss.download_object" | "aliyun_oss.put_object" | "aliyun_oss.generate_presigned_url",
   input: Record<string, unknown>,
   transitFiles?: TransitFileStore,
+  prefix?: string,
 ) {
   const context: ExecutionContext = {
     getCredential: async (service) => {
       expect(service).toBe("aliyun_oss");
-      return credential;
+      return prefix
+        ? {
+            ...credential,
+            values: { ...credential.values, prefix },
+            metadata: { ...credential.metadata, prefix },
+          }
+        : credential;
     },
   };
   if (transitFiles) {

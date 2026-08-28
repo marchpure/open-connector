@@ -88,6 +88,7 @@ interface AliyunGetObjectMetaResult {
 interface AliyunOssClient {
   listBuckets(query?: Record<string, unknown> | null): Promise<AliyunListBucketsResult>;
   listV2(query?: Record<string, unknown> | null): Promise<AliyunListObjectsResult>;
+  getBucketInfo(name?: string, options?: Record<string, unknown>): Promise<unknown>;
   put(name: string, body: string | Buffer, options?: Record<string, unknown>): Promise<AliyunPutResult>;
   delete(name: string, options?: Record<string, unknown>): Promise<unknown>;
   authorization(
@@ -423,7 +424,7 @@ async function aliyunListBuckets(input: Record<string, unknown>, context: Aliyun
   const allowlistedBucket = optionalString(context.metadata.bucket) ?? optionalString(context.values.bucket);
   if (allowlistedBucket) {
     const client = await createClientForAction(input, context, allowlistedBucket);
-    await client.listV2({ "max-keys": 1 });
+    await client.getBucketInfo(allowlistedBucket);
     return {
       buckets: [{ name: allowlistedBucket, region: "", creationDate: "", storageClass: null }],
       owner: null,
@@ -675,6 +676,9 @@ async function aliyunDeleteObject(input: Record<string, unknown>, context: Aliyu
 async function aliyunGeneratePresignedUrl(input: Record<string, unknown>, context: AliyunOssContext): Promise<unknown> {
   const bucket = resolveBucket(input, context);
   const objectKey = requireAliyunField(input.objectKey, "objectKey");
+  buildAliyunOssProxyBaseUrl(resolveEndpoint(input, context), bucket);
+  assertAllowedBucket(bucket, context);
+  assertAllowedObjectKey(objectKey, context);
   const client = await createClientForAction(input, context, bucket);
   const method = normalizePresignedMethod(input.method);
   const expiresSeconds = normalizeExpiresSeconds(input.expiresSeconds);

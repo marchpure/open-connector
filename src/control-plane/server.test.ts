@@ -399,7 +399,7 @@ describe("connection control API", () => {
     });
     expect(discovery.status).toBe(202);
     expect(await discovery.json()).toMatchObject({
-      job: { kind: "discover", status: "succeeded", result: { service: "fixture", actions: [] } },
+      job: { kind: "discover", status: "succeeded", result: { service: "fixture", resources: [], actions: [] } },
     });
     database.close();
   });

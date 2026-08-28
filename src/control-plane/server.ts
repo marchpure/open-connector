@@ -1,14 +1,14 @@
 import type { CatalogStore } from "../catalog-store.ts";
 import type { TransitFileWriter } from "../core/types.ts";
 import type { ActionDefinition } from "../core/types.ts";
-import type { IProviderLoader } from "../providers/provider-loader.ts";
+import type { IProviderLoader, ProviderResourceCandidate } from "../providers/provider-loader.ts";
 import type { ITransitFileService } from "../server/files/transit-file-store.ts";
 import type { StagedTransitFile } from "../server/files/transit-file-store.ts";
 import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
 import type { EnablementEntry } from "./catalog.ts";
 import type { OracleConnectionConfig, OracleQueryDriver } from "./oracle-adapter.ts";
 import type { OracleDriverOptions } from "./oracle-driver.ts";
-import type { TenantPrincipal } from "./types.ts";
+import type { ResourceRef, TenantPrincipal } from "./types.ts";
 import type { Context } from "hono";
 import type { DatabaseSync } from "node:sqlite";
 
@@ -201,18 +201,44 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     if (!provider) {
       jobs.fail(job.id, { code: "provider_not_found", message: "Provider definition was not found." });
     } else {
-      jobs.succeed(job.id, {
-        service: provider.service,
-        definitionVersion: connection.connectorDefinitionVersion,
-        actions: provider.actions.map(({ id, name, description, inputSchema, outputSchema, execution }) => ({
-          id,
-          name,
-          description,
-          inputSchema,
-          outputSchema,
-          executable: execution.locallyExecutable,
-        })),
-      });
+      try {
+        const execution = await runtime.connectionService.resolveForExecution(
+          connection.service,
+          connection.connectionName,
+        );
+        const candidates = options.providerLoader.discoverResources
+          ? await options.providerLoader.discoverResources(
+              connection.service,
+              { getCredential: execution.getCredential, signal: context.req.raw.signal },
+              context.req.raw.signal,
+            )
+          : [];
+        const resources = candidates.map((candidate) =>
+          toResourceRef(candidate, {
+            tenantId: connection.tenantId,
+            workspaceId: connection.workspaceId,
+            connectionId,
+          }),
+        );
+        jobs.succeed(job.id, {
+          service: provider.service,
+          definitionVersion: connection.connectorDefinitionVersion,
+          resources,
+          actions: provider.actions.map(({ id, name, description, inputSchema, outputSchema, execution }) => ({
+            id,
+            name,
+            description,
+            inputSchema,
+            outputSchema,
+            executable: execution.locallyExecutable,
+          })),
+        });
+      } catch (error) {
+        jobs.fail(job.id, {
+          code: error instanceof ConnectionError ? error.code : "discovery_failed",
+          message: error instanceof Error ? error.message : "Connection resource discovery failed.",
+        });
+      }
     }
     return context.json({ job: jobs.get(job.id) }, 202);
   });
@@ -675,6 +701,26 @@ function tenantJobs(options: ConnectionControlAppOptions, principal: TenantPrinc
 
 function principalOf(context: Context): TenantPrincipal {
   return context.get("principal") as TenantPrincipal;
+}
+
+function toResourceRef(
+  candidate: ProviderResourceCandidate,
+  scope: Pick<ResourceRef, "tenantId" | "workspaceId" | "connectionId">,
+): ResourceRef {
+  return {
+    ...scope,
+    sourceType: candidate.sourceType,
+    resourceId: candidate.resourceId,
+    resourceToken: candidate.resourceToken,
+    version: candidate.version,
+    etag: candidate.etag,
+    title: candidate.title,
+    mimeType: candidate.mimeType,
+    schema: candidate.schema,
+    owner: candidate.owner,
+    aclSummary: candidate.aclSummary,
+    url: candidate.url,
+  };
 }
 
 function readBearer(context: Context): string | undefined {
