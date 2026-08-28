@@ -8,7 +8,8 @@
   "implementationCommits": [
     "f52d2d72fb63b52957ed95e781dc18627ac8bb27",
     "fcecc1579f66d6cfca416900522d6211267efb21",
-    "e2528f3c2dc2a64d97e3b64b1be20611a88c70a6"
+    "e2528f3c2dc2a64d97e3b64b1be20611a88c70a6",
+    "a73e750821baffc34bb35d22d1f3049a495ab136"
   ],
   "sourceWorktreeIsolation": {
     "path": "/Users/bytedance/.codex/worktrees/knowledge-connection-service-open-connector",
@@ -92,6 +93,8 @@
     "Private database access requires both OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK and CONNECTION_DATABASE_EGRESS_ALLOWLIST.",
     "ClickHouse rejects redirects so credentials cannot leave the configured database origin.",
     "Credential replacement revokes prior leases and rotates the bounded connection pool.",
+    "SQL Server CA certificates are passed to the Tedious TLS secure-context configuration.",
+    "Revoked connection replacement preserves the connection identity and advances its revision.",
     "Audit output is tenant-scoped and redacted, and preserves lease invocationId."
   ],
   "verification": {
@@ -99,8 +102,8 @@
     "results": {
       "catalog": "1450 providers and 15196 actions generated",
       "fixCheck": "passed",
-      "focusedTests": "25 passed",
-      "fullTests": "167 files passed, 1 skipped; 1504 tests passed, 4 skipped",
+      "focusedTests": "33 passed in the first corrective gate; 25 passed in the final focused regression gate",
+      "fullTests": "167 files passed, 1 skipped; 1505 tests passed, 4 skipped",
       "build": "passed",
       "productionAudit": "0 vulnerabilities",
       "fullAudit": "0 vulnerabilities",
@@ -115,7 +118,7 @@
     "commands": [
       "npm run generate:catalog",
       "npm run fix-check",
-      "npx vitest run src/control-plane/server.test.ts src/core/database/actions.test.ts src/core/database/runtime.test.ts src/providers/clickhouse/runtime.test.ts src/providers/sql_server/runtime.test.ts",
+      "npx vitest run src/control-plane/server.test.ts src/control-plane/security.test.ts src/core/database/actions.test.ts src/core/database/runtime.test.ts src/providers/clickhouse/runtime.test.ts src/providers/sql_server/runtime.test.ts",
       "npm test",
       "npm run build",
       "npm audit --omit=dev",
