@@ -214,6 +214,55 @@ export const credentialValidators: CredentialValidators = {
   },
 };
 
+export async function discoverResources(
+  context: ExecutionContext,
+  fetcher: typeof fetch,
+): Promise<
+  Array<{
+    sourceType: "aws_s3";
+    resourceId: string;
+    title?: string;
+    mimeType?: string;
+    schema?: Record<string, unknown>;
+    url?: string;
+  }>
+> {
+  const credential = await context.getCredential(service);
+  if (credential?.authType !== "custom_credential") {
+    throw new ProviderRequestError(401, "Configure aws_s3 custom credentials first.");
+  }
+  const actionContext: AwsActionContext = {
+    values: credential.values,
+    metadata: credential.metadata,
+    fetcher,
+    signal: context.signal,
+  };
+  const result = await awsListBuckets({}, actionContext);
+  const buckets = Array.isArray(result.buckets) ? result.buckets : [];
+  return buckets
+    .slice(0, 100)
+    .map((bucket) => {
+      const record = bucket && typeof bucket === "object" ? (bucket as Record<string, unknown>) : {};
+      const name = optionalString(record.name);
+      if (!name) return undefined;
+      const region = optionalString(record.region) ?? resolveRegion({}, actionContext);
+      return {
+        sourceType: "aws_s3" as const,
+        resourceId: name,
+        title: `S3 bucket ${name}`,
+        mimeType: "application/vnd.aws.s3.bucket",
+        schema: compactObject({
+          name,
+          region,
+          prefix: optionalString(credential.metadata.prefix) ?? optionalString(credential.values.prefix),
+          allowlisted: true,
+        }),
+        url: buildBucketResourceUrl(region, name, resolveEndpoint({}, actionContext)),
+      };
+    })
+    .filter((resource): resource is NonNullable<typeof resource> => resource !== undefined);
+}
+
 async function validateAwsCredential(
   input: Record<string, string>,
   fetcher: typeof fetch,
@@ -320,7 +369,7 @@ async function awsListBuckets(input: Record<string, unknown>, context: AwsAction
 }
 
 async function awsListObjects(input: Record<string, unknown>, context: AwsActionContext) {
-  const bucket = requireAwsField(input.bucket, "bucket");
+  const bucket = resolveBucket(input, context);
   const region = resolveRegion(input, context);
   createAwsS3BaseUrl(region, bucket, resolveEndpoint(input, context));
   assertAllowedBucket(bucket, context);
@@ -763,6 +812,10 @@ function buildObjectUrl(region: string, bucket: string, objectKey: string, endpo
     objectKey,
     endpoint,
   }).url.toString();
+}
+
+function buildBucketResourceUrl(region: string, bucket: string, endpoint?: string): string {
+  return createAwsS3BaseUrl(region, bucket, endpoint).origin;
 }
 
 function buildCanonicalHeaders(headers: Headers) {

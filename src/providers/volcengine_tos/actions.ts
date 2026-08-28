@@ -95,6 +95,7 @@ export const volcengineTosActions: ActionDefinition[] = [
       isTruncated: s.boolean("Whether another page is available."),
       nextContinuationToken: s.nullableString("The continuation token for the next page."),
     }),
+    resourceBindingsOptional: { bucket: ["application/vnd.volcengine.tos.bucket"] },
   }),
   defineProviderAction(service, {
     name: "head_object",
@@ -110,6 +111,7 @@ export const volcengineTosActions: ActionDefinition[] = [
       { optional: ["bucket", "versionId", "ifMatch"] },
     ),
     outputSchema: s.requiredObject("The TOS object metadata.", { object: metadata }),
+    resourceBindingsOptional: { bucket: ["application/vnd.volcengine.tos.bucket"] },
   }),
   defineProviderAction(service, {
     name: "download_object",
@@ -126,5 +128,6 @@ export const volcengineTosActions: ActionDefinition[] = [
       { optional: ["bucket", "versionId", "ifMatch", "fileName"] },
     ),
     outputSchema: downloadedObject,
+    resourceBindingsOptional: { bucket: ["application/vnd.volcengine.tos.bucket"] },
   }),
 ];

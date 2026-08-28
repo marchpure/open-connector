@@ -110,7 +110,16 @@ export const aliyunOssActions: ActionDefinition[] = [
         maxKeys: maxKeysSchema,
       },
       {
-        optional: ["endpoint", "prefix", "delimiter", "continuationToken", "startAfter", "fetchOwner", "maxKeys"],
+        optional: [
+          "bucket",
+          "endpoint",
+          "prefix",
+          "delimiter",
+          "continuationToken",
+          "startAfter",
+          "fetchOwner",
+          "maxKeys",
+        ],
       },
     ),
     outputSchema: s.object("The output payload for this action.", {
@@ -123,6 +132,7 @@ export const aliyunOssActions: ActionDefinition[] = [
         s.string("The continuation token for the next page, or null when the list is complete."),
       ),
     }),
+    resourceBindingsOptional: { bucket: ["application/vnd.aliyun.oss.bucket"] },
   }),
   defineProviderAction(service, {
     name: "head_object",
@@ -142,6 +152,7 @@ export const aliyunOssActions: ActionDefinition[] = [
     outputSchema: s.object("The output payload for this action.", {
       object: { ...objectMetadataSchema, description: "The normalized OSS object metadata." },
     }),
+    resourceBindingsOptional: { bucket: ["application/vnd.aliyun.oss.bucket"] },
   }),
   defineProviderAction(service, {
     name: "download_object",
@@ -160,6 +171,7 @@ export const aliyunOssActions: ActionDefinition[] = [
       { optional: ["bucket", "endpoint", "prefix", "versionId", "ifMatch", "fileName"] },
     ),
     outputSchema: downloadedObjectSchema,
+    resourceBindingsOptional: { bucket: ["application/vnd.aliyun.oss.bucket"] },
   }),
   defineProviderAction(service, {
     name: "put_object",
@@ -205,6 +217,7 @@ export const aliyunOssActions: ActionDefinition[] = [
       url: s.string("The canonical OSS URL for the uploaded object."),
       etag: s.nullable(s.string("The uploaded object ETag, or null when OSS did not return it.")),
     }),
+    resourceBindingsOptional: { bucket: ["application/vnd.aliyun.oss.bucket"] },
   }),
   defineProviderAction(service, {
     name: "delete_object",
@@ -225,6 +238,7 @@ export const aliyunOssActions: ActionDefinition[] = [
       objectKey: s.string("The deleted object key."),
       deleted: s.boolean("Whether the delete request completed successfully."),
     }),
+    resourceBindingsOptional: { bucket: ["application/vnd.aliyun.oss.bucket"] },
   }),
   defineProviderAction(service, {
     name: "generate_presigned_url",
@@ -252,5 +266,6 @@ export const aliyunOssActions: ActionDefinition[] = [
       expiresSeconds: s.integer("The URL validity duration in seconds."),
       url: s.string("The generated pre-signed URL."),
     }),
+    resourceBindingsOptional: { bucket: ["application/vnd.aliyun.oss.bucket"] },
   }),
 ];

@@ -181,4 +181,89 @@ describe("TenantResourceStore", () => {
     ).toEqual({ allowed: true });
     database.close();
   });
+
+  it("authorizes an explicitly supplied storage bucket only after discovery", () => {
+    const database = new DatabaseSync(":memory:");
+    const principal: TenantPrincipal = {
+      tenantId: "tenant-a",
+      workspaceId: "workspace-a",
+      subject: "user-a",
+      audience: "knowledge-runtime",
+      ownerId: "user-a",
+    };
+    database.exec(`
+      create table tenant_connections (
+        id text primary key,
+        tenant_id text not null,
+        workspace_id text not null,
+        owner_id text not null,
+        service text not null,
+        connection_name text not null,
+        connector_definition_version text not null,
+        credential_ref text not null,
+        credential_ciphertext text not null,
+        profile_json text not null,
+        status text not null,
+        revision integer not null,
+        visibility text not null,
+        created_at text not null,
+        updated_at text not null
+      );
+    `);
+    const store = new TenantResourceStore(database, principal);
+    database.exec(`
+      insert into tenant_connections
+        (id, tenant_id, workspace_id, owner_id, service, connection_name,
+         connector_definition_version, credential_ref, status, revision, visibility,
+         credential_ciphertext, profile_json, created_at, updated_at)
+      values ('connection-a', 'tenant-a', 'workspace-a', 'user-a', 'aws_s3', 'S3',
+              '1.0.0', 'credential', 'ready', 1, 'personal', 'ciphertext', '{}',
+              datetime('now'), datetime('now'))
+    `);
+    store.replace("connection-a", 1, [
+      {
+        sourceType: "aws_s3",
+        tenantId: "tenant-a",
+        workspaceId: "workspace-a",
+        connectionId: "connection-a",
+        resourceId: "documents",
+        mimeType: "application/vnd.aws.s3.bucket",
+      },
+    ]);
+
+    expect(
+      store.authorize(
+        "connection-a",
+        "aws_s3",
+        "aws_s3.head_object",
+        { bucket: "documents" },
+        {
+          optional: { bucket: ["application/vnd.aws.s3.bucket"] },
+        },
+      ),
+    ).toEqual({ allowed: true });
+    expect(
+      store.authorize(
+        "connection-a",
+        "aws_s3",
+        "aws_s3.head_object",
+        { bucket: "guessed" },
+        {
+          optional: { bucket: ["application/vnd.aws.s3.bucket"] },
+        },
+      ),
+    ).toMatchObject({ allowed: false, code: "resource_not_discovered" });
+    expect(
+      store.authorize(
+        "connection-a",
+        "aws_s3",
+        "aws_s3.head_object",
+        {},
+        {
+          optional: { bucket: ["application/vnd.aws.s3.bucket"] },
+        },
+      ),
+    ).toEqual({ allowed: true });
+    database.close();
+  });
 });

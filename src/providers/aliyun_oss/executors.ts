@@ -307,6 +307,55 @@ export const credentialValidators: CredentialValidators = {
   },
 };
 
+export async function discoverResources(
+  context: ExecutionContext,
+  fetcher: typeof fetch,
+): Promise<
+  Array<{
+    sourceType: "aliyun_oss";
+    resourceId: string;
+    title?: string;
+    mimeType?: string;
+    schema?: Record<string, unknown>;
+    url?: string;
+  }>
+> {
+  const credential = await context.getCredential(service);
+  if (credential?.authType !== "custom_credential") {
+    throw new ProviderRequestError(401, "Configure aliyun_oss custom credentials first.");
+  }
+  const actionContext: AliyunOssContext = {
+    values: credential.values,
+    metadata: credential.metadata,
+    fetcher,
+    signal: context.signal,
+  };
+  const result = (await aliyunListBuckets({}, actionContext)) as Record<string, unknown>;
+  const buckets = Array.isArray(result.buckets) ? result.buckets : [];
+  const endpoint = resolveEndpoint({}, actionContext);
+  return buckets
+    .slice(0, 100)
+    .map((bucket) => {
+      const record = bucket && typeof bucket === "object" ? (bucket as Record<string, unknown>) : {};
+      const name = optionalString(record.name);
+      if (!name) return undefined;
+      return {
+        sourceType: "aliyun_oss" as const,
+        resourceId: name,
+        title: `OSS bucket ${name}`,
+        mimeType: "application/vnd.aliyun.oss.bucket",
+        schema: compactObject({
+          name,
+          region: optionalString(record.region),
+          prefix: optionalString(credential.metadata.prefix) ?? optionalString(credential.values.prefix),
+          allowlisted: true,
+        }),
+        url: buildAliyunOssProxyBaseUrl(endpoint, name),
+      };
+    })
+    .filter((resource): resource is NonNullable<typeof resource> => resource !== undefined);
+}
+
 async function validateAliyunOssCredential(
   input: Record<string, string>,
   fetcher: typeof fetch,
@@ -503,7 +552,7 @@ async function aliyunListBuckets(input: Record<string, unknown>, context: Aliyun
 }
 
 async function aliyunListObjects(input: Record<string, unknown>, context: AliyunOssContext): Promise<unknown> {
-  const bucket = requireAliyunField(input.bucket, "bucket");
+  const bucket = resolveBucket(input, context);
   buildAliyunOssProxyBaseUrl(resolveEndpoint(input, context), bucket);
   assertAllowedBucket(bucket, context);
   const requestedPrefix = assertAllowedPrefix(

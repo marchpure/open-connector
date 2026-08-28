@@ -83,6 +83,50 @@ export const credentialValidators: CredentialValidators = {
   },
 };
 
+export async function discoverResources(
+  context: ExecutionContext,
+  fetcher: typeof fetch,
+): Promise<
+  Array<{
+    sourceType: "volcengine_tos";
+    resourceId: string;
+    title?: string;
+    mimeType?: string;
+    schema?: Record<string, unknown>;
+    url?: string;
+  }>
+> {
+  const credential = await context.getCredential(service);
+  if (credential?.authType !== "custom_credential") {
+    throw new ProviderRequestError(401, "Configure volcengine_tos custom credentials first.");
+  }
+  const actionContext: TosContext = {
+    values: credential.values,
+    metadata: credential.metadata,
+    fetcher,
+    signal: context.signal,
+  };
+  const result = await listBuckets(actionContext);
+  const bucket = readConfig(credential.values).bucket;
+  const config = readConfig(credential.values);
+  return [
+    {
+      sourceType: "volcengine_tos",
+      resourceId: bucket,
+      title: `TOS bucket ${bucket}`,
+      mimeType: "application/vnd.volcengine.tos.bucket",
+      schema: compactObject({
+        name: bucket,
+        region: config.region,
+        prefix: config.prefix,
+        allowlisted: true,
+        validated: result.isTruncated === false,
+      }),
+      url: `https://${bucket}.${new URL(config.endpoint).host}`,
+    },
+  ];
+}
+
 interface TosConfig {
   accessKeyId: string;
   secretAccessKey: string;
