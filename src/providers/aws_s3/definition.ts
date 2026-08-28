@@ -54,6 +54,15 @@ export const provider: ProviderDefinition = {
             "Optional default bucket reused by object-level actions. Use a bucket from your own S3 resources as documented here: https://docs.aws.amazon.com/AmazonS3/latest/userguide/create-bucket-overview.html",
         },
         {
+          key: "prefix",
+          label: "Allowlisted Prefix",
+          inputType: "text",
+          required: false,
+          secret: false,
+          placeholder: "documents/",
+          description: "Optional object-key prefix allowlist for object-level actions.",
+        },
+        {
           key: "sessionToken",
           label: "Session Token",
           inputType: "password",

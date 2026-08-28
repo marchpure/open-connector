@@ -38,12 +38,14 @@ type AwsS3ClientConfig = {
   secretAccessKey: string;
   sessionToken?: string;
   region: string;
+  endpoint?: string;
   fetcher: typeof fetch;
 };
 
 type AwsS3RequestInput = {
   method?: "GET" | "PUT" | "HEAD" | "DELETE";
   bucket?: string;
+  endpoint?: string;
   objectKey?: string;
   query?: Record<string, string | number | boolean | undefined>;
   headers?: Record<string, string | undefined>;
@@ -150,8 +152,10 @@ export const proxy: ProviderProxyExecutor = async (input, context) => {
     );
     const bucket =
       optionalString(credential.metadata.bucket)?.trim() ?? optionalString(credential.values.bucket)?.trim();
+    const endpoint =
+      optionalString(credential.metadata.endpoint)?.trim() ?? optionalString(credential.values.endpoint)?.trim();
     const method = normalizeAwsS3ProxyMethod(input.method);
-    const url = createProviderProxyUrl(buildAwsS3ProxyBaseUrl(region, bucket), input.endpoint, input.query);
+    const url = createProviderProxyUrl(buildAwsS3ProxyBaseUrl(region, bucket, endpoint), input.endpoint, input.query);
     url.search = canonicalizeSearchParams(url.searchParams);
 
     const body = normalizeAwsS3ProxyBody(input.body);
@@ -171,6 +175,7 @@ export const proxy: ProviderProxyExecutor = async (input, context) => {
         secretAccessKey: requireAwsField(credential.values.secretAccessKey, "secretAccessKey"),
         sessionToken: optionalString(credential.values.sessionToken)?.trim(),
         region,
+        endpoint,
         fetcher: providerFetch,
       }),
       {
@@ -212,6 +217,8 @@ async function validateAwsCredential(
   const secretAccessKey = requireAwsField(input.secretAccessKey, "secretAccessKey");
   const region = requireAwsField(input.region, "region");
   const bucket = optionalString(input.bucket);
+  const endpoint = optionalString(input.endpoint);
+  const prefix = optionalString(input.prefix);
   const sessionToken = optionalString(input.sessionToken);
   const client = createAwsS3Client({
     accessKeyId,
@@ -219,6 +226,7 @@ async function validateAwsCredential(
     sessionToken,
     region,
     fetcher,
+    endpoint,
   });
 
   try {
@@ -234,6 +242,8 @@ async function validateAwsCredential(
           metadata: compactObject({
             region,
             bucket,
+            endpoint,
+            prefix,
             credentialKind: sessionToken ? "sts" : "aksk",
             firstBucketName: bucket,
           }),
@@ -259,6 +269,8 @@ async function validateAwsCredential(
       metadata: compactObject({
         region,
         bucket,
+        endpoint,
+        prefix,
         credentialKind: sessionToken ? "sts" : "aksk",
         firstBucketName: firstBucket?.name,
       }),
@@ -269,6 +281,19 @@ async function validateAwsCredential(
 }
 
 async function awsListBuckets(input: Record<string, unknown>, context: AwsActionContext) {
+  const allowlistedBucket = optionalString(context.metadata.bucket) ?? optionalString(context.values.bucket);
+  if (allowlistedBucket) {
+    const client = createClientForAction(input, context);
+    await awsS3Request(client, { method: "HEAD", bucket: allowlistedBucket, signal: context.signal });
+    return {
+      buckets: [
+        { name: allowlistedBucket, region: resolveRegion(input, context), storageClass: null, creationDate: "" },
+      ],
+      owner: null,
+      isTruncated: false,
+      nextMarker: null,
+    };
+  }
   const client = createClientForAction(input, context);
   const response = await awsS3Request(client, {
     query: compactObject({
@@ -292,12 +317,21 @@ async function awsListBuckets(input: Record<string, unknown>, context: AwsAction
 async function awsListObjects(input: Record<string, unknown>, context: AwsActionContext) {
   const bucket = requireAwsField(input.bucket, "bucket");
   const region = resolveRegion(input, context);
+  createAwsS3BaseUrl(region, bucket, resolveEndpoint(input, context));
+  assertAllowedBucket(bucket, context);
+  const requestedPrefix = assertAllowedPrefix(
+    optionalString(input.prefix) ??
+      optionalString(context.metadata.prefix) ??
+      optionalString(context.values.prefix) ??
+      "",
+    context,
+  );
   const response = await awsS3Request(createClientForAction(input, context), {
     bucket,
     query: compactObject({
       "list-type": 2,
       "encoding-type": "url",
-      prefix: optionalString(input.prefix),
+      prefix: requestedPrefix,
       delimiter: optionalString(input.delimiter),
       "continuation-token": optionalString(input.continuationToken),
       "start-after": optionalString(input.startAfter),
@@ -315,6 +349,9 @@ async function awsListObjects(input: Record<string, unknown>, context: AwsAction
 async function awsHeadObject(input: Record<string, unknown>, context: AwsActionContext) {
   const bucket = resolveBucket(input, context);
   const objectKey = requireAwsField(input.objectKey, "objectKey");
+  createAwsS3BaseUrl(resolveRegion(input, context), bucket, resolveEndpoint(input, context));
+  assertAllowedBucket(bucket, context);
+  assertAllowedObjectKey(objectKey, context);
   const response = await awsS3Request(createClientForAction(input, context), {
     method: "HEAD",
     bucket,
@@ -353,6 +390,9 @@ async function awsDownloadObject(input: Record<string, unknown>, context: AwsAct
 
     const bucket = resolveBucket(input, context);
     const objectKey = readObjectKey(input);
+    createAwsS3BaseUrl(resolveRegion(input, context), bucket, resolveEndpoint(input, context));
+    assertAllowedBucket(bucket, context);
+    assertAllowedObjectKey(objectKey, context);
     const response = await awsS3Request(createClientForAction(input, context), {
       method: "GET",
       bucket,
@@ -388,6 +428,8 @@ async function awsPutObject(input: Record<string, unknown>, context: AwsActionCo
   const bucket = resolveBucket(input, context);
   const region = resolveRegion(input, context);
   const objectKey = requireAwsField(input.objectKey, "objectKey");
+  assertAllowedBucket(bucket, context);
+  assertAllowedObjectKey(objectKey, context);
   const sourceUrl = optionalString(input.sourceUrl);
   const sourceFile = sourceUrl ? await downloadSourceFile(sourceUrl, context.signal) : null;
   const resolvedContentType = optionalString(input.contentType) ?? sourceFile?.contentType;
@@ -414,7 +456,7 @@ async function awsPutObject(input: Record<string, unknown>, context: AwsActionCo
   return {
     bucket,
     objectKey,
-    url: buildObjectUrl(region, bucket, objectKey),
+    url: buildObjectUrl(region, bucket, objectKey, resolveEndpoint(input, context)),
     etag: headers.etag ?? null,
   };
 }
@@ -422,6 +464,9 @@ async function awsPutObject(input: Record<string, unknown>, context: AwsActionCo
 async function awsDeleteObject(input: Record<string, unknown>, context: AwsActionContext) {
   const bucket = resolveBucket(input, context);
   const objectKey = requireAwsField(input.objectKey, "objectKey");
+  createAwsS3BaseUrl(resolveRegion(input, context), bucket, resolveEndpoint(input, context));
+  assertAllowedBucket(bucket, context);
+  assertAllowedObjectKey(objectKey, context);
   await awsS3Request(createClientForAction(input, context), {
     method: "DELETE",
     bucket,
@@ -442,6 +487,9 @@ async function awsDeleteObject(input: Record<string, unknown>, context: AwsActio
 async function awsGeneratePresignedUrl(input: Record<string, unknown>, context: AwsActionContext) {
   const bucket = resolveBucket(input, context);
   const objectKey = requireAwsField(input.objectKey, "objectKey");
+  createAwsS3BaseUrl(resolveRegion(input, context), bucket, resolveEndpoint(input, context));
+  assertAllowedBucket(bucket, context);
+  assertAllowedObjectKey(objectKey, context);
   const method = normalizePresignedMethod(input.method);
   const expiresSeconds = normalizeExpiresSeconds(input.expiresSeconds);
   const client = createClientForAction(input, context);
@@ -474,8 +522,8 @@ function normalizeAwsS3ProxyMethod(method: string): "GET" | "PUT" | "HEAD" | "DE
   throw new ProviderRequestError(400, "aws_s3 proxy only supports GET, PUT, HEAD, and DELETE requests.");
 }
 
-function buildAwsS3ProxyBaseUrl(region: string, bucket: string | undefined): string {
-  return createAwsS3BaseUrl(region, bucket).origin;
+function buildAwsS3ProxyBaseUrl(region: string, bucket: string | undefined, endpoint?: string): string {
+  return createAwsS3BaseUrl(region, bucket, endpoint).origin;
 }
 
 function normalizeAwsS3ProxyBody(body: unknown): string | undefined {
@@ -510,6 +558,7 @@ function createClientForAction(input: Record<string, unknown>, context: AwsActio
     secretAccessKey: requireAwsField(values.secretAccessKey, "secretAccessKey"),
     sessionToken: optionalString(values.sessionToken)?.trim(),
     region: resolveRegion(input, context),
+    endpoint: resolveEndpoint(input, context),
     fetcher: context.fetcher,
   });
 }
@@ -518,6 +567,7 @@ async function awsS3Request(client: AwsS3ClientConfig, input: AwsS3RequestInput)
   const method = input.method ?? "GET";
   const target = buildRequestTarget({
     region: client.region,
+    endpoint: client.endpoint,
     bucket: input.bucket,
     objectKey: input.objectKey,
     query: input.query,
@@ -647,6 +697,7 @@ function signAwsRequest(
 
 function buildRequestTarget(input: {
   region: string;
+  endpoint?: string;
   bucket?: string;
   objectKey?: string;
   query?: Record<string, string | number | boolean | undefined>;
@@ -665,8 +716,12 @@ function buildRequestTarget(input: {
   };
 }
 
-function createAwsS3BaseUrl(region: string, bucket: string | undefined): URL {
-  const expectedHost = bucket ? `${bucket}.s3.${region}.amazonaws.com` : `s3.${region}.amazonaws.com`;
+function createAwsS3BaseUrl(region: string, bucket: string | undefined, endpoint?: string): URL {
+  if (!/^[a-z0-9][a-z0-9.-]*$/iu.test(region) || (bucket !== undefined && !/^[a-z0-9][a-z0-9.-]*$/iu.test(bucket))) {
+    throw new ProviderRequestError(400, "bucket and region must form a valid AWS S3 endpoint");
+  }
+  const base = endpoint ? parseS3Endpoint(endpoint) : new URL(`https://s3.${region}.amazonaws.com`);
+  const expectedHost = bucket ? `${bucket}.${base.host}` : base.host;
   let url: URL;
   try {
     url = new URL(`https://${expectedHost}`);
@@ -686,11 +741,12 @@ function createAwsS3BaseUrl(region: string, bucket: string | undefined): URL {
   return url;
 }
 
-function buildObjectUrl(region: string, bucket: string, objectKey: string) {
+function buildObjectUrl(region: string, bucket: string, objectKey: string, endpoint?: string) {
   return buildRequestTarget({
     region,
     bucket,
     objectKey,
+    endpoint,
   }).url.toString();
 }
 
@@ -1101,6 +1157,53 @@ function resolveRegion(input: Record<string, unknown>, context: AwsActionContext
   }
 
   throw new ProviderRequestError(400, "region is required for aws_s3 action execution");
+}
+
+function resolveEndpoint(input: Record<string, unknown>, context: AwsActionContext): string | undefined {
+  return (
+    optionalString(input.endpoint) ??
+    optionalString(context.metadata.endpoint) ??
+    optionalString(context.values.endpoint)
+  );
+}
+
+function assertAllowedBucket(bucket: string, context: AwsActionContext): void {
+  const allowed = optionalString(context.metadata.bucket) ?? optionalString(context.values.bucket);
+  if (allowed && bucket !== allowed) {
+    throw new ProviderRequestError(403, "bucket is outside the AWS S3 connection allowlist");
+  }
+}
+
+function assertAllowedPrefix(prefix: string, context: AwsActionContext): string {
+  const allowed = optionalString(context.metadata.prefix) ?? optionalString(context.values.prefix) ?? "";
+  if (allowed && !prefix.startsWith(allowed)) {
+    throw new ProviderRequestError(403, "prefix is outside the AWS S3 connection allowlist");
+  }
+  return prefix;
+}
+
+function assertAllowedObjectKey(objectKey: string, context: AwsActionContext): void {
+  const prefix = optionalString(context.metadata.prefix) ?? optionalString(context.values.prefix) ?? "";
+  if (prefix && !objectKey.startsWith(prefix)) {
+    throw new ProviderRequestError(403, "objectKey is outside the AWS S3 connection allowlist");
+  }
+}
+
+function parseS3Endpoint(value: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value.includes("://") ? value : `https://${value}`);
+  } catch {
+    throw new ProviderRequestError(400, "endpoint must be a valid HTTPS URL");
+  }
+  if (url.protocol !== "https:" || url.pathname !== "/" || url.search || url.hash || url.username || url.password) {
+    throw new ProviderRequestError(400, "endpoint must be an HTTPS origin without credentials or a path");
+  }
+  assertPublicHttpUrl(url.toString(), {
+    fieldName: "endpoint",
+    createError: (message) => new ProviderRequestError(400, message),
+  });
+  return url;
 }
 
 function resolveBucket(input: Record<string, unknown>, context: AwsActionContext) {

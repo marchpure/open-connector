@@ -420,6 +420,17 @@ function defaultObjectFileName(objectKey: string): string {
 }
 
 async function aliyunListBuckets(input: Record<string, unknown>, context: AliyunOssContext): Promise<unknown> {
+  const allowlistedBucket = optionalString(context.metadata.bucket) ?? optionalString(context.values.bucket);
+  if (allowlistedBucket) {
+    const client = await createClientForAction(input, context, allowlistedBucket);
+    await client.listV2({ "max-keys": 1 });
+    return {
+      buckets: [{ name: allowlistedBucket, region: "", creationDate: "", storageClass: null }],
+      owner: null,
+      isTruncated: false,
+      nextMarker: null,
+    };
+  }
   const client = await createClientForAction(input, context);
   const result = await client.listBuckets(
     compactObject({
@@ -439,10 +450,19 @@ async function aliyunListBuckets(input: Record<string, unknown>, context: Aliyun
 
 async function aliyunListObjects(input: Record<string, unknown>, context: AliyunOssContext): Promise<unknown> {
   const bucket = requireAliyunField(input.bucket, "bucket");
+  buildAliyunOssProxyBaseUrl(resolveEndpoint(input, context), bucket);
+  assertAllowedBucket(bucket, context);
+  const requestedPrefix = assertAllowedPrefix(
+    optionalString(input.prefix) ??
+      optionalString(context.metadata.prefix) ??
+      optionalString(context.values.prefix) ??
+      "",
+    context,
+  );
   const client = await createClientForAction(input, context, bucket);
   const result = await client.listV2(
     compactObject({
-      prefix: optionalString(input.prefix),
+      prefix: requestedPrefix,
       delimiter: optionalString(input.delimiter),
       "continuation-token": optionalString(input.continuationToken),
       "start-after": optionalString(input.startAfter),
@@ -464,6 +484,9 @@ async function aliyunListObjects(input: Record<string, unknown>, context: Aliyun
 async function aliyunHeadObject(input: Record<string, unknown>, context: AliyunOssContext): Promise<unknown> {
   const bucket = resolveBucket(input, context);
   const objectKey = requireAliyunField(input.objectKey, "objectKey");
+  buildAliyunOssProxyBaseUrl(resolveEndpoint(input, context), bucket);
+  assertAllowedBucket(bucket, context);
+  assertAllowedObjectKey(objectKey, context);
   const client = await createClientForAction(input, context, bucket);
   const result = await client.getObjectMeta(
     objectKey,
@@ -500,6 +523,9 @@ async function aliyunDownloadObject(input: Record<string, unknown>, context: Ali
 
     const bucket = resolveBucket(input, context);
     const objectKey = readObjectKey(input);
+    buildAliyunOssProxyBaseUrl(resolveEndpoint(input, context), bucket);
+    assertAllowedBucket(bucket, context);
+    assertAllowedObjectKey(objectKey, context);
     const endpoint = resolveEndpoint(input, context);
     const versionId = optionalString(input.versionId);
     const url = createProviderProxyUrl(
@@ -563,6 +589,9 @@ async function aliyunDownloadObject(input: Record<string, unknown>, context: Ali
 async function aliyunPutObject(input: Record<string, unknown>, context: AliyunOssContext): Promise<unknown> {
   const bucket = resolveBucket(input, context);
   const objectKey = requireAliyunField(input.objectKey, "objectKey");
+  buildAliyunOssProxyBaseUrl(resolveEndpoint(input, context), bucket);
+  assertAllowedBucket(bucket, context);
+  assertAllowedObjectKey(objectKey, context);
   const client = await createClientForAction(input, context, bucket);
   const sourceUrl = optionalString(input.sourceUrl);
   // A user-supplied sourceUrl is downloaded with the public-only fetch even when
@@ -624,6 +653,9 @@ async function downloadSourceFile(
 async function aliyunDeleteObject(input: Record<string, unknown>, context: AliyunOssContext): Promise<unknown> {
   const bucket = resolveBucket(input, context);
   const objectKey = requireAliyunField(input.objectKey, "objectKey");
+  buildAliyunOssProxyBaseUrl(resolveEndpoint(input, context), bucket);
+  assertAllowedBucket(bucket, context);
+  assertAllowedObjectKey(objectKey, context);
   const client = await createClientForAction(input, context, bucket);
 
   await client.delete(
@@ -695,6 +727,28 @@ function resolveBucket(input: Record<string, unknown>, context: AliyunOssContext
     optionalString(context.values.bucket) ??
     missingAliyunField("bucket is required")
   );
+}
+
+function assertAllowedBucket(bucket: string, context: AliyunOssContext): void {
+  const allowed = optionalString(context.metadata.bucket) ?? optionalString(context.values.bucket);
+  if (allowed && bucket !== allowed) {
+    throw new ProviderRequestError(403, "bucket is outside the Alibaba Cloud OSS connection allowlist");
+  }
+}
+
+function assertAllowedPrefix(prefix: string, context: AliyunOssContext): string {
+  const allowed = optionalString(context.metadata.prefix) ?? optionalString(context.values.prefix) ?? "";
+  if (allowed && !prefix.startsWith(allowed)) {
+    throw new ProviderRequestError(403, "prefix is outside the Alibaba Cloud OSS connection allowlist");
+  }
+  return prefix;
+}
+
+function assertAllowedObjectKey(objectKey: string, context: AliyunOssContext): void {
+  const allowed = optionalString(context.metadata.prefix) ?? optionalString(context.values.prefix) ?? "";
+  if (allowed && !objectKey.startsWith(allowed)) {
+    throw new ProviderRequestError(403, "objectKey is outside the Alibaba Cloud OSS connection allowlist");
+  }
 }
 
 function missingAliyunField(message: string): never {

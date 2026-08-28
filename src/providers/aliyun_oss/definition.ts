@@ -54,6 +54,15 @@ export const provider: ProviderDefinition = {
             "Optional default bucket reused by object-level actions. Use a bucket from your own OSS resources in the OSS console: https://oss.console.aliyun.com/overview",
         },
         {
+          key: "prefix",
+          label: "Allowlisted Prefix",
+          inputType: "text",
+          required: false,
+          secret: false,
+          placeholder: "documents/",
+          description: "Optional object-key prefix allowlist for object-level actions.",
+        },
+        {
           key: "securityToken",
           label: "Security Token",
           inputType: "password",
