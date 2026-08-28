@@ -1,0 +1,208 @@
+{
+  "schemaVersion": 1,
+  "status": "CONNECTION_INCREMENTAL_P1_FROZEN_WITH_EXTERNAL_BLOCKERS",
+  "baseSha": "3bbd44624933300487a54ee3acba23190b66ee98",
+  "implementationSha": "4542d5c6f774e3b6e72f3fc64ff1007d9820fb7d",
+  "branch": "feat/connection-expansion-p1-data-platforms",
+  "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms",
+  "scope": [
+    "oceanbase",
+    "tidb_sql",
+    "maxcompute",
+    "hologres",
+    "hive",
+    "trino",
+    "elasticsearch",
+    "opensearch"
+  ],
+  "canonicalIds": {
+    "tidb": "Unchanged TiDB Cloud management API provider.",
+    "tidb_sql": "New canonical SQL data-access provider. No migration or alias from tidb because the credentials and actions are semantically different.",
+    "elasticsearch": "Existing provider enhanced in place and retained as the canonical ID.",
+    "opensearch": "No duplicate provider ID. Product detection selects the OpenSearch-compatible PIT protocol inside the shared elasticsearch runtime."
+  },
+  "providers": {
+    "oceanbase": {
+      "result": "BLOCKED",
+      "tier": "beta",
+      "boundary": "New provider; MySQL mode reuses the shared mysql2 runtime and native EXPLAIN budget check. Oracle mode uses an Oracle-wire backend with read-only transaction, bound values, and bounded results.",
+      "actions": [
+        "validate_connection",
+        "list_databases",
+        "list_schemas",
+        "list_tables",
+        "describe_table",
+        "preview_table",
+        "execute_read_query"
+      ],
+      "evidence": "Contract, generated catalog, typecheck, shared database security tests, and Oracle adapter/driver tests. Oracle validation uses the OceanBase-supported V$VERSION identity query; Trino cancellation and bounded query cleanup are covered by runtime behavior.",
+      "blocker": "No real OceanBase MySQL-mode or Oracle-mode service was available for the required end-to-end matrix."
+    },
+    "tidb_sql": {
+      "result": "PASS",
+      "tier": "verified",
+      "boundary": "New SQL provider reusing MySQL wire safety primitives without changing the existing tidb Cloud management provider.",
+      "actions": [
+        "validate_connection",
+        "list_databases",
+        "list_schemas",
+        "list_tables",
+        "describe_table",
+        "preview_table",
+        "execute_read_query"
+      ],
+      "evidence": "docs/connection-expansion/evidence/tidb-sql-real-engine.json",
+      "blocker": null
+    },
+    "maxcompute": {
+      "result": "BLOCKED",
+      "tier": "beta",
+      "boundary": "New provider using @alicloud/maxcompute20220104 for project, table, and column/partition-column metadata. AK/SK and optional STS token remain encrypted server-side.",
+      "actions": ["validate_connection", "list_projects", "list_tables", "describe_table"],
+      "evidence": "Official SDK contract, generated catalog, typecheck, endpoint SSRF checks, bounded credential validation, configured-project scope enforcement, and Control Plane regression tests.",
+      "blocker": "No Alibaba Cloud account was available. The installed official Node SDK exposes metadata/control APIs but no supported SQL execution/result or Tunnel row-fetch API; preview/query remain intentionally absent and are not claimed."
+    },
+    "hologres": {
+      "result": "BLOCKED",
+      "tier": "beta",
+      "boundary": "New provider reusing the PostgreSQL wire runtime with Hologres identity from hg_version(), isolated pool keys, SSL, read-only transactions, and PostgreSQL scan budgets.",
+      "actions": [
+        "validate_connection",
+        "list_databases",
+        "list_schemas",
+        "list_tables",
+        "describe_table",
+        "preview_table",
+        "execute_read_query"
+      ],
+      "evidence": "Contract, generated catalog, typecheck, and shared PostgreSQL/database runtime tests.",
+      "blocker": "No real Hologres endpoint and account were available for version/type/SSL/query compatibility evidence."
+    },
+    "hive": {
+      "result": "PASS",
+      "tier": "verified",
+      "boundary": "New Node-only provider using HiveServer2 Thrift through hive-driver. NoSASL and PLAIN/LDAP are implemented; Kerberos is not claimed.",
+      "actions": [
+        "validate_connection",
+        "list_databases",
+        "list_schemas",
+        "list_tables",
+        "describe_table",
+        "preview_table",
+        "execute_read_query"
+      ],
+      "evidence": "docs/connection-expansion/evidence/hive-real-engine.json",
+      "blocker": "Kerberos requires an operator-installed native kerberos module and a real KDC/service principal."
+    },
+    "trino": {
+      "result": "PASS",
+      "tier": "verified",
+      "boundary": "New Node-only provider implementing the official HTTP statement protocol, same-origin nextUri polling, DELETE cancellation, prepared statements, Basic-over-TLS or explicit no-auth, and bounded pages.",
+      "actions": [
+        "validate_connection",
+        "list_databases",
+        "list_schemas",
+        "list_tables",
+        "describe_table",
+        "preview_table",
+        "execute_read_query"
+      ],
+      "evidence": "docs/connection-expansion/evidence/trino-real-engine.json",
+      "blocker": null
+    },
+    "elasticsearch": {
+      "result": "PASS",
+      "tier": "verified",
+      "boundary": "Existing provider enhanced in place with product detection, response/error byte bounds, PIT/search_after stable pagination, terminal PIT cleanup, and Control Plane read-only lease policy. Existing management actions remain available outside Agent leases.",
+      "actions": [
+        "ping_cluster",
+        "list_indices",
+        "get_index_schema",
+        "query_index",
+        "get_index_stats",
+        "list_aliases",
+        "get_cluster_health",
+        "get_cluster_nodes",
+        "list_shards",
+        "get_document",
+        "count_documents"
+      ],
+      "evidence": "docs/connection-expansion/evidence/elasticsearch-real-engine.json",
+      "blocker": null
+    },
+    "opensearch": {
+      "result": "PASS",
+      "tier": "verified",
+      "boundary": "Compatibility product of the canonical elasticsearch provider; runtime detects OpenSearch and uses its /_search/point_in_time response shape.",
+      "actions": "Same bounded read allowlist as elasticsearch.",
+      "evidence": "docs/connection-expansion/evidence/elasticsearch-real-engine.json#/compatibleProduct",
+      "blocker": null
+    }
+  },
+  "controlPlane": {
+    "reuse": "All providers use the existing tenant/workspace/owner/visibility, encrypted credential store, ACL, revision, ConnectionLease, audit, catalog tier, and enablement path.",
+    "leasePolicy": "The seven canonical data-platform services validate action ownership/executability and issue Agent leases only for declared bounded reads. Elasticsearch mutation, mapping, delete, reindex, and indexing actions are denied.",
+    "credentialExposure": "Provider callers receive connection refs/leases and redacted results; credentials remain in the encrypted server-side store.",
+    "realLifecycleEvidence": "TiDB SQL completed create, encrypted credential verification, validate job, lease invocation, audit/redaction, revoke/replay rejection, and delete through the HTTP Control Plane."
+  },
+  "sharedFiles": [
+    "src/core/database/mysql-runtime.ts",
+    "src/providers/postgresql/runtime.ts",
+    "src/control-plane/data-platform-policy.ts",
+    "src/control-plane/server.ts",
+    "src/control-plane/index.ts",
+    "package.json",
+    "package-lock.json",
+    "artifacts/npm-sbom.json",
+    "artifacts/npm-sbom-cyclonedx.json"
+  ],
+  "generated": {
+    "catalogProviders": 1459,
+    "catalogActions": 15248,
+    "nodeRegistryProviders": 1459,
+    "cloudflareRegistryProviders": 1445,
+    "serviceIdsUnique": true
+  },
+  "verification": {
+    "generateCatalog": "passed",
+    "fixCheck": "passed",
+    "typecheck": "passed",
+    "tests": "173 files passed, 1 skipped; 1553 tests passed, 4 skipped",
+    "build": "passed",
+    "npmAuditOmitDev": "0 vulnerabilities",
+    "npmAudit": "0 vulnerabilities",
+    "gitDiffCheck": "passed",
+    "realEngines": [
+      "TiDB 8.5.3",
+      "Apache Hive 4.0.1",
+      "Trino 477",
+      "Elasticsearch 8.19.4",
+      "OpenSearch 2.19.3"
+    ]
+  },
+  "supplyChain": {
+    "cycloneDx": "artifacts/npm-sbom-cyclonedx.json",
+    "cycloneDxSpec": "1.5",
+    "cycloneDxComponents": 658,
+    "cycloneDxSha256": "2b4b08663eeff54545d4c04b9181de435a09bf8c603a9b994fbfeb0c044bfd6f",
+    "npmLs": "artifacts/npm-sbom.json",
+    "npmLsSha256": "8baa10fcc879c96f8e03ae20e0d477d3f048e2e657a41b837496fc275bcf02d3",
+    "newDependencies": {
+      "@alicloud/maxcompute20220104": "Apache-2.0",
+      "hive-driver": "MIT"
+    }
+  },
+  "integrationNotes": [
+    "Cherry-pick the implementation commit before this handoff commit.",
+    "Do not replace or migrate the existing tidb Cloud management provider.",
+    "Do not create an opensearch provider ID; retain runtime product detection in elasticsearch.",
+    "Keep OceanBase, MaxCompute, and Hologres beta until their external blockers are cleared with real lifecycle evidence.",
+    "Do not merge P2 as part of this delivery."
+  ],
+  "externalBlockers": [
+    "OceanBase MySQL-mode and Oracle-mode services/credentials were unavailable.",
+    "A real Hologres endpoint and credentials were unavailable.",
+    "A real MaxCompute account and data-plane SQL result API were unavailable.",
+    "Hive Kerberos verification requires a real KDC/service principal and optional native kerberos module."
+  ]
+}
