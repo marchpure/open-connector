@@ -206,7 +206,7 @@ describe("connection-service security evidence", () => {
     expect(await connections.get("fixture", "default")).toMatchObject({ id: first.id, revision: "3" });
     database.close();
   });
-  it("rejects replacement of another owner's personal connection", async () => {
+    it("rejects replacement of another owner's personal connection", async () => {
     const database = new DatabaseSync(":memory:");
     const codec = new AesGcmSecretCodec("test-key");
     const ownerConnections = new TenantConnectionStore(database, principal, codec);
