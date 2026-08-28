@@ -9,7 +9,9 @@
     "f52d2d72fb63b52957ed95e781dc18627ac8bb27",
     "fcecc1579f66d6cfca416900522d6211267efb21",
     "e2528f3c2dc2a64d97e3b64b1be20611a88c70a6",
-    "a73e750821baffc34bb35d22d1f3049a495ab136"
+    "a73e750821baffc34bb35d22d1f3049a495ab136",
+    "89aef66613ea491a5203ae425b1be8325c5ee820",
+    "e95c2c00edfd2734dd71f8ec871fa57a94adf28d"
   ],
   "sourceWorktreeIsolation": {
     "path": "/Users/bytedance/.codex/worktrees/knowledge-connection-service-open-connector",
@@ -82,7 +84,7 @@
       "src/server/actions/action-runner.ts",
       "src/server/storage/runtime-store.ts"
     ],
-    "dependencies": ["mysql2", "mssql", "node-sql-parser", "@types/mssql"],
+    "dependencies": ["pg (existing baseline)", "mysql2", "mssql", "node-sql-parser", "@types/mssql"],
     "unchanged": ["Oracle implementation", "BigQuery", "Snowflake", "frontend", "BFF", "AutoSkill"]
   },
   "security": [
@@ -95,6 +97,9 @@
     "Credential replacement revokes prior leases and rotates the bounded connection pool.",
     "SQL Server CA certificates are passed to the Tedious TLS secure-context configuration.",
     "Revoked connection replacement preserves the connection identity and advances its revision.",
+    "Connection replacement is owner-enforced inside the tenant store, preventing same-tenant personal-connection IDOR.",
+    "ClickHouse credential validation maps engine error payloads to stable redacted database error classes.",
+    "MySQL-wire and SQL Server result metadata preserve provider-native type names.",
     "Audit output is tenant-scoped and redacted, and preserves lease invocationId."
   ],
   "verification": {
@@ -102,8 +107,8 @@
     "results": {
       "catalog": "1450 providers and 15196 actions generated",
       "fixCheck": "passed",
-      "focusedTests": "33 passed in the first corrective gate; 25 passed in the final focused regression gate",
-      "fullTests": "167 files passed, 1 skipped; 1505 tests passed, 4 skipped",
+      "focusedTests": "33 passed in the first corrective gate; 25 passed in the second; 35 passed in the security/error gate; 24 passed in the provider-metadata gate",
+      "fullTests": "167 files passed, 1 skipped; 1509 tests passed, 4 skipped",
       "build": "passed",
       "productionAudit": "0 vulnerabilities",
       "fullAudit": "0 vulnerabilities",
@@ -123,7 +128,7 @@
       "npm run build",
       "npm audit --omit=dev",
       "npm audit",
-      "npm ls --all --json",
+      "npm ls --all --json > /tmp/connection-w1-npm-ls-final.json",
       "git diff --check"
     ],
     "oracleRegression": {
