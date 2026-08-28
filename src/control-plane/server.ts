@@ -62,6 +62,107 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
   });
   app.get("/v1/health", (context) => context.json({ ok: true }));
   app.get("/v1/catalog", (context) => context.json({ items: catalog.list() }));
+  // These are Connection Service-owned adapters, not OpenConnector providers.
+  // Keep them in a separate capability surface so the browser can present the
+  // real control-plane entry points without inventing provider catalog rows.
+  app.get("/v1/adapters/capabilities", (context) =>
+    context.json({
+      items: [
+        {
+          service: "oracle_database",
+          displayName: "Oracle Database",
+          tier: "beta",
+          connectorDefinitionVersion: "1.0.0",
+          category: "adapter",
+          capabilities: ["validate", "discover"],
+          endpoints: ["/v1/adapters/oracle/validate", "/v1/adapters/oracle/discover"],
+          configSchema: {
+            type: "object",
+            required: ["host", "port"],
+            properties: {
+              host: { type: "string", title: "Host" },
+              port: { type: "integer", title: "Port", default: 1521 },
+              serviceName: { type: "string", title: "Service name" },
+              sid: { type: "string", title: "SID" },
+              allowedSchemas: { type: "array", items: { type: "string" }, title: "Allowed schemas" },
+            },
+          },
+          authSchema: {
+            type: "object",
+            required: ["user", "password"],
+            properties: {
+              user: { type: "string", title: "Username" },
+              password: { type: "string", title: "Password", format: "password" },
+            },
+          },
+        },
+        {
+          service: "rest_openapi",
+          displayName: "REST / OpenAPI",
+          tier: "beta",
+          connectorDefinitionVersion: "1.0.0",
+          category: "adapter",
+          capabilities: ["validate", "invoke"],
+          endpoints: ["/v1/adapters/rest/validate", "/v1/adapters/rest/invoke"],
+          configSchema: {
+            type: "object",
+            required: ["baseUrl", "spec"],
+            properties: {
+              baseUrl: { type: "string", title: "Base URL", format: "uri" },
+              spec: { type: "object", title: "OpenAPI JSON" },
+              confirmed: { type: "boolean", title: "Confirmed" },
+            },
+          },
+          authSchema: {
+            type: "object",
+            properties: {
+              type: { type: "string", title: "Auth type" },
+              header: { type: "string", title: "API key header" },
+              value: { type: "string", title: "API key", format: "password" },
+              token: { type: "string", title: "Bearer token", format: "password" },
+            },
+          },
+        },
+        {
+          service: "mcp",
+          displayName: "MCP Server",
+          tier: "beta",
+          connectorDefinitionVersion: "1.0.0",
+          category: "adapter",
+          capabilities: ["discover", "register", "invoke"],
+          endpoints: ["/v1/adapters/mcp/discover", "/v1/adapters/mcp/definitions"],
+          configSchema: {
+            type: "object",
+            required: ["transport"],
+            properties: {
+              transport: { type: "string", title: "Transport" },
+              endpoint: { type: "string", title: "Endpoint", format: "uri" },
+              command: { type: "string", title: "Local command" },
+              args: { type: "array", items: { type: "string" }, title: "Arguments" },
+              allowedTools: { type: "array", items: { type: "string" }, title: "Allowed tools" },
+            },
+          },
+          authSchema: { type: "object", properties: {} },
+        },
+        {
+          service: "files",
+          displayName: "Files",
+          tier: "beta",
+          connectorDefinitionVersion: "1.0.0",
+          category: "adapter",
+          capabilities: ["upload", "preview", "list"],
+          endpoints: ["/v1/files", "/v1/files/{fileId}/preview"],
+          configSchema: {
+            type: "object",
+            properties: {
+              filename: { type: "string", title: "File" },
+            },
+          },
+          authSchema: { type: "object", properties: {} },
+        },
+      ],
+    }),
+  );
   app.get("/v1/files", async (context) => {
     if (!options.fileStore) return context.json({ items: [] });
     const files = tenantFileAdapter(options, principalOf(context)).list();
@@ -556,6 +657,20 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       );
     }
   });
+  app.post("/v1/adapters/rest/validate", async (context) => {
+    const body = await readJsonBody(context);
+    try {
+      const adapter = RestOpenApiAdapter.fromSpec(
+        requiredString(body.baseUrl),
+        body.spec && typeof body.spec === "object" ? (body.spec as Record<string, unknown>) : undefined,
+        parseRestAuth(body.auth),
+        body.confirmed === true,
+      );
+      return context.json({ result: adapter.describe() });
+    } catch (error) {
+      return jsonError(context, 400, "rest_adapter_error", error instanceof Error ? error.message : "REST validation failed.");
+    }
+  });
   app.post("/v1/web-discovery/sessions", async (context) => {
     const body = await readJsonBody(context);
     try {
@@ -717,6 +832,20 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         400,
         "oracle_adapter_error",
         error instanceof Error ? error.message : "Oracle query failed.",
+      );
+    }
+  });
+  app.post("/v1/adapters/oracle/validate", async (context) => {
+    const body = await readJsonBody(context);
+    try {
+      const adapter = oracleAdapter(options, body);
+      return context.json({ result: await adapter.query("select 1 as ok from dual", {}) });
+    } catch (error) {
+      return jsonError(
+        context,
+        400,
+        "oracle_adapter_error",
+        error instanceof Error ? error.message : "Oracle validation failed.",
       );
     }
   });
