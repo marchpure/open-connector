@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "status": "CONNECTION_INCREMENTAL_P1_FROZEN_WITH_EXTERNAL_BLOCKERS",
   "baseSha": "3bbd44624933300487a54ee3acba23190b66ee98",
-  "implementationSha": "c7386b0e02dac55222c2d00119077dd0b07ad2a2",
+  "implementationSha": "eeefb8483d262c311b35d68f8eac6e25ac036415",
   "branch": "feat/connection-expansion-p1-data-platforms",
   "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms",
   "scope": [
@@ -113,7 +113,7 @@
     "elasticsearch": {
       "result": "PASS",
       "tier": "verified",
-      "boundary": "Existing provider enhanced in place with product detection, response byte bounds, PIT/search_after stable pagination, and Control Plane read-only lease policy. Existing management actions remain available outside Agent leases.",
+      "boundary": "Existing provider enhanced in place with product detection, response/error byte bounds, PIT/search_after stable pagination, terminal PIT cleanup, and Control Plane read-only lease policy. Existing management actions remain available outside Agent leases.",
       "actions": [
         "ping_cluster",
         "list_indices",
@@ -172,7 +172,7 @@
     "npmAuditOmitDev": "0 vulnerabilities",
     "npmAudit": "0 vulnerabilities",
     "gitDiffCheck": "passed",
-      "realEngines": [
+    "realEngines": [
       "TiDB 8.5.3",
       "Apache Hive 4.0.1",
       "Trino 477",
