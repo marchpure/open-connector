@@ -2225,12 +2225,12 @@ describe("ConnectServer", () => {
             grantedScopes: [],
           },
           inputSummary: {
-            query: `${"a".repeat(256)}[truncated]`,
+            query: "[redacted]",
             apiKey: "[redacted]",
             nested: { password: "[redacted]" },
           },
           outputSummary: {
-            query: `${"a".repeat(256)}[truncated]`,
+            query: "[redacted]",
             apiKey: "[redacted]",
             nested: { password: "[redacted]" },
           },

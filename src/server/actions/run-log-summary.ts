@@ -8,6 +8,7 @@ const maxArrayLength = 20;
 const maxObjectKeys = 50;
 const sensitiveKeyPattern =
   /access[-_]?key|api[-_]?key|authorization|client[-_]?secret|cookie|credential|password|private[-_]?key|refresh[-_]?token|secret|session|signature|token/i;
+const sensitiveQueryKeyPattern = /^(?:sql|query|queries|parameters|params)$/i;
 const sensitiveContextPattern = /(^|\.)(cookies?|credentials?|headers?|secrets?)(\.|$)/i;
 const credentialValuePattern = /^(?:Basic|Bearer)\s+\S+|^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/i;
 const sensitiveUrlContextPattern = /callback|download|presigned|signed|temporary|webhook/i;
@@ -84,7 +85,11 @@ function summarizeObject(value: object, path: string[], depth: number, state: Su
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (!descriptor?.enumerable) continue;
       const nextPath = [...path, key];
-      if (sensitiveKeyPattern.test(key) || sensitiveContextPattern.test(nextPath.join("."))) {
+      if (
+        sensitiveKeyPattern.test(key) ||
+        sensitiveQueryKeyPattern.test(key) ||
+        sensitiveContextPattern.test(nextPath.join("."))
+      ) {
         entries.push([key, "[redacted]"]);
       } else {
         entries.push([

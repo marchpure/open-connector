@@ -20,6 +20,24 @@ describe("summarizeForRunLog", () => {
     });
   });
 
+  it("does not retain database query text or bound parameter values in audit summaries", () => {
+    expect(
+      summarizeForRunLog({
+        sql: "select * from accounts where password = 'secret-in-sql'",
+        query: "select * from users where api_key = 'secret-in-sql'",
+        parameters: ["bound-secret", 1],
+        nested: {
+          params: { password: "another-secret" },
+        },
+      }),
+    ).toEqual({
+      sql: "[redacted]",
+      query: "[redacted]",
+      parameters: "[redacted]",
+      nested: { params: "[redacted]" },
+    });
+  });
+
   it("redacts HTTP authorization schemes case-insensitively", () => {
     expect(
       summarizeForRunLog({
