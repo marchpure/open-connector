@@ -6,7 +6,7 @@
     "branch": "feat/connection-expansion-w2-office-storage",
     "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-w2-office-storage",
     "sourceWorktreeUnmodified": true,
-    "implementationCommit": "13f18d7"
+    "implementationCommit": "765ee4f"
   },
   "scope": {
     "included": ["feishu", "dingtalk", "wecom", "aws_s3", "aliyun_oss", "volcengine_tos"],
