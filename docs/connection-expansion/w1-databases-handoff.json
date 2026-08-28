@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "status": "CONNECTION_W1_FROZEN_WITH_EXTERNAL_BLOCKERS",
+  "baseCommit": "69ad6f8028eaf3a34b706012c72dc3f099a348e2",
+  "branch": "feat/connection-expansion-w1-databases",
+  "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-w1-databases",
+  "implementationCommits": ["f52d2d72fb63b52957ed95e781dc18627ac8bb27"],
+  "providers": [
+    {
+      "service": "postgresql",
+      "change": "new",
+      "tier": "verified",
+      "evidence": "docs/connection-expansion/evidence/postgresql-real-engine.json"
+    },
+    {
+      "service": "mysql",
+      "change": "new",
+      "tier": "verified",
+      "evidence": "docs/connection-expansion/evidence/mysql-real-engine.json"
+    },
+    {
+      "service": "sql_server",
+      "change": "new",
+      "tier": "beta",
+      "evidence": "docs/connection-expansion/evidence/sql-server-external-blocker.json"
+    },
+    {
+      "service": "clickhouse",
+      "change": "extended_existing_canonical_provider",
+      "tier": "verified",
+      "evidence": "docs/connection-expansion/evidence/clickhouse-real-engine.json"
+    },
+    {
+      "service": "doris",
+      "change": "new",
+      "tier": "verified",
+      "evidence": "docs/connection-expansion/evidence/doris-real-engine.json"
+    },
+    {
+      "service": "starrocks",
+      "change": "new",
+      "tier": "verified",
+      "evidence": "docs/connection-expansion/evidence/starrocks-real-engine.json"
+    }
+  ],
+  "requiredActions": [
+    "validate_connection",
+    "list_databases",
+    "list_schemas",
+    "list_tables",
+    "describe_table",
+    "preview_table",
+    "execute_read_query"
+  ],
+  "boundaries": {
+    "sharedDatabaseRuntime": "src/core/database/",
+    "existingProviderExtended": "src/providers/clickhouse/",
+    "newProviders": [
+      "src/providers/postgresql/",
+      "src/providers/mysql/",
+      "src/providers/sql_server/",
+      "src/providers/doris/",
+      "src/providers/starrocks/"
+    ],
+    "controlPlaneFiles": [
+      "src/control-plane/index.ts",
+      "src/control-plane/server.ts",
+      "src/control-plane/server.test.ts",
+      "src/control-plane/tenant-store.ts",
+      "src/server/actions/action-runner.ts",
+      "src/server/storage/runtime-store.ts"
+    ],
+    "dependencies": ["mysql2", "mssql", "node-sql-parser", "@types/mssql"],
+    "unchanged": ["Oracle implementation", "BigQuery", "Snowflake", "frontend", "BFF", "AutoSkill"]
+  },
+  "security": [
+    "Parser-first read-only SQL gate rejects writes, procedures, dangerous functions, and multi-statements.",
+    "Queries use native scalar parameter binding and identifiers use engine-specific quoting.",
+    "Results enforce row, byte, timeout, and concurrency budgets.",
+    "PostgreSQL and MySQL use read-only transactions; Doris, StarRocks, and SQL Server reject effective write privileges.",
+    "Private database access requires both OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK and CONNECTION_DATABASE_EGRESS_ALLOWLIST.",
+    "ClickHouse rejects redirects so credentials cannot leave the configured database origin.",
+    "Credential replacement revokes prior leases and rotates the bounded connection pool.",
+    "Audit output is tenant-scoped and redacted, and preserves lease invocationId."
+  ],
+  "verification": {
+    "realEngineHarness": "scripts/verify-database-provider.ts",
+    "results": {
+      "catalog": "1450 providers and 15196 actions generated",
+      "fixCheck": "passed",
+      "focusedTests": "47 passed",
+      "fullTests": "166 files passed, 1 skipped; 1503 tests passed, 4 skipped",
+      "build": "passed",
+      "productionAudit": "0 vulnerabilities",
+      "fullAudit": "0 vulnerabilities",
+      "dependencyInventory": {
+        "path": "/tmp/connection-w1-npm-ls.json",
+        "sha256": "f6d43ba077b31b02c08cc64d55e7ea00b96bb50de057d5b314cb315f54f462e2",
+        "packagesObserved": 1435,
+        "note": "npm ls reported six extraneous optional WASM packages in the existing local node_modules tree; package-lock.json is authoritative."
+      },
+      "gitDiffCheck": "passed"
+    },
+    "commands": [
+      "npm run generate:catalog",
+      "npm run fix-check",
+      "npx vitest run src/control-plane/server.test.ts src/core/database/actions.test.ts src/core/database/runtime.test.ts src/providers/clickhouse/runtime.test.ts src/providers/sql_server/runtime.test.ts",
+      "npm test",
+      "npm run build",
+      "npm audit --omit=dev",
+      "npm audit",
+      "npm ls --all --json",
+      "git diff --check"
+    ],
+    "oracleRegression": {
+      "implementationChanged": false,
+      "existingRealEvidence": "docs/connection-service-evidence.json#realOracle",
+      "tests": "existing Oracle adapter and driver suites"
+    }
+  },
+  "integrationNotes": [
+    "Generated catalog and registry outputs are intentionally gitignored; integration must run npm run generate:catalog and npm run generate:registry after merge.",
+    "Resolve generated-file conflicts by regenerating from provider source definitions and actions.",
+    "Keep sql_server at beta until the blocker evidence exit criteria pass against real Microsoft SQL Server.",
+    "Do not use Azure SQL Edge compatibility results to relabel sql_server as verified."
+  ],
+  "externalBlockers": [
+    {
+      "service": "sql_server",
+      "summary": "The official SQL Server 2022 image is linux/amd64-only on an arm64 Docker host, and registry DNS failed during both emulated-image pull attempts.",
+      "evidence": "docs/connection-expansion/evidence/sql-server-external-blocker.json"
+    }
+  ]
+}
