@@ -189,7 +189,7 @@ export const proxy: ProviderProxyExecutor = async (input, context) => {
 
     const response = await elasticsearchFetch(url, init);
     if (!response.ok) {
-      throw new ProviderRequestError(response.status, await readElasticsearchError(response));
+      throw new ProviderRequestError(response.status, await readElasticsearchError(response, context.signal));
     }
 
     return {
@@ -346,28 +346,58 @@ async function queryElasticsearchIndex(input: Record<string, unknown>, context: 
   const from = readNumber(input.from, 0);
   const size = readNumber(input.size, 10);
   const body = buildSearchBody(input, from, size);
+  let openedPitId: string | undefined;
+  let retainPit = false;
   if (cursor) {
     delete body.from;
     body.pit = { id: cursor.pitId, keep_alive: "1m" };
     body.search_after = cursor.sort;
   } else {
     const pit = await createSearchPointInTime(indexName, context);
+    openedPitId = requireElasticsearchField(pit.payload.id ?? pit.payload.pit_id, "point-in-time id");
     body.pit = {
-      id: requireElasticsearchField(pit.payload.id ?? pit.payload.pit_id, "point-in-time id"),
+      id: openedPitId,
       keep_alive: "1m",
     };
     delete body.from;
   }
   if (!body.sort) body.sort = [{ _shard_doc: "asc" }];
-  const { payload } = await elasticsearchRequest<Record<string, unknown>>({
-    ...context,
-    method: "POST",
-    path: "/_search",
-    body,
-    phase: "execute",
-  });
+  try {
+    const { payload } = await elasticsearchRequest<Record<string, unknown>>({
+      ...context,
+      method: "POST",
+      path: "/_search",
+      body,
+      phase: "execute",
+    });
+    const result = normalizeBoundedSearchResponse(indexName, payload, from, size);
+    retainPit = result.pagination.nextCursor !== null;
+    return result;
+  } finally {
+    if (openedPitId && !retainPit) {
+      await closeSearchPointInTime(openedPitId, context).catch(() => undefined);
+    }
+  }
+}
 
-  return normalizeBoundedSearchResponse(indexName, payload, from, size);
+async function closeSearchPointInTime(pitId: string, context: ElasticsearchActionContext): Promise<void> {
+  try {
+    await elasticsearchRequest({
+      ...context,
+      method: "DELETE",
+      path: "/_pit",
+      body: { id: pitId },
+      phase: "execute",
+    });
+  } catch {
+    await elasticsearchRequest({
+      ...context,
+      method: "DELETE",
+      path: "/_search/point_in_time",
+      body: { pit_id: pitId },
+      phase: "execute",
+    });
+  }
 }
 
 async function createSearchPointInTime(
@@ -510,7 +540,7 @@ async function elasticsearchRequest<T>(input: ElasticsearchRequestInput): Promis
     };
   }
 
-  const message = await readElasticsearchError(response);
+  const message = await readElasticsearchError(response, input.signal);
   if (response.status === 429) {
     throw new ProviderRequestError(429, message);
   }
@@ -638,8 +668,15 @@ function identifySearchProduct(payload: Record<string, unknown>): {
   throw new ProviderRequestError(400, "Server did not identify as Elasticsearch or OpenSearch.");
 }
 
-async function readElasticsearchError(response: Response) {
-  const text = await response.text().catch(() => "");
+async function readElasticsearchError(response: Response, signal?: AbortSignal) {
+  const text = await readBoundedResponseBytes(response, {
+    maxBytes: 64 * 1024,
+    fieldName: "Elasticsearch error response",
+    signal,
+    createError: () => new ProviderRequestError(502, "Elasticsearch error response exceeds the response budget"),
+  })
+    .then((bytes) => new TextDecoder().decode(bytes))
+    .catch(() => "");
   if (!text.trim()) {
     return `elasticsearch request failed with ${response.status}`;
   }
