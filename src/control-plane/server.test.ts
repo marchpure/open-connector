@@ -522,6 +522,24 @@ describe("connection control API", () => {
     expect(await leasedDiscovery.json()).toMatchObject({
       job: { kind: "discover", status: "succeeded", result: { service: "fixture", resources: [], actions: [] } },
     });
+
+    const updated = await app.request(`/v1/connections/${connectionId}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({ connectionName: "renamed" }),
+    });
+    expect(updated.status).toBe(200);
+    const staleDiscovery = await app.request(`/v1/connections/${connectionId}/discover`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${auth}`,
+        "x-connection-lease": discoveryLease.token,
+        "x-connection-invocation-id": "discover-invocation",
+        "x-connection-audience": "knowledge-runtime",
+      },
+    });
+    expect(staleDiscovery.status).toBe(401);
+    expect(await staleDiscovery.json()).toMatchObject({ error: { code: "lease_scope_denied" } });
     database.close();
   });
 

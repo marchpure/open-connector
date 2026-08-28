@@ -1,6 +1,6 @@
 {
   "status": "CONNECTION_W2_FROZEN_WITH_EXTERNAL_BLOCKERS",
-  "recordedAt": "2026-08-28T03:48:17Z",
+  "recordedAt": "2026-08-28T04:14:33Z",
   "baseline": {
     "sourceCommit": "69ad6f8028eaf3a34b706012c72dc3f099a348e2",
     "branch": "feat/connection-expansion-w2-office-storage",
@@ -27,7 +27,7 @@
     "controlPlane": "All providers are loaded by the generated lazy registry and execute through the tenant-scoped Connection Service, encrypted credential store, ACL/visibility checks, ConnectionLease, action policy, audit store, and catalog enablement.",
     "credentialHandling": "Only encrypted credential ciphertext is persisted. Profiles and action results are redacted. Runtime code does not call lark-cli, DingTalk CLI, browser sessions, or Studio-managed credentials.",
     "egress": "Provider egress uses the shared guarded fetch or explicit guarded endpoint validation. User-supplied source URLs remain public-only. Alibaba OSS SDK requests use a custom urllib adapter backed by the injected guarded fetch and bounded response reads.",
-    "boundedReads": "Object downloads and sourceUrl ingestion use transit storage/readBoundedResponseBytes with abort cleanup. Office and object listing actions expose bounded pages or cursors. Office ResourceRef schema hints are depth/field/size bounded and redact credential-like fields. Control-plane discovery requires a verified ConnectionLease for the provider discover_resources action.",
+    "boundedReads": "Object downloads and sourceUrl ingestion use transit storage/readBoundedResponseBytes with abort cleanup. Office and object listing actions expose bounded pages or cursors. Office ResourceRef schema hints and DingTalk/WeCom directory action results are depth/item/field/size bounded and redact credential-like fields. Control-plane discovery and runtime actions require a ConnectionLease bound to the current connection revision.",
     "writePolicy": "TOS exposes no write/delete/presign actions. Existing S3/OSS write actions remain catalog/runtime compatibility surfaces and require the existing control-plane lease to be explicitly scoped."
   },
   "connections": [
@@ -58,7 +58,13 @@
         "Resource visibility and scope behavior must be proven with the authorized user token.",
         "Large docs, chat history, and attachments must remain paged or transit-bounded."
       ],
-      "sharedFiles": ["src/control-plane/server.ts", "src/control-plane/tenant-store.ts", "src/control-plane/lease.ts", "src/providers/provider-runtime.ts"],
+      "sharedFiles": [
+        "src/control-plane/server.ts",
+        "src/control-plane/tenant-store.ts",
+        "src/control-plane/lease.ts",
+        "src/control-plane/types.ts",
+        "src/providers/provider-runtime.ts"
+      ],
       "dependencies": ["External Feishu app, test tenant, user token, and revocation evidence"]
     },
     {
@@ -85,10 +91,18 @@
       },
       "revocation": "Control-plane revoke/delete and lease revocation are inherited; upstream OAuth token expiry, scope reduction, IDOR, and user/app identity differences require real DingTalk evidence.",
       "officialLimits": [
+        "The current canonical provider exposes visible organization/contact directory data only; directory ResourceRefs are not document or knowledge-base content.",
         "Document/knowledge-base/cloud-drive/table resources are not claimed without verified official API evidence.",
         "dingtalk_bot is message-only compatibility and is not a knowledge connection."
       ],
-      "sharedFiles": ["src/providers/provider-loader.ts", "src/providers/provider-runtime.ts", "scripts/generate-provider-registry.ts"],
+      "sharedFiles": [
+        "src/providers/provider-loader.ts",
+        "src/providers/provider-runtime.ts",
+        "src/control-plane/server.ts",
+        "src/control-plane/lease.ts",
+        "src/control-plane/types.ts",
+        "scripts/generate-provider-registry.ts"
+      ],
       "dependencies": ["DingTalk internal app, OAuth callback, test enterprise, and user account"]
     },
     {
@@ -115,10 +129,18 @@
       },
       "revocation": "Control-plane revoke/delete and lease revocation are inherited; token invalidation, scope denial, cross-tenant IDOR, and group visibility require real WeCom evidence.",
       "officialLimits": [
+        "The current canonical provider exposes visible enterprise directory data only; department ResourceRefs are not document or knowledge-base content.",
         "Historical messages, documents, meetings, and schedules are not claimed by this canonical provider without independent official API and permission evidence.",
         "wecom_bot and wecom_mcp are not substituted for enterprise knowledge access."
       ],
-      "sharedFiles": ["src/providers/provider-loader.ts", "src/providers/provider-runtime.ts", "scripts/generate-provider-registry.ts"],
+      "sharedFiles": [
+        "src/providers/provider-loader.ts",
+        "src/providers/provider-runtime.ts",
+        "src/control-plane/server.ts",
+        "src/control-plane/lease.ts",
+        "src/control-plane/types.ts",
+        "scripts/generate-provider-registry.ts"
+      ],
       "dependencies": ["WeCom test enterprise, internal app, agent, secret, and visible group"]
     },
     {
@@ -152,7 +174,13 @@
         "Writes/deletes/presigned URLs remain available only when explicitly lease-allowed.",
         "Downloads are bounded by transit storage; sourceUrl reads are abort-safe; object keys reject control characters, dot segments, and bucket/prefix escapes."
       ],
-      "sharedFiles": ["src/control-plane/server.ts", "src/control-plane/tenant-store.ts", "src/core/request.ts"],
+      "sharedFiles": [
+        "src/control-plane/server.ts",
+        "src/control-plane/tenant-store.ts",
+        "src/control-plane/lease.ts",
+        "src/control-plane/types.ts",
+        "src/core/request.ts"
+      ],
       "dependencies": ["AWS test account, IAM policy, bucket, versioned object, and optional MinIO beta fixture"]
     },
     {
@@ -186,7 +214,13 @@
         "OSS endpoint/signature/error semantics remain OSS-native and are not replaced with S3 aliases.",
         "Downloads are bounded by transit storage; sourceUrl reads are abort-safe; object keys reject control characters, dot segments, and allowlist escapes."
       ],
-      "sharedFiles": ["src/control-plane/server.ts", "src/control-plane/tenant-store.ts", "src/core/request.ts"],
+      "sharedFiles": [
+        "src/control-plane/server.ts",
+        "src/control-plane/tenant-store.ts",
+        "src/control-plane/lease.ts",
+        "src/control-plane/types.ts",
+        "src/core/request.ts"
+      ],
       "dependencies": ["Alibaba Cloud test account, RAM policy, OSS bucket/object, and STS fixture"]
     },
     {
@@ -223,7 +257,14 @@
         "Only one configured bucket is discoverable; object keys must remain within the prefix allowlist.",
         "Writes and deletes are intentionally absent from the Agent action catalog."
       ],
-      "sharedFiles": ["src/providers/provider-loader.ts", "src/core/request.ts", "scripts/generate-provider-registry.ts"],
+      "sharedFiles": [
+        "src/providers/provider-loader.ts",
+        "src/core/request.ts",
+        "src/control-plane/server.ts",
+        "src/control-plane/lease.ts",
+        "src/control-plane/types.ts",
+        "scripts/generate-provider-registry.ts"
+      ],
       "dependencies": ["Volcengine test account, TOS bucket/object, IAM policy, and STS fixture"]
     }
   ],
@@ -231,14 +272,15 @@
     "passed": [
       "npm run generate:catalog",
       "npm run fix-check",
-      "npm exec vitest run src/core/request.test.ts src/control-plane/server.test.ts src/providers/office-discovery.test.ts src/providers/aws_s3/executors.test.ts src/providers/aliyun_oss/executors.test.ts src/providers/volcengine_tos/executors.test.ts (6 files, 75 tests passed)",
-      "npm test -- --run (165 files passed, 1 skipped; 1484 tests passed, 4 skipped)",
+      "npm exec vitest run src/core/request.test.ts src/control-plane/server.test.ts src/providers/office-discovery.test.ts src/providers/aws_s3/executors.test.ts src/providers/aliyun_oss/executors.test.ts src/providers/volcengine_tos/executors.test.ts (6 files, 77 tests passed)",
+      "npm test -- --run (165 files passed, 1 skipped; 1487 tests passed, 4 skipped)",
       "npm run build (typecheck passed)",
       "npm audit --audit-level=high (0 vulnerabilities)",
-      "npm ls --all --json > artifacts/npm-sbom.json (artifacts/npm-sbom.json)",
+      "npm ls --all --json > artifacts/npm-sbom.json (release-time SBOM; local install reports six extraneous optional WASM packages and no vulnerabilities)",
       "git diff --check",
       "Control-plane lease rejection and discovery failure audit records are redacted and retain invocationId.",
-      "Bounded Feishu/DingTalk/WeCom ResourceRef schema redaction and directory discovery tests; S3/OSS/TOS bounded-read and object-key safety tests."
+      "Bounded Feishu/DingTalk/WeCom ResourceRef schema redaction and directory discovery tests; S3/OSS/TOS bounded-read and object-key safety tests.",
+      "ConnectionLease revision binding rejects stale discovery/action invocations after connection updates."
     ],
     "notRunOrBlocked": [
       "Real Feishu connection create-authorize-validate-discover-lease-read-audit-revoke-delete",

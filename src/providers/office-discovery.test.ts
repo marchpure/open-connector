@@ -2,8 +2,10 @@ import type { ExecutionContext, ResolvedCredential } from "../core/types.ts";
 
 import { describe, expect, it, vi } from "vitest";
 import { discoverResources as discoverDingTalkResources } from "./dingtalk/executors.ts";
+import { dingtalkActionHandlers } from "./dingtalk/executors.ts";
 import { discoverResources as discoverFeishuResources } from "./feishu/executors.ts";
 import { discoverResources as discoverWeComResources } from "./wecom/executors.ts";
+import { wecomActionHandlers } from "./wecom/executors.ts";
 
 const oauthCredential: Extract<ResolvedCredential, { authType: "oauth2" }> = {
   authType: "oauth2",
@@ -138,6 +140,36 @@ describe("office provider resource discovery", () => {
       }),
     ]);
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds and redacts DingTalk action list results", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      Response.json({ users: Array.from({ length: 150 }, (_, index) => ({ id: index, token: "secret" })) }),
+    );
+    const result = await dingtalkActionHandlers.search_users(
+      { query: "engineering", size: 100 },
+      { accessToken: "token", tokenType: "Bearer", fetcher },
+    );
+    expect(result).toMatchObject({ items: expect.any(Array) });
+    expect((result as { items: unknown[] }).items).toHaveLength(100);
+    expect(JSON.stringify(result)).not.toContain("secret");
+  });
+
+  it("bounds and redacts WeCom directory action results", async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
+      if (url.pathname.endsWith("/gettoken")) return Response.json({ errcode: 0, access_token: "access-token" });
+      return Response.json({
+        errcode: 0,
+        userlist: Array.from({ length: 1100 }, (_, index) => ({ userid: String(index), secret: "secret" })),
+      });
+    });
+    const result = await wecomActionHandlers.list_users(
+      { departmentId: "1", fetchChild: false },
+      { values: { corpId: "corp-1", agentId: "agent-1", secret: "secret" }, fetcher },
+    );
+    expect(result).toMatchObject({ total: 1000, items: expect.any(Array) });
+    expect(JSON.stringify(result)).not.toContain("secret");
   });
 });
 
