@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "status": "CONNECTION_INCREMENTAL_P1_FROZEN_WITH_EXTERNAL_BLOCKERS",
   "baseSha": "3bbd44624933300487a54ee3acba23190b66ee98",
-  "implementationSha": "eeefb8483d262c311b35d68f8eac6e25ac036415",
+  "implementationSha": "4542d5c6f774e3b6e72f3fc64ff1007d9820fb7d",
   "branch": "feat/connection-expansion-p1-data-platforms",
   "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms",
   "scope": [
@@ -59,7 +59,7 @@
       "tier": "beta",
       "boundary": "New provider using @alicloud/maxcompute20220104 for project, table, and column/partition-column metadata. AK/SK and optional STS token remain encrypted server-side.",
       "actions": ["validate_connection", "list_projects", "list_tables", "describe_table"],
-      "evidence": "Official SDK contract, generated catalog, typecheck, endpoint SSRF checks, bounded credential validation, and Control Plane regression tests.",
+      "evidence": "Official SDK contract, generated catalog, typecheck, endpoint SSRF checks, bounded credential validation, configured-project scope enforcement, and Control Plane regression tests.",
       "blocker": "No Alibaba Cloud account was available. The installed official Node SDK exposes metadata/control APIs but no supported SQL execution/result or Tunnel row-fetch API; preview/query remain intentionally absent and are not claimed."
     },
     "hologres": {
