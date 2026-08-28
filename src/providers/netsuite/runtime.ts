@@ -13,11 +13,24 @@ import {
   requiredString,
 } from "../../core/cast.ts";
 import {
+  assertReadOnlySuiteql,
+  discoverErpCapabilities,
+  erpActionOutput,
+  projectErpFields,
+  readErpInput,
+  requireErpCompanyField,
+  resolveErpCompanyId,
+} from "../../core/erp/runtime.ts";
+import { erpMaxPages, erpMaxResponseBytes } from "../../core/erp/runtime.ts";
+import { withErpConcurrency } from "../../core/erp/runtime.ts";
+import { readBoundedResponseBytes } from "../../core/request.ts";
+import {
   createProviderTimeout,
   isAbortLikeError,
   providerUserAgent,
   ProviderRequestError,
 } from "../provider-runtime.ts";
+import { netsuiteEntities } from "./erp.ts";
 
 const netsuiteRecordPathPrefix = "/services/rest/record/v1";
 const netsuiteQueryPathPrefix = "/services/rest/query/v1";
@@ -48,6 +61,7 @@ interface NetsuiteCredential {
 
 export interface NetsuiteContext extends NetsuiteCredential {
   restBaseUrl: string;
+  companyId?: string;
   fetcher: ProviderFetch;
   signal?: AbortSignal;
 }
@@ -70,6 +84,93 @@ interface OAuthHeaderInput {
 }
 
 export const netsuiteActionHandlers: ProviderActionHandlers<"netsuite", NetsuiteActionHandler> = {
+  async validate_connection(_input, context) {
+    await requestNetsuiteJson({
+      context,
+      path: netsuiteValidationPath,
+      query: { select: "recordTypes" },
+      mode: "execute",
+    });
+    return { accountId: context.accountId, apiVersion: "SuiteTalk REST v1" };
+  },
+  async discover_capabilities(_input, context) {
+    await requestNetsuiteJson({
+      context,
+      path: netsuiteValidationPath,
+      query: { select: "recordTypes" },
+      mode: "execute",
+    });
+    const capabilities = [];
+    for (const entity of netsuiteEntities) {
+      try {
+        const companyField = requireErpCompanyField(entity, context.companyId);
+        const predicates = companyField ? [`${quoteIdentifier(companyField)} = ${numericId(context.companyId!)}`] : [];
+        await requestNetsuiteJson({
+          context,
+          path: `${netsuiteQueryPathPrefix}/suiteql`,
+          query: { limit: 1, offset: 0 },
+          method: "POST",
+          body: {
+            q: `SELECT ${entity.fields.map(quoteIdentifier).join(", ")} FROM ${quoteIdentifier(entity.entity)}${
+              predicates.length ? ` WHERE ${predicates.join(" AND ")}` : ""
+            }`,
+          },
+          extraHeaders: { Prefer: "transient" },
+          mode: "execute",
+        });
+        capabilities.push(...discoverErpCapabilities([entity]));
+      } catch (error) {
+        if (error instanceof ProviderRequestError && [400, 403, 404, 422].includes(error.status)) continue;
+        throw error;
+      }
+    }
+    if (capabilities.length === 0) {
+      throw new ProviderRequestError(422, "No supported ERP entities are visible to this connection", {
+        code: "unsupported",
+        supportedDomains: [],
+      });
+    }
+    return { capabilities };
+  },
+  async list_entities(rawInput, context) {
+    const { input, entity } = readErpInput(rawInput, netsuiteEntities);
+    const companyId = resolveErpCompanyId(input.companyId, context.companyId);
+    const companyField = requireErpCompanyField(entity, companyId);
+    const offset = readCursor(input.cursor);
+    const fields = input.fields;
+    const predicates: string[] = [];
+    if (input.modifiedFrom) predicates.push(`lastmodifieddate >= TIMESTAMP ${sqlLiteral(input.modifiedFrom)}`);
+    if (input.modifiedTo) predicates.push(`lastmodifieddate < TIMESTAMP ${sqlLiteral(input.modifiedTo)}`);
+    if (companyId && companyField) {
+      predicates.push(`${quoteIdentifier(companyField)} = ${numericId(companyId)}`);
+    }
+    const query = assertReadOnlySuiteql(
+      `SELECT ${fields.map(quoteIdentifier).join(", ")} FROM ${quoteIdentifier(entity.entity)}${
+        predicates.length ? ` WHERE ${predicates.join(" AND ")}` : ""
+      }`,
+    );
+    const page = normalizeCollection(
+      await requestNetsuiteJson({
+        context,
+        path: `${netsuiteQueryPathPrefix}/suiteql`,
+        query: { limit: input.pageSize, offset },
+        method: "POST",
+        body: { q: query },
+        extraHeaders: { Prefer: "transient" },
+        mode: "execute",
+      }),
+    );
+    const items = (page.items as Array<Record<string, unknown>>).map((item) => projectErpFields(item, fields));
+    return erpActionOutput(
+      entity,
+      {
+        items,
+        nextCursor: page.hasMore === true ? String(offset + items.length) : undefined,
+        native: { offset, count: items.length, totalResults: page.totalResults, suiteql: true },
+      },
+      input.pageNumber,
+    );
+  },
   run_suiteql(input, context) {
     return runSuiteql(input, context);
   },
@@ -98,6 +199,7 @@ export function resolveNetsuiteCredentialContext(
   return {
     ...credential,
     restBaseUrl,
+    companyId: optionalString(values.companyId),
     fetcher,
     signal,
   };
@@ -134,18 +236,19 @@ export async function validateNetsuiteCredential(
 }
 
 async function runSuiteql(input: Record<string, unknown>, context: NetsuiteContext): Promise<unknown> {
+  const limit = optionalPositiveInteger(input.limit, "limit") ?? 100;
   return {
     result: normalizeCollection(
       await requestNetsuiteJson({
         context,
         path: `${netsuiteQueryPathPrefix}/suiteql`,
         query: compactObject({
-          limit: optionalPositiveInteger(input.limit, "limit"),
-          offset: optionalNonNegativeInteger(input.offset, "offset"),
+          limit,
+          offset: optionalBoundedOffset(input.offset, limit),
         }),
         method: "POST",
         body: {
-          q: requiredInputString(input.query, "query"),
+          q: assertReadOnlySuiteql(requiredInputString(input.query, "query")),
         },
         extraHeaders: {
           Prefer: "transient",
@@ -158,14 +261,15 @@ async function runSuiteql(input: Record<string, unknown>, context: NetsuiteConte
 
 async function listRecords(input: Record<string, unknown>, context: NetsuiteContext): Promise<unknown> {
   const recordType = requiredInputString(input.recordType, "recordType");
+  const limit = optionalPositiveInteger(input.limit, "limit") ?? 100;
   return {
     records: normalizeCollection(
       await requestNetsuiteJson({
         context,
         path: `${netsuiteRecordPathPrefix}/${encodeURIComponent(recordType)}`,
         query: compactObject({
-          limit: optionalPositiveInteger(input.limit, "limit"),
-          offset: optionalNonNegativeInteger(input.offset, "offset"),
+          limit,
+          offset: optionalBoundedOffset(input.offset, limit),
           q: optionalString(input.q),
         }),
         mode: "execute",
@@ -235,6 +339,10 @@ async function requestNetsuiteJson(input: NetsuiteRequestOptions): Promise<unkno
 }
 
 async function requestNetsuiteJsonWithMetadata(input: NetsuiteRequestOptions): Promise<NetsuiteResponsePayload> {
+  return withErpConcurrency(() => requestNetsuiteJsonWithinBudget(input));
+}
+
+async function requestNetsuiteJsonWithinBudget(input: NetsuiteRequestOptions): Promise<NetsuiteResponsePayload> {
   const timeout = createProviderTimeout(input.context.signal, netsuiteRequestTimeoutMs);
   try {
     let response: Response;
@@ -243,11 +351,11 @@ async function requestNetsuiteJsonWithMetadata(input: NetsuiteRequestOptions): P
     } catch (error) {
       throw new ProviderRequestError(
         timeout.didTimeout() || isAbortLikeError(error) ? 504 : 502,
-        error instanceof Error ? `NetSuite request failed: ${error.message}` : "NetSuite request failed",
+        "NetSuite request failed",
       );
     }
 
-    const payload = await readJsonPayload(response);
+    const payload = await readJsonPayload(response, timeout.signal);
     if (!response.ok) {
       const message = payload.kind === "json" ? readErrorMessage(payload.value) : undefined;
       throw mapNetsuiteError(response.status, message, input.mode, input.notFoundAsInvalidInput === true);
@@ -461,8 +569,14 @@ function encodeRfc3986(value: string): string {
     .replaceAll("*", "%2A");
 }
 
-async function readJsonPayload(response: Response): Promise<JsonPayloadReadResult> {
-  const text = await response.text();
+async function readJsonPayload(response: Response, signal?: AbortSignal): Promise<JsonPayloadReadResult> {
+  const bytes = await readBoundedResponseBytes(response, {
+    maxBytes: erpMaxResponseBytes,
+    fieldName: "NetSuite response",
+    signal,
+    createError: (message) => new ProviderRequestError(413, message),
+  });
+  const text = new TextDecoder().decode(bytes);
   if (!text) {
     return { kind: "empty" };
   }
@@ -506,28 +620,27 @@ function mapNetsuiteError(
   mode: NetsuiteMode,
   notFoundAsInvalidInput: boolean,
 ): ProviderRequestError {
-  const detail = message ? `: ${message}` : "";
   if (mode === "validate" && (status === 401 || status === 403)) {
-    return new ProviderRequestError(400, `NetSuite rejected the credential${detail}`);
+    return new ProviderRequestError(400, "NetSuite rejected the credential");
   }
 
   if (status === 401 || status === 403) {
-    return new ProviderRequestError(status, `NetSuite rejected the credential${detail}`);
+    return new ProviderRequestError(status, "NetSuite authentication or role denied");
   }
 
   if (status === 404 && notFoundAsInvalidInput) {
-    return new ProviderRequestError(404, `NetSuite resource was not found${detail}`);
+    return new ProviderRequestError(404, "NetSuite resource was not found");
   }
 
   if (status === 429) {
-    return new ProviderRequestError(429, `NetSuite rate limit exceeded${detail}`);
+    return new ProviderRequestError(429, "NetSuite rate limit exceeded");
   }
 
   if (status >= 400 && status < 500) {
-    return new ProviderRequestError(status, `NetSuite rejected the request${detail}`);
+    return new ProviderRequestError(status, "NetSuite rejected the request");
   }
 
-  return new ProviderRequestError(502, `NetSuite request failed${detail}`);
+  return new ProviderRequestError(502, "NetSuite upstream request failed");
 }
 
 function normalizeCollection(payload: unknown): Record<string, unknown> {
@@ -568,19 +681,19 @@ function optionalPositiveInteger(value: unknown, fieldName: string): number | un
   if (value == null) {
     return undefined;
   }
-  if (result === undefined || result <= 0) {
-    throw new ProviderRequestError(400, `${fieldName} must be a positive integer`);
+  if (result === undefined || result <= 0 || result > 200) {
+    throw new ProviderRequestError(400, `${fieldName} must be between 1 and 200`);
   }
   return result;
 }
 
-function optionalNonNegativeInteger(value: unknown, fieldName: string): number | undefined {
+function optionalBoundedOffset(value: unknown, pageSize: number): number | undefined {
   const result = optionalInteger(value);
   if (value == null) {
     return undefined;
   }
-  if (result === undefined || result < 0) {
-    throw new ProviderRequestError(400, `${fieldName} must be a non-negative integer`);
+  if (result === undefined || result < 0 || result > pageSize * (erpMaxPages - 1)) {
+    throw new ProviderRequestError(400, `offset must stay within ${erpMaxPages} pages`);
   }
   return result;
 }
@@ -591,4 +704,27 @@ function providerInputError(message: string): ProviderRequestError {
 
 function providerOutputError(message: string): ProviderRequestError {
   return new ProviderRequestError(502, message);
+}
+
+function readCursor(value: string | undefined): number {
+  if (!value) return 0;
+  const offset = Number(value);
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new ProviderRequestError(400, "cursor is invalid");
+  return offset;
+}
+
+function quoteIdentifier(value: string): string {
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/u.test(value)) {
+    throw new ProviderRequestError(400, "NetSuite entity or field name is invalid");
+  }
+  return value;
+}
+
+function numericId(value: string): string {
+  if (!/^\d+$/u.test(value)) throw new ProviderRequestError(400, "companyId must be numeric for NetSuite");
+  return value;
+}
+
+function sqlLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
 }

@@ -1,7 +1,9 @@
 import type { ActionDefinition } from "../../core/types.ts";
 
+import { defineErpReadActions } from "../../core/erp/actions.ts";
 import { s } from "../../core/json-schema.ts";
 import { defineProviderAction } from "../../core/provider-definition.ts";
+import { netsuiteEntities } from "./erp.ts";
 
 const service = "netsuite";
 
@@ -11,7 +13,7 @@ const recordTypeSchema = s.nonEmptyString(
 const recordIdSchema = s.nonEmptyString("The NetSuite internal ID or external ID for the record.");
 const limitSchema = s.integer("The maximum number of NetSuite records to return.", {
   minimum: 1,
-  maximum: 1000,
+  maximum: 200,
 });
 const offsetSchema = s.nonNegativeInteger("The zero-based NetSuite result offset.");
 const looseRecordSchema = s.looseObject("A NetSuite JSON object with record-type-specific fields.");
@@ -29,6 +31,7 @@ const collectionSchema = s.looseRequiredObject("A NetSuite paged collection resp
 });
 
 export const netsuiteActions: ActionDefinition[] = [
+  ...defineErpReadActions(service, netsuiteEntities),
   defineProviderAction(service, {
     name: "run_suiteql",
     description: "Execute a SuiteQL query through NetSuite REST Web Services.",

@@ -7,6 +7,8 @@ const service = "erpnext";
 export const provider: ProviderDefinition = {
   service,
   displayName: "ERPNext",
+  description:
+    "ERPNext through the official Frappe REST API. Agent leases expose explicit bounded read-only ERP domain mappings; legacy generic CRUD remains outside Agent leases.",
   categories: ["Productivity", "Finance"],
   authTypes: ["api_key"],
   auth: [
@@ -35,6 +37,24 @@ export const provider: ProviderDefinition = {
           placeholder: "api_secret",
           description:
             "ERPNext API secret paired with the API key for token authentication. Frappe shows it in the Generate Keys popup in the user record's API Access section: https://docs.frappe.io/framework/user/en/api/rest",
+        },
+        {
+          key: "privateRunner",
+          label: "Use controlled private runner",
+          inputType: "text",
+          required: false,
+          secret: false,
+          placeholder: "true",
+          description:
+            "Required for private instances together with CONNECTION_ERP_PRIVATE_RUNNER, OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK, and CONNECTION_ERP_EGRESS_ALLOWLIST.",
+        },
+        {
+          key: "companyId",
+          label: "Default company",
+          inputType: "text",
+          required: false,
+          secret: false,
+          description: "Optional ERPNext company name used as the fixed legal-entity boundary for Agent reads.",
         },
       ],
     },

@@ -5,12 +5,27 @@ export type ConnectionStatus = "draft" | "validating" | "ready" | "degraded" | "
 export type CatalogTier = "catalog" | "beta" | "verified";
 
 /**
- * Provider-neutral identity for a resource discovered through an office
+ * Provider-neutral identity for a resource discovered through a managed
  * connection. Provider actions may add native fields, but reads must retain
  * this stable reference and re-check upstream authorization.
  */
 export interface ResourceRef {
-  sourceType: "feishu" | "dingtalk" | "wecom" | "aws_s3" | "aliyun_oss" | "volcengine_tos";
+  sourceType:
+    | "feishu"
+    | "dingtalk"
+    | "wecom"
+    | "aws_s3"
+    | "aliyun_oss"
+    | "volcengine_tos"
+    | "erpnext"
+    | "netsuite"
+    | "sap_s4hana"
+    | "oracle_fusion_erp"
+    | "dynamics_365_finance"
+    | "dynamics_365_business_central"
+    | "odoo"
+    | "kingdee_cloud"
+    | "yonyou_bip";
   tenantId: string;
   workspaceId: string;
   connectionId: string;

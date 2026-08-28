@@ -391,6 +391,27 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         "Storage write, delete, and presign actions require the connection owner.",
       );
     }
+    if (isErpService(connection.service)) {
+      const providerActionIds = new Set(
+        options.catalog.providers
+          .find((provider) => provider.service === connection.service)
+          ?.actions.map((action) => action.id) ?? [],
+      );
+      const unknownActions = requestedActions.filter(
+        (actionId) => !providerActionIds.has(actionId) && actionId !== `${connection.service}.discover_resources`,
+      );
+      if (unknownActions.length > 0) {
+        return jsonError(context, 400, "invalid_action", "Every leased action must belong to the selected connection.");
+      }
+    }
+    if (requestedActions.some(isErpMutationAction)) {
+      return jsonError(
+        context,
+        403,
+        "action_not_allowed",
+        "ERP mutation actions are disabled for Agent leases in this release.",
+      );
+    }
     try {
       const issued = leases.issue(principalOf(context), {
         connectionIds: [connectionId],
@@ -829,6 +850,18 @@ function optionalString(value: unknown): string | undefined {
 
 function isOwnerControlledStorageAction(actionId: string): boolean {
   return /^(?:aws_s3|aliyun_oss)\.(?:put_object|delete_object|generate_presigned_url)$/u.test(actionId);
+}
+
+function isErpMutationAction(actionId: string): boolean {
+  return /^(?:erpnext\.(?:list_documents|get_document|get_document_count|get_document_value|create_document|update_document|delete_document|set_document_value)|netsuite\.(?:run_suiteql|list_records|get_record|create_record|update_record))$/u.test(
+    actionId,
+  );
+}
+
+function isErpService(service: string): boolean {
+  return /^(?:erpnext|netsuite|sap_s4hana|oracle_fusion_erp|dynamics_365_finance|dynamics_365_business_central|odoo|kingdee_cloud|yonyou_bip)$/u.test(
+    service,
+  );
 }
 
 function optionalVisibility(value: unknown): "personal" | "team" | undefined {

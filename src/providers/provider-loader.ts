@@ -16,7 +16,22 @@ export interface ExecutorModule {
 }
 
 export interface ProviderResourceCandidate {
-  sourceType: "feishu" | "dingtalk" | "wecom" | "aws_s3" | "aliyun_oss" | "volcengine_tos";
+  sourceType:
+    | "feishu"
+    | "dingtalk"
+    | "wecom"
+    | "aws_s3"
+    | "aliyun_oss"
+    | "volcengine_tos"
+    | "erpnext"
+    | "netsuite"
+    | "sap_s4hana"
+    | "oracle_fusion_erp"
+    | "dynamics_365_finance"
+    | "dynamics_365_business_central"
+    | "odoo"
+    | "kingdee_cloud"
+    | "yonyou_bip";
   resourceId: string;
   resourceToken?: string;
   version?: string;
