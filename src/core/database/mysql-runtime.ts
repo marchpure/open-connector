@@ -8,6 +8,7 @@ import {
   assertReadOnlySql,
   boundedQueryResult,
   credentialPoolKey,
+  databaseScanBudgetBytes,
   databaseScanBudgetRows,
   DatabaseRuntimeError,
   normalizeDatabaseError,
@@ -23,6 +24,11 @@ interface MysqlBackendOptions {
   versionMatches: (version: string) => boolean;
   identityQuery?: string;
   identityVersionField?: string;
+}
+
+interface ReadSessionOptions {
+  enforceScanBudget?: boolean;
+  maxRows?: number;
 }
 
 const pools = new Map<string, { credentialKey: string; pool: Pool }>();
@@ -181,7 +187,10 @@ class MysqlWireBackend implements DatabaseBackend {
   async previewTable(database: string | undefined, schema: string | undefined, table: string, page: Page) {
     const selected = schema ?? database ?? this.config.database;
     const sql = `select * from ${quoteIdentifier(selected, "backtick")}.${quoteIdentifier(table, "backtick")} limit ${page.pageSize + 1} offset ${page.offset}`;
-    const [rows, fields] = await this.readSession(sql, []);
+    const [rows, fields] = await this.readSession(sql, [], 30_000, {
+      enforceScanBudget: true,
+      maxRows: page.pageSize + 1,
+    });
     return boundedQueryResult(
       rows as Record<string, unknown>[],
       fields.map((field) => ({ name: field.name, dataType: String(field.type) })),
@@ -197,7 +206,10 @@ class MysqlWireBackend implements DatabaseBackend {
   ): Promise<QueryResult> {
     assertReadOnlySql(query, "mysql");
     const bounded = `select * from (${stripFinalSemicolon(query)}) as openconnector_read limit ${limits.maxRows + 1}`;
-    const [rows, fields] = await this.readSession(bounded, parameters, limits.timeoutMs);
+    const [rows, fields] = await this.readSession(bounded, parameters, limits.timeoutMs, {
+      enforceScanBudget: true,
+      maxRows: limits.maxRows + 1,
+    });
     return boundedQueryResult(
       rows as Record<string, unknown>[],
       fields.map((field) => ({ name: field.name, dataType: String(field.type) })),
@@ -210,6 +222,7 @@ class MysqlWireBackend implements DatabaseBackend {
     sql: string,
     parameters: DatabaseScalar[],
     timeoutMs = 30_000,
+    options: ReadSessionOptions = {},
   ): Promise<Awaited<ReturnType<PoolConnection["execute"]>>> {
     let connection: PoolConnection | undefined;
     const abort = (): void => connection?.destroy();
@@ -222,8 +235,11 @@ class MysqlWireBackend implements DatabaseBackend {
       } else {
         await assertMysqlWireReadOnlyPrincipal(connection, this.options.engine);
       }
-      if (this.options.service === "mysql" && sql.includes("openconnector_read")) {
-        await assertMysqlScanBudget(connection, sql, parameters, timeoutMs);
+      if (this.options.service !== "mysql") {
+        await configureAnalyticalSession(connection, timeoutMs, options.maxRows);
+      }
+      if (options.enforceScanBudget) {
+        await assertMysqlScanBudget(connection, sql, parameters, timeoutMs, this.options.service);
       }
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -256,14 +272,24 @@ async function assertMysqlScanBudget(
   sql: string,
   parameters: DatabaseScalar[],
   timeoutMs: number,
+  service: MysqlBackendOptions["service"] = "mysql",
 ): Promise<void> {
-  const [rows] = await connection.query(
-    {
-      sql: `EXPLAIN FORMAT=JSON ${sql}`,
-      timeout: timeoutMs,
-    },
-    parameters,
-  );
+  if (service !== "mysql") {
+    const [rows] = await queryWithTimeout(connection, `EXPLAIN ${sql}`, parameters, timeoutMs);
+    const explanation = (rows as RowDataPacket[])
+      .flatMap((row) => Object.values(row))
+      .filter((value): value is string => typeof value === "string")
+      .join("\n");
+    const estimates = [...explanation.matchAll(/\bcardinality\s*=\s*([0-9]+)/gi)].map((match) => Number(match[1]));
+    if (estimates.some((estimate) => estimate > databaseScanBudgetRows)) {
+      throw new DatabaseRuntimeError(
+        "database_budget_exceeded",
+        `${service === "doris" ? "Doris" : "StarRocks"} query exceeds the configured scan row budget.`,
+      );
+    }
+    return;
+  }
+  const [rows] = await queryWithTimeout(connection, `EXPLAIN FORMAT=JSON ${sql}`, parameters, timeoutMs);
   const raw = Object.values((rows as RowDataPacket[])[0] ?? {})[0];
   if (typeof raw !== "string") return;
   let plan: unknown;
@@ -274,6 +300,41 @@ async function assertMysqlScanBudget(
   }
   if (maximumEstimatedRows(plan) > databaseScanBudgetRows) {
     throw new DatabaseRuntimeError("database_budget_exceeded", "MySQL query exceeds the configured scan row budget.");
+  }
+}
+
+async function queryWithTimeout(
+  connection: PoolConnection,
+  sql: string,
+  parameters: DatabaseScalar[],
+  timeoutMs: number,
+): Promise<Awaited<ReturnType<PoolConnection["query"]>>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      connection.query(sql, parameters),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          connection.destroy();
+          reject(new DatabaseRuntimeError("database_timeout", "Database request timed out."));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function configureAnalyticalSession(
+  connection: PoolConnection,
+  timeoutMs: number,
+  maxRows: number | undefined,
+): Promise<void> {
+  const timeoutSeconds = Math.max(1, Math.ceil(Math.min(timeoutMs, 30_000) / 1000));
+  await connection.query(`SET SESSION query_timeout = ${timeoutSeconds}`);
+  await connection.query(`SET SESSION exec_mem_limit = ${databaseScanBudgetBytes}`);
+  if (maxRows !== undefined) {
+    await connection.query(`SET SESSION sql_select_limit = ${Math.max(1, Math.min(maxRows, 1000))}`);
   }
 }
 

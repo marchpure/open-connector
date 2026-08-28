@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "service": "clickhouse",
   "engineImage": "clickhouse/clickhouse-server:25.8",
-  "capturedAt": "2026-08-28T03:08:08.215Z",
+  "capturedAt": "2026-08-28T06:15:14.550Z",
   "environment": {
     "architecture": "arm64",
     "platform": "darwin"
