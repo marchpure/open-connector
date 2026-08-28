@@ -106,8 +106,18 @@ export class TenantConnectionStore implements IConnectionStore {
   async set(service: string, connectionName: string, credential: ResolvedCredential): Promise<StoredConnection> {
     const existing = await this.get(service, connectionName);
     const now = new Date().toISOString();
-    const id = existing?.id ?? randomUUID();
-    const revision = (existing ? Number(existing.revision) : 0) + 1;
+    const revoked = existing
+      ? undefined
+      : (this.database
+          .prepare(
+            `select id, revision from tenant_connections
+              where tenant_id=? and workspace_id=? and service=? and connection_name=?`,
+          )
+          .get(this.principal.tenantId, this.principal.workspaceId, service, connectionName) as
+          | { id?: unknown; revision?: unknown }
+          | undefined);
+    const id = existing?.id ?? (revoked?.id ? String(revoked.id) : randomUUID());
+    const revision = existing ? Number(existing.revision) + 1 : Number(revoked?.revision ?? 0) + 1;
     const profile =
       credential.authType === "no_auth"
         ? { accountId: `${service}:public`, displayName: service, grantedScopes: [] }

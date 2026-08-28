@@ -183,4 +183,27 @@ describe("connection-service security evidence", () => {
     });
     database.close();
   });
+
+  it("reuses a revoked connection identity while advancing its revision", async () => {
+    const database = new DatabaseSync(":memory:");
+    const codec = new AesGcmSecretCodec("test-key");
+    const connections = new TenantConnectionStore(database, principal, codec);
+    const first = await connections.set("fixture", "default", {
+      authType: "custom_credential",
+      values: { secret: "first" },
+      profile: { accountId: "first", displayName: "first", grantedScopes: [] },
+      metadata: {},
+    });
+    await connections.delete("fixture", "default");
+    const replacement = await connections.set("fixture", "default", {
+      authType: "custom_credential",
+      values: { secret: "second" },
+      profile: { accountId: "second", displayName: "second", grantedScopes: [] },
+      metadata: {},
+    });
+
+    expect(replacement).toMatchObject({ id: first.id, revision: "3" });
+    expect(await connections.get("fixture", "default")).toMatchObject({ id: first.id, revision: "3" });
+    database.close();
+  });
 });

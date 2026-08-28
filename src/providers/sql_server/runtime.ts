@@ -84,6 +84,7 @@ export async function createSqlServerBackend(
         instanceName: config.instanceName,
         encrypt: config.encrypt,
         trustServerCertificate: config.trustServerCertificate,
+        ...(config.caCertificate ? { cryptoCredentialsDetails: { ca: config.caCertificate } } : {}),
         enableArithAbort: true,
         appName: "OpenConnector",
       },
