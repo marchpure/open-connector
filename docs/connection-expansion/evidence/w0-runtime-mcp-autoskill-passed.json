@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "status": "PASSED",
+  "connectionPort": 38101,
+  "protocol": "streamable-http",
+  "client": "AutoSkill McpManager",
+  "protocolSteps": ["initialize", "tools/list", "tools/call"],
+  "tools": ["list_allowed_actions", "get_action_guide", "execute_action"],
+  "actionId": "hackernews.get_max_item_id",
+  "auditPersisted": true,
+  "mcpClientVersion": "1.9.4",
+  "notes": ["No credentials, lease tokens, or provider result values are included."]
+}
