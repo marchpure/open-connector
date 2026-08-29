@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "catalogFiles": 1470,
+  "uniqueServices": 1470,
+  "actions": 15297,
+  "duplicateServices": 0,
+  "malformedFiles": 0,
+  "providerActionServiceMismatches": 0,
+  "missingRequiredProviderFields": 0,
+  "defaultEnabledProvidersAbsentFromCatalog": 0,
+  "enabledProviderExecutorGaps": 0,
+  "notes": [
+    "Catalog presence is not treated as verification.",
+    "The connection-service control-plane adapter is not a catalog provider and is audited separately."
+  ]
+}
