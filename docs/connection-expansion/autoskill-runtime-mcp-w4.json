@@ -4,12 +4,13 @@
   "baseSha": "a3c37f5ae4371bf7efa5d13e252707f19c32af7d",
   "branch": "feat/connection-autoskill-runtime-mcp",
   "endpoint": "/v1/runtime/mcp/sse",
-  "transport": "MCP Streamable HTTP with legacy protocol negotiation",
+  "transport": "MCP Streamable HTTP plus AutoSkill-compatible HTTP/SSE",
   "tools": ["list_allowed_actions", "get_action_guide", "execute_action"],
   "leaseBoundary": {
     "token": "HMAC-signed claims with hash-backed expiry and revocation state",
-    "requiredHeaders": ["X-Connection-Lease", "X-Connection-Invocation-Id", "X-Connection-Audience"],
-    "identitySource": "signed lease only; URL and bearer identity are ignored",
+    "requiredQuery": ["connectionId", "invocationId", "audience"],
+    "requiredHeaders": ["X-Connection-Lease"],
+    "identitySource": "tenant, workspace, subject, and owner come only from the signed lease; URL query selects the leased connection and binds invocation and audience",
     "bindings": [
       "tenant",
       "workspace",
@@ -35,20 +36,15 @@
   },
   "audit": {
     "query": "/v1/audit?invocationId=<id>",
-    "fields": [
-      "connectionId",
-      "actionId",
-      "caller",
-      "startedAt",
-      "completedAt",
-      "ok",
-      "errorCode"
-    ],
+    "fields": ["connectionId", "actionId", "caller", "startedAt", "completedAt", "ok", "errorCode"],
     "redacted": true
   },
   "securityTests": [
     "wrong action id",
-    "cross-connection URL selection ignored",
+    "missing connectionId, invocationId, or audience query",
+    "forged cross-connection URL selection rejected",
+    "query and compatibility header mismatch rejected",
+    "explicit non-first connection selected from a multi-connection lease",
     "expired lease",
     "revoked lease",
     "cross-tenant bearer and audit isolation",
@@ -59,8 +55,8 @@
   ],
   "verification": {
     "fixCheck": "passed",
-    "fullTests": "181 files passed, 1 skipped; 1646 tests passed, 4 skipped",
-    "focusedRuntimeTests": "3 files and 115 tests passed",
+    "fullTests": "181 files passed, 1 skipped; 1649 tests passed, 4 skipped",
+    "focusedRuntimeTests": "3 files and 34 tests passed",
     "build": "passed",
     "catalog": "1470 providers and 15297 actions",
     "npmAudit": "0 vulnerabilities",
@@ -69,7 +65,7 @@
       "status": "passed",
       "command": "node scripts/verify-runtime-mcp.ts",
       "service": "real local Connection Service process",
-      "client": "@modelcontextprotocol/client",
+      "clients": ["@modelcontextprotocol/client", "AutoSkill src.mcp.mcp_manager.McpManager"],
       "protocolSteps": ["initialize", "tools/list", "tools/call"],
       "provider": "hackernews",
       "actionId": "hackernews.get_max_item_id",

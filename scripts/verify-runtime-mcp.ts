@@ -1,8 +1,8 @@
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { resolve, join } from "node:path";
 import { createPrincipalToken } from "../src/control-plane/auth.ts";
 
 const port = 34_271;
@@ -58,12 +58,14 @@ try {
       audience: principal.audience,
     }),
   });
-  const transport = new StreamableHTTPClientTransport(new URL(`${origin}/v1/runtime/mcp/sse`), {
+  const runtimeUrl = new URL(`${origin}/v1/runtime/mcp/sse`);
+  runtimeUrl.searchParams.set("connectionId", created.connection.id);
+  runtimeUrl.searchParams.set("invocationId", invocationId);
+  runtimeUrl.searchParams.set("audience", principal.audience);
+  const transport = new StreamableHTTPClientTransport(runtimeUrl, {
     requestInit: {
       headers: {
         "x-connection-lease": lease.token,
-        "x-connection-invocation-id": invocationId,
-        "x-connection-audience": principal.audience,
       },
     },
   });
@@ -76,6 +78,25 @@ try {
       arguments: { actionId: "hackernews.get_max_item_id", input: {} },
     });
     if (result.isError) throw new Error(`Real provider call failed: ${JSON.stringify(result)}`);
+    const autoskillRoot = process.env.AUTOSKILL_ROOT ?? resolve(process.cwd(), "..", "autoskill-creator-baseline");
+    const python = join(autoskillRoot, "backend", ".venv", "bin", "python");
+    const autoskillSmoke = spawnSync(python, [resolve("scripts/verify-runtime-mcp-autoskill.py")], {
+      cwd: join(autoskillRoot, "backend"),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PYTHONPATH: join(autoskillRoot, "backend"),
+        CONNECTION_RUNTIME_MCP_URL: runtimeUrl.toString(),
+        CONNECTION_RUNTIME_MCP_LEASE: lease.token,
+      },
+    });
+    if (autoskillSmoke.status !== 0) {
+      throw new Error(`AutoSkill Python MCP smoke failed:\n${autoskillSmoke.stdout}\n${autoskillSmoke.stderr}`);
+    }
+    const autoskillResult = JSON.parse(autoskillSmoke.stdout.trim()) as { status?: string; client?: string };
+    if (autoskillResult.status !== "passed") {
+      throw new Error(`AutoSkill Python MCP smoke did not pass: ${autoskillSmoke.stdout}`);
+    }
     const audit = await requestJson<{ items: Array<{ invocationId?: string; actionId: string; ok: boolean }> }>(
       `/v1/audit?invocationId=${encodeURIComponent(invocationId)}`,
       { headers: { authorization } },
@@ -90,8 +111,9 @@ try {
     console.log(
       JSON.stringify({
         status: "passed",
-        endpoint: `${origin}/v1/runtime/mcp/sse`,
+        endpoint: runtimeUrl.toString(),
         protocol: "streamable-http",
+        autoskillClient: autoskillResult.client,
         tools: tools.tools.map((tool) => tool.name),
         actionId: "hackernews.get_max_item_id",
         invocationId,
@@ -101,6 +123,10 @@ try {
   } finally {
     await client.close();
   }
+} catch (error) {
+  throw new Error(
+    `${error instanceof Error ? error.stack : String(error)}\nConnection Service output:\n${serverOutput}`,
+  );
 } finally {
   server.kill("SIGTERM");
   await new Promise<void>((resolve) => {

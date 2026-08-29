@@ -18,6 +18,7 @@ const leaseCheckIntervalMs = 100;
 
 export interface LeaseRuntimeMcpContext {
   token: string;
+  connectionId: string;
   invocationId: string;
   audience: string;
   claims: ConnectionLeaseClaims;
@@ -27,17 +28,42 @@ export interface LeaseRuntimeMcpContext {
 export function resolveLeaseRuntimeMcpContext(
   leases: ConnectionLeaseService,
   token: string | undefined,
-  invocationId: string | undefined,
-  audience: string | undefined,
+  query: {
+    connectionId: string | undefined;
+    invocationId: string | undefined;
+    audience: string | undefined;
+  },
+  headers: {
+    connectionId?: string;
+    invocationId?: string;
+    audience?: string;
+  } = {},
 ): LeaseRuntimeMcpContext {
-  if (!token || !invocationId || !audience) {
-    throw new LeaseError("invalid_lease", "Lease, invocationId, and audience headers are required.");
+  if (!token || !query.connectionId || !query.invocationId || !query.audience) {
+    throw new LeaseError(
+      "invalid_lease",
+      "X-Connection-Lease and connectionId, invocationId, and audience query parameters are required.",
+    );
   }
-  const claims = leases.resolve(token, { invocationId, audience });
+  if (
+    (headers.connectionId !== undefined && headers.connectionId !== query.connectionId) ||
+    (headers.invocationId !== undefined && headers.invocationId !== query.invocationId) ||
+    (headers.audience !== undefined && headers.audience !== query.audience)
+  ) {
+    throw new LeaseError("lease_scope_denied", "MCP query and header scope parameters do not match.");
+  }
+  const claims = leases.resolve(token, {
+    invocationId: query.invocationId,
+    audience: query.audience,
+  });
+  if (!claims.connectionIds.includes(query.connectionId)) {
+    throw new LeaseError("lease_scope_denied", "Connection lease does not grant the selected connection.");
+  }
   return {
     token,
-    invocationId,
-    audience,
+    connectionId: query.connectionId,
+    invocationId: query.invocationId,
+    audience: query.audience,
     claims,
     principal: {
       tenantId: claims.tenantId,
@@ -88,8 +114,17 @@ export function createLeaseRuntimeMcpServer(
         input: z.record(z.string(), z.unknown()).default({}),
       },
     },
-    async ({ actionId, input }) =>
-      toolResult(await executeAction(deps.catalog, runtime, request, actionId, input, signal)),
+    async ({ actionId, input }, context) =>
+      toolResult(
+        await executeAction(
+          deps.catalog,
+          runtime,
+          request,
+          actionId,
+          input,
+          AbortSignal.any([signal, context.mcpReq.signal]),
+        ),
+      ),
   );
   return server;
 }
@@ -100,11 +135,14 @@ export function assertLeaseRuntimeRequest(
 ): ConnectionRecord {
   const runtime = createTenantRuntime(deps, request.principal);
   const connection = verifyCurrentLease(runtime, request);
-  for (const actionId of request.claims.allowedActions) {
+  const selectedActions = request.claims.allowedActions.filter((actionId) => {
     const action = deps.catalog.actionsById.get(actionId);
-    if (!action || action.service !== connection.service || !action.execution.locallyExecutable) {
-      throw new LeaseError("lease_scope_denied", "Lease contains an action outside the runtime connection.");
-    }
+    return action?.service === connection.service && action.execution.locallyExecutable;
+  });
+  if (selectedActions.length === 0) {
+    throw new LeaseError("lease_scope_denied", "Lease grants no executable action for the selected connection.");
+  }
+  for (const actionId of selectedActions) {
     runtime.leases.verify(request.token, request.principal, {
       connectionId: connection.id,
       connectionRevision: connection.revision,
@@ -245,18 +283,13 @@ function verifyAction(
 }
 
 function verifyCurrentLease(runtime: TenantRuntime, request: LeaseRuntimeMcpContext): ConnectionRecord {
-  if (request.claims.connectionIds.length !== 1) {
-    throw new LeaseError("lease_scope_denied", "Runtime MCP requires exactly one leased connection.");
-  }
-  const connection = runtime.connections.visibleRecord(request.claims.connectionIds[0]);
+  const connection = runtime.connections.visibleRecord(request.connectionId);
   if (!connection) {
     throw new LeaseError("lease_scope_denied", "The leased connection is no longer visible.");
   }
-  const actionId = request.claims.allowedActions[0];
-  runtime.leases.verify(request.token, request.principal, {
+  runtime.leases.verifyConnection(request.token, request.principal, {
     connectionId: connection.id,
     connectionRevision: connection.revision,
-    actionId,
     invocationId: request.invocationId,
     audience: request.audience,
   });
@@ -280,7 +313,7 @@ async function recordRejectedExecution(
     completedAt: now,
     durationMs: 0,
     ok: false,
-    connectionId: request.claims.connectionIds[0],
+    connectionId: request.connectionId,
     errorCode: error instanceof LeaseError ? error.code : "unknown_action",
     errorMessage: "Runtime MCP execution was rejected.",
   };

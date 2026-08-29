@@ -135,10 +135,24 @@ export class ConnectionLeaseService {
       invocationId: string;
     },
   ): ConnectionLeaseClaims {
-    const claims = this.resolve(token, {
-      audience: expected.audience,
-      invocationId: expected.invocationId,
-    });
+    const claims = this.verifyConnection(token, principal, expected);
+    if (!claims.allowedActions.includes(expected.actionId)) {
+      throw new LeaseError("lease_scope_denied", "Connection lease does not grant this invocation.");
+    }
+    return claims;
+  }
+
+  verifyConnection(
+    token: string,
+    principal: TenantPrincipal,
+    expected: {
+      connectionId: string;
+      connectionRevision?: number;
+      audience: string;
+      invocationId: string;
+    },
+  ): ConnectionLeaseClaims {
+    const claims = this.resolve(token, expected);
     if (
       claims.tenantId !== principal.tenantId ||
       claims.workspaceId !== principal.workspaceId ||
@@ -146,8 +160,7 @@ export class ConnectionLeaseService {
       claims.ownerId !== principal.ownerId ||
       !claims.connectionIds.includes(expected.connectionId) ||
       (expected.connectionRevision !== undefined &&
-        claims.connectionRevisions?.[expected.connectionId] !== expected.connectionRevision) ||
-      !claims.allowedActions.includes(expected.actionId)
+        claims.connectionRevisions?.[expected.connectionId] !== expected.connectionRevision)
     ) {
       throw new LeaseError("lease_scope_denied", "Connection lease does not grant this invocation.");
     }
@@ -161,7 +174,8 @@ export class ConnectionLeaseService {
       invocationId: string;
     },
   ): ConnectionLeaseClaims {
-    if (!isSignedLease(token, this.signingKey)) {
+    const claims = readSignedLease(token, this.signingKey);
+    if (!claims) {
       throw new LeaseError("invalid_lease", "Malformed connection lease.");
     }
     const tokenHash = hashToken(token);
@@ -177,7 +191,9 @@ export class ConnectionLeaseService {
     if (new Date(String(row.expires_at)).getTime() <= this.now().getTime()) {
       throw new LeaseError("lease_expired", "Connection lease expired.");
     }
-    const claims = rowToClaims(row);
+    if (JSON.stringify(claims) !== JSON.stringify(rowToClaims(row))) {
+      throw new LeaseError("invalid_lease", "Connection lease claims do not match stored state.");
+    }
     if (claims.audience !== expected.audience || claims.invocationId !== expected.invocationId) {
       throw new LeaseError("lease_scope_denied", "Connection lease does not grant this invocation.");
     }
@@ -238,11 +254,35 @@ function signLease(payload: string, signingKey: string): string {
   return createHmac("sha256", signingKey).update(payload).digest("base64url");
 }
 
-function isSignedLease(token: string, signingKey: string): boolean {
-  if (!token.startsWith("cl_")) return false;
+function readSignedLease(token: string, signingKey: string): ConnectionLeaseClaims | undefined {
+  if (!token.startsWith("cl_")) return undefined;
   const [payload, signature, ...extra] = token.slice(3).split(".");
-  if (!payload || !signature || extra.length > 0) return false;
-  return equalHash(signature, signLease(payload, signingKey));
+  if (!payload || !signature || extra.length > 0 || !equalHash(signature, signLease(payload, signingKey))) {
+    return undefined;
+  }
+  try {
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Partial<ConnectionLeaseClaims>;
+    if (
+      typeof claims.tenantId !== "string" ||
+      typeof claims.workspaceId !== "string" ||
+      typeof claims.subject !== "string" ||
+      typeof claims.ownerId !== "string" ||
+      typeof claims.invocationId !== "string" ||
+      typeof claims.audience !== "string" ||
+      !Array.isArray(claims.connectionIds) ||
+      !claims.connectionIds.every((value) => typeof value === "string") ||
+      !Array.isArray(claims.allowedActions) ||
+      !claims.allowedActions.every((value) => typeof value === "string") ||
+      typeof claims.issuedAt !== "string" ||
+      typeof claims.expiresAt !== "string" ||
+      typeof claims.jti !== "string"
+    ) {
+      return undefined;
+    }
+    return claims as ConnectionLeaseClaims;
+  } catch {
+    return undefined;
+  }
 }
 
 function rowToClaims(row: Record<string, unknown>): ConnectionLeaseClaims {

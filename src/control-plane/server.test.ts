@@ -11,6 +11,7 @@ import { createCatalogStore } from "../catalog-store.ts";
 import { TransitFileService } from "../server/files/transit-files.ts";
 import { AesGcmSecretCodec } from "../server/secrets/secret-codec.ts";
 import { createPrincipalToken } from "./auth.ts";
+import { ConnectionLeaseService } from "./lease.ts";
 import { createConnectionControlApp } from "./server.ts";
 
 const provider: ProviderDefinition = {
@@ -124,6 +125,14 @@ describe("connection control API", () => {
       }),
     });
     const otherConnectionId = ((await otherConnection.json()) as { connection: { id: string } }).connection.id;
+    const runtimeUrl = (
+      selectedConnectionId = connectionId,
+      invocationId = "mcp-invocation",
+      audience = "knowledge-runtime",
+    ) =>
+      new URL(
+        `https://connect.test/v1/runtime/mcp/sse?connectionId=${encodeURIComponent(selectedConnectionId)}&invocationId=${encodeURIComponent(invocationId)}&audience=${encodeURIComponent(audience)}`,
+      );
     const leaseResponse = await app.request(`/v1/connections/${connectionId}/lease`, {
       method: "POST",
       headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
@@ -135,22 +144,26 @@ describe("connection control API", () => {
     });
     const lease = (await leaseResponse.json()) as { token: string; claims: { jti: string } };
     const fetcher: typeof fetch = async (input, init) => app.fetch(new Request(input, init));
-    const transport = new StreamableHTTPClientTransport(
-      new URL(
-        `https://connect.test/v1/runtime/mcp/sse?tenantId=attacker&connectionId=${encodeURIComponent(otherConnectionId)}`,
-      ),
-      {
-        fetch: fetcher,
-        requestInit: {
-          headers: {
-            authorization: `Bearer ${otherAuth}`,
-            "x-connection-lease": lease.token,
-            "x-connection-invocation-id": "mcp-invocation",
-            "x-connection-audience": "knowledge-runtime",
-          },
+    for (const query of [
+      `invocationId=mcp-invocation&audience=knowledge-runtime`,
+      `connectionId=${encodeURIComponent(connectionId)}&audience=knowledge-runtime`,
+      `connectionId=${encodeURIComponent(connectionId)}&invocationId=mcp-invocation`,
+    ]) {
+      const missingQuery = await app.request(`/v1/runtime/mcp/sse?${query}`, {
+        headers: { "x-connection-lease": lease.token },
+      });
+      expect(missingQuery.status).toBe(400);
+      await expect(missingQuery.json()).resolves.toMatchObject({ error: { code: "invalid_lease" } });
+    }
+    const transport = new StreamableHTTPClientTransport(runtimeUrl(), {
+      fetch: fetcher,
+      requestInit: {
+        headers: {
+          authorization: `Bearer ${otherAuth}`,
+          "x-connection-lease": lease.token,
         },
       },
-    );
+    });
     const client = new Client({ name: "lease-runtime-test", version: "1.0.0" });
 
     try {
@@ -187,6 +200,40 @@ describe("connection control API", () => {
       await client.close();
     }
 
+    const multiConnectionLease = new ConnectionLeaseService(database).issue(principal, {
+      connectionIds: [connectionId, otherConnectionId],
+      connectionRevisions: { [connectionId]: 1, [otherConnectionId]: 1 },
+      allowedActions: ["fixture.read"],
+      invocationId: "multi-connection-invocation",
+      audience: "knowledge-runtime",
+    });
+    const multiConnectionTransport = new StreamableHTTPClientTransport(
+      runtimeUrl(otherConnectionId, "multi-connection-invocation"),
+      {
+        fetch: fetcher,
+        requestInit: { headers: { "x-connection-lease": multiConnectionLease.token } },
+      },
+    );
+    const multiConnectionClient = new Client({ name: "multi-connection-runtime-test", version: "1.0.0" });
+    try {
+      await multiConnectionClient.connect(multiConnectionTransport);
+      await expect(
+        multiConnectionClient.callTool({ name: "list_allowed_actions", arguments: {} }),
+      ).resolves.toMatchObject({
+        structuredContent: { ok: true, data: { connectionId: otherConnectionId } },
+      });
+      await expect(
+        multiConnectionClient.callTool({
+          name: "execute_action",
+          arguments: { actionId: "fixture.read", input: {} },
+        }),
+      ).resolves.toMatchObject({
+        structuredContent: { ok: true, auditPersisted: true },
+      });
+    } finally {
+      await multiConnectionClient.close();
+    }
+
     const audit = await app.request("/v1/audit?invocationId=mcp-invocation", {
       headers: { authorization: `Bearer ${auth}` },
     });
@@ -207,20 +254,26 @@ describe("connection control API", () => {
     });
     await expect(otherAudit.json()).resolves.toEqual({ items: [] });
 
-    for (const [invocationId, audience] of [
-      ["replayed-invocation", "knowledge-runtime"],
-      ["mcp-invocation", "wrong-audience"],
-    ]) {
-      const rejectedTransport = new StreamableHTTPClientTransport(new URL("https://connect.test/v1/runtime/mcp/sse"), {
-        fetch: fetcher,
-        requestInit: {
-          headers: {
-            "x-connection-lease": lease.token,
-            "x-connection-invocation-id": invocationId,
-            "x-connection-audience": audience,
+    for (const [selectedConnectionId, invocationId, audience, extraHeaders] of [
+      [connectionId, "replayed-invocation", "knowledge-runtime", {}],
+      [connectionId, "mcp-invocation", "wrong-audience", {}],
+      [otherConnectionId, "mcp-invocation", "knowledge-runtime", {}],
+      [connectionId, "mcp-invocation", "knowledge-runtime", { "x-connection-id": otherConnectionId }],
+      [connectionId, "mcp-invocation", "knowledge-runtime", { "x-connection-invocation-id": "conflict" }],
+      [connectionId, "mcp-invocation", "knowledge-runtime", { "x-connection-audience": "conflict" }],
+    ] satisfies Array<[string, string, string, Record<string, string>]>) {
+      const rejectedTransport = new StreamableHTTPClientTransport(
+        runtimeUrl(selectedConnectionId, invocationId, audience),
+        {
+          fetch: fetcher,
+          requestInit: {
+            headers: {
+              "x-connection-lease": lease.token,
+              ...extraHeaders,
+            },
           },
         },
-      });
+      );
       const rejectedClient = new Client({ name: "rejected-runtime-test", version: "1.0.0" });
       await expect(rejectedClient.connect(rejectedTransport)).rejects.toThrow();
       await rejectedClient.close();
@@ -228,13 +281,11 @@ describe("connection control API", () => {
     database
       .prepare("update connection_leases set expires_at='2020-01-01T00:00:00.000Z' where token_hash is not null")
       .run();
-    const expiredTransport = new StreamableHTTPClientTransport(new URL("https://connect.test/v1/runtime/mcp/sse"), {
+    const expiredTransport = new StreamableHTTPClientTransport(runtimeUrl(), {
       fetch: fetcher,
       requestInit: {
         headers: {
           "x-connection-lease": lease.token,
-          "x-connection-invocation-id": "mcp-invocation",
-          "x-connection-audience": "knowledge-runtime",
         },
       },
     });
@@ -245,19 +296,14 @@ describe("connection control API", () => {
       .prepare("update connection_leases set expires_at='2099-01-01T00:00:00.000Z' where token_hash is not null")
       .run();
     database.prepare("update tenant_connections set revision=revision+1 where id=?").run(connectionId);
-    const staleRevisionTransport = new StreamableHTTPClientTransport(
-      new URL("https://connect.test/v1/runtime/mcp/sse"),
-      {
-        fetch: fetcher,
-        requestInit: {
-          headers: {
-            "x-connection-lease": lease.token,
-            "x-connection-invocation-id": "mcp-invocation",
-            "x-connection-audience": "knowledge-runtime",
-          },
+    const staleRevisionTransport = new StreamableHTTPClientTransport(runtimeUrl(), {
+      fetch: fetcher,
+      requestInit: {
+        headers: {
+          "x-connection-lease": lease.token,
         },
       },
-    );
+    });
     const staleRevisionClient = new Client({ name: "stale-revision-runtime-test", version: "1.0.0" });
     await expect(staleRevisionClient.connect(staleRevisionTransport)).rejects.toThrow();
     await staleRevisionClient.close();
@@ -267,19 +313,110 @@ describe("connection control API", () => {
       headers: { authorization: `Bearer ${auth}` },
     });
     expect(revoked.status).toBe(200);
-    const revokedTransport = new StreamableHTTPClientTransport(new URL("https://connect.test/v1/runtime/mcp/sse"), {
+    const revokedTransport = new StreamableHTTPClientTransport(runtimeUrl(), {
       fetch: fetcher,
       requestInit: {
         headers: {
           "x-connection-lease": lease.token,
-          "x-connection-invocation-id": "mcp-invocation",
-          "x-connection-audience": "knowledge-runtime",
         },
       },
     });
     const revokedClient = new Client({ name: "revoked-runtime-test", version: "1.0.0" });
     await expect(revokedClient.connect(revokedTransport)).rejects.toThrow();
     await revokedClient.close();
+    database.close();
+  });
+
+  it("cancels an in-flight MCP action when its lease is revoked", async () => {
+    const database = new DatabaseSync(":memory:");
+    let executionStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      executionStarted = resolve;
+    });
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
+      providerLoader: {
+        loadActionExecutor: async () => async (_input, context) => {
+          executionStarted();
+          await new Promise<void>((resolve) =>
+            context.signal?.addEventListener("abort", () => resolve(), { once: true }),
+          );
+          return { ok: true, output: { value: "must-not-complete" } };
+        },
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          customCredential: async () => ({ profile: { displayName: "fixture" } }),
+        }),
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://127.0.0.1:3400",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        service: "fixture",
+        authType: "custom_credential",
+        connectionName: "cancellation",
+        values: { secret: "connection-secret" },
+      }),
+    });
+    const connectionId = ((await created.json()) as { connection: { id: string } }).connection.id;
+    const leaseResponse = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["fixture.read"],
+        invocationId: "cancel-invocation",
+        audience: "knowledge-runtime",
+      }),
+    });
+    const lease = (await leaseResponse.json()) as { token: string; claims: { jti: string } };
+    const url = new URL("https://connect.test/v1/runtime/mcp/sse");
+    url.searchParams.set("connectionId", connectionId);
+    url.searchParams.set("invocationId", "cancel-invocation");
+    url.searchParams.set("audience", "knowledge-runtime");
+    const transport = new StreamableHTTPClientTransport(url, {
+      fetch: async (input, init) => app.fetch(new Request(input, init)),
+      requestInit: { headers: { "x-connection-lease": lease.token } },
+    });
+    const client = new Client({ name: "lease-cancellation-test", version: "1.0.0" });
+    try {
+      await client.connect(transport);
+      const call = client.callTool({
+        name: "execute_action",
+        arguments: { actionId: "fixture.read", input: {} },
+      });
+      await started;
+      const revoked = await app.request(`/v1/leases/${lease.claims.jti}/revoke`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${auth}` },
+      });
+      expect(revoked.status).toBe(200);
+      const result = await call;
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result)).toContain("lease_revoked");
+    } finally {
+      await client.close();
+    }
+    const audit = await app.request("/v1/audit?invocationId=cancel-invocation", {
+      headers: { authorization: `Bearer ${auth}` },
+    });
+    await expect(audit.json()).resolves.toMatchObject({
+      items: [
+        expect.objectContaining({
+          caller: "mcp",
+          connectionId,
+          actionId: "fixture.read",
+          ok: false,
+          errorCode: "execution_cancelled",
+        }),
+      ],
+    });
     database.close();
   });
 
@@ -1303,6 +1440,55 @@ describe("connection control API", () => {
           "baidu_netdisk.create_share_link",
         ],
         invocationId: "inv-read-only",
+        audience: "knowledge-runtime",
+      }),
+    });
+    expect(lease.status).toBe(403);
+    expect(await lease.json()).toMatchObject({ error: { code: "lease_action_forbidden" } });
+    database.close();
+  });
+
+  it("denies unclassified actions by default instead of assuming they are read-only", async () => {
+    const database = new DatabaseSync(":memory:");
+    const ambiguousProvider: ProviderDefinition = {
+      ...provider,
+      actions: [
+        {
+          ...provider.actions[0],
+          id: "fixture.process",
+          name: "process",
+          description: "An action whose side effects are not classified.",
+        },
+      ],
+    };
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([ambiguousProvider], { executableActionIds: ["fixture.process"] }),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          customCredential: async () => ({ profile: { accountId: "validated" } }),
+        }),
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const token = createPrincipalToken(principal, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "secret" } }),
+    });
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+    const lease = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["fixture.process"],
+        invocationId: "inv-default-deny",
         audience: "knowledge-runtime",
       }),
     });

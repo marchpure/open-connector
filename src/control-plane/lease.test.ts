@@ -141,6 +141,34 @@ describe("ConnectionLeaseService", () => {
       }),
     ).toThrowError(/does not grant/);
   });
+
+  it("verifies an explicitly selected connection in a multi-connection lease", () => {
+    const leases = new ConnectionLeaseService(new DatabaseSync(":memory:"));
+    const issued = leases.issue(principal, {
+      connectionIds: ["connection-1", "connection-2"],
+      connectionRevisions: { "connection-1": 1, "connection-2": 4 },
+      allowedActions: ["feishu.get_document"],
+      invocationId: "invocation-1",
+      audience: principal.audience,
+    });
+
+    expect(
+      leases.verifyConnection(issued.token, principal, {
+        connectionId: "connection-2",
+        connectionRevision: 4,
+        invocationId: "invocation-1",
+        audience: principal.audience,
+      }),
+    ).toMatchObject({ connectionIds: ["connection-1", "connection-2"] });
+    expect(() =>
+      leases.verifyConnection(issued.token, principal, {
+        connectionId: "connection-3",
+        connectionRevision: 4,
+        invocationId: "invocation-1",
+        audience: principal.audience,
+      }),
+    ).toThrowError(/does not grant/);
+  });
 });
 
 describe("redaction", () => {

@@ -30,6 +30,7 @@ import { ControlledMcpAdapter, TenantMcpDefinitionStore } from "./mcp-adapter.ts
 import { OracleDatabaseAdapter } from "./oracle-adapter.ts";
 import { redactSecrets, safeConnectionProfile } from "./redaction.ts";
 import { RestIdempotencyStore, RestOpenApiAdapter } from "./rest-adapter.ts";
+import { RuntimeMcpSseSessions } from "./runtime-mcp-sse.ts";
 import {
   assertLeaseRuntimeRequest,
   createLeaseRuntimeMcpServer,
@@ -57,6 +58,15 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
   const app = new Hono();
   const catalog = new CatalogEnablement(options.catalog, options.enablement);
   const leases = new ConnectionLeaseService(options.controlDatabase);
+  const runtimeMcpDependencies = {
+    catalog: options.catalog,
+    providerLoader: options.providerLoader,
+    controlDatabase: options.controlDatabase,
+    secretCodec: options.secretCodec,
+    publicOrigin: options.publicOrigin,
+    transitFiles: options.transitFiles,
+  };
+  const runtimeMcpSse = new RuntimeMcpSseSessions(runtimeMcpDependencies);
 
   app.get("/health", (context) => context.json({ ok: true, service: "connection-service", version: "1.0.0" }));
   app.get("/oauth/callback", async (context) => {
@@ -138,43 +148,32 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     await next();
   });
   app.get("/v1/health", (context) => context.json({ ok: true }));
-  app.post("/v1/runtime/mcp/sse", async (context) => {
-    let leaseContext;
+  app.get("/v1/runtime/mcp/sse", (context) => {
     try {
-      leaseContext = resolveLeaseRuntimeMcpContext(
-        leases,
-        context.req.header("x-connection-lease"),
-        context.req.header("x-connection-invocation-id") ?? context.req.header("invocationId"),
-        context.req.header("x-connection-audience") ?? context.req.header("audience"),
-      );
-      assertLeaseRuntimeRequest(
-        {
-          catalog: options.catalog,
-          providerLoader: options.providerLoader,
-          controlDatabase: options.controlDatabase,
-          secretCodec: options.secretCodec,
-          publicOrigin: options.publicOrigin,
-          transitFiles: options.transitFiles,
-        },
-        leaseContext,
-      );
+      const leaseContext = resolveRuntimeMcpLease(context, leases);
+      return runtimeMcpSse.open(leaseContext, context.req.raw);
     } catch (error) {
       return leaseError(context, error);
     }
+  });
+  app.post("/v1/runtime/mcp/sse", async (context) => {
+    let leaseContext;
+    try {
+      leaseContext = resolveRuntimeMcpLease(context, leases);
+      assertLeaseRuntimeRequest(runtimeMcpDependencies, leaseContext);
+    } catch (error) {
+      return leaseError(context, error);
+    }
+    const sessionId = context.req.query("sessionId");
+    if (sessionId) {
+      try {
+        return await runtimeMcpSse.receive(sessionId, leaseContext, context.req.raw);
+      } catch (error) {
+        return leaseError(context, error);
+      }
+    }
     const handler = createMcpHandler(
-      () =>
-        createLeaseRuntimeMcpServer(
-          {
-            catalog: options.catalog,
-            providerLoader: options.providerLoader,
-            controlDatabase: options.controlDatabase,
-            secretCodec: options.secretCodec,
-            publicOrigin: options.publicOrigin,
-            transitFiles: options.transitFiles,
-          },
-          leaseContext,
-          context.req.raw.signal,
-        ),
+      () => createLeaseRuntimeMcpServer(runtimeMcpDependencies, leaseContext, context.req.raw.signal),
       { legacy: "stateless", responseMode: "json" },
     );
     try {
@@ -724,7 +723,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       );
     }
     const prohibitedAgentActions = requestedActions.filter(
-      (actionId) => !isErpMutationAction(actionId) && isProhibitedAgentLeaseAction(actionId),
+      (actionId) => !isErpMutationAction(actionId) && !isAllowedReadOnlyLeaseAction(connectionService, actionId),
     );
     if (prohibitedAgentActions.length > 0) {
       return jsonError(
@@ -1251,6 +1250,23 @@ function principalOf(context: Context): TenantPrincipal {
   return context.get("principal") as TenantPrincipal;
 }
 
+function resolveRuntimeMcpLease(context: Context, leases: ConnectionLeaseService) {
+  return resolveLeaseRuntimeMcpContext(
+    leases,
+    context.req.header("x-connection-lease"),
+    {
+      connectionId: context.req.query("connectionId"),
+      invocationId: context.req.query("invocationId"),
+      audience: context.req.query("audience"),
+    },
+    {
+      connectionId: context.req.header("x-connection-id"),
+      invocationId: context.req.header("x-connection-invocation-id") ?? context.req.header("invocationId"),
+      audience: context.req.header("x-connection-audience") ?? context.req.header("audience"),
+    },
+  );
+}
+
 function toResourceRef(
   candidate: ProviderResourceCandidate,
   scope: Pick<ResourceRef, "tenantId" | "workspaceId" | "connectionId">,
@@ -1293,17 +1309,22 @@ function isOwnerControlledStorageAction(actionId: string): boolean {
   );
 }
 
-function isProhibitedAgentLeaseAction(actionId: string): boolean {
-  const actionName = actionId.slice(actionId.indexOf(".") + 1);
-  return (
-    /(?:^|_)(?:create|add|append|update|set|patch|edit|rename|move|copy|delete|remove|archive|restore|upload|import|send|reply|forward|publish|put|write|execute|run|trigger|start|stop|cancel|approve|reject|invite|share|grant|revoke|generate_presigned)(?:_|$)/u.test(
-      actionName,
-    ) ||
-    /^post(?:_|$)/u.test(actionName) ||
-    /^(?:(?:tencent_docs)\.(?:batch_update_sheet|batch_update_doc)|(?:wps_mcp)\.(?:list_tools|call_tool))$/u.test(
-      actionId,
-    )
+function isAllowedReadOnlyLeaseAction(service: string, actionId: string): boolean {
+  if (actionId === `${service}.discover_resources`) return true;
+  if (isDataPlatformService(service)) return isAllowedDataPlatformLeaseAction(service, actionId);
+  if (isErpService(service)) {
+    return ["validate_connection", "discover_capabilities", "list_entities"].includes(actionNameOf(actionId));
+  }
+  const actionName = actionNameOf(actionId);
+  if (/^(?:wps_mcp)\.(?:list_tools|call_tool)$/u.test(actionId)) return false;
+  return /^(?:get|list|search|read|fetch|find|lookup|query|describe|inspect|check|count|validate|discover|preview|download|ping|test|whoami|resolve|retrieve|view)(?:_|$)/u.test(
+    actionName,
   );
+}
+
+function actionNameOf(actionId: string): string {
+  const actionName = actionId.slice(actionId.indexOf(".") + 1);
+  return actionName;
 }
 
 function isErpMutationAction(actionId: string): boolean {
