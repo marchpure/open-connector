@@ -3,12 +3,14 @@ import type { RestDefinition, RestOperation } from "./rest-adapter.ts";
 import type { DatabaseSync } from "node:sqlite";
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { assertPublicHttpUrl } from "../core/request.ts";
 
 export interface WebObservation {
   url: string;
   method: string;
   requestHeaders: Record<string, string>;
   requestSample?: unknown;
+  requestQuerySample?: Record<string, string>;
   responseStatus: number;
   responseContentType: string;
   responseSample?: unknown;
@@ -22,6 +24,7 @@ export interface WebCandidate {
   path: string;
   readOnly: boolean;
   requestSchema?: Record<string, unknown>;
+  querySchema?: Record<string, unknown>;
   responseSchema?: Record<string, unknown>;
 }
 
@@ -77,6 +80,19 @@ export class TenantWebDiscoveryStore {
       );
       create index if not exists idx_web_discovery_scope
         on web_discovery_sessions (tenant_id, workspace_id, subject);
+      create table if not exists web_discovery_audit (
+        id text primary key,
+        tenant_id text not null,
+        workspace_id text not null,
+        subject text not null,
+        session_id text,
+        candidate_id text,
+        event text not null,
+        detail_json text not null,
+        created_at text not null
+      );
+      create index if not exists idx_web_discovery_audit_scope
+        on web_discovery_audit (tenant_id, workspace_id, created_at);
     `);
   }
 
@@ -135,6 +151,7 @@ export class TenantWebDiscoveryStore {
       path: inferPath(url.pathname),
       readOnly: method === "GET",
       requestSchema: inferSchema(observation.requestSample),
+      querySchema: inferSchema(observation.requestQuerySample),
       responseSchema: inferSchema(observation.responseSample),
     };
     this.database
@@ -151,6 +168,12 @@ export class TenantWebDiscoveryStore {
         await this.secretCodec.encode(JSON.stringify(candidate)),
         new Date().toISOString(),
       );
+    this.audit(sessionId, candidate.id, "candidate", {
+      origin: candidate.origin,
+      method: candidate.method,
+      path: candidate.path,
+      readOnly: candidate.readOnly,
+    });
     return candidate;
   }
 
@@ -167,6 +190,11 @@ export class TenantWebDiscoveryStore {
         async (row) => JSON.parse(await this.secretCodec.decode(String(row.candidate_ciphertext))) as WebCandidate,
       ),
     );
+  }
+
+  async getCandidate(sessionId: string, candidateId: string): Promise<WebCandidate | undefined> {
+    const candidate = (await this.listCandidates(sessionId)).find((item) => item.id === candidateId);
+    return candidate;
   }
 
   async confirm(
@@ -200,7 +228,39 @@ export class TenantWebDiscoveryStore {
           where id=? and session_id=? and tenant_id=? and workspace_id=?`,
       )
       .run(new Date().toISOString(), candidate.id, sessionId, this.principal.tenantId, this.principal.workspaceId);
+    this.audit(sessionId, candidate.id, "confirm", {
+      origin: candidate.origin,
+      method: candidate.method,
+      path: candidate.path,
+      operationId: input.operationId,
+      readOnly: candidate.readOnly,
+    });
     return { baseUrl: candidate.origin, operations: [operation], auth: { type: "none" }, definitionVersion: "web-1" };
+  }
+
+  private audit(
+    sessionId: string,
+    candidateId: string | undefined,
+    event: string,
+    detail: Record<string, unknown>,
+  ): void {
+    this.database
+      .prepare(
+        `insert into web_discovery_audit
+          (id, tenant_id, workspace_id, subject, session_id, candidate_id, event, detail_json, created_at)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        randomUUID(),
+        this.principal.tenantId,
+        this.principal.workspaceId,
+        this.principal.subject,
+        sessionId,
+        candidateId ?? null,
+        event,
+        JSON.stringify(redactDiscoveryDetail(detail)),
+        new Date().toISOString(),
+      );
   }
 
   private session(id: string, workerToken?: string): { origin: string } {
@@ -232,6 +292,10 @@ function normalizeOrigin(value: string): string {
     if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
       throw new Error();
     }
+    assertPublicHttpUrl(url.origin, {
+      fieldName: "Web discovery origin",
+      createError: (message) => new Error(message),
+    });
     return url.origin;
   } catch {
     throw new WebDiscoveryError("invalid_origin", "Web discovery requires an HTTPS origin.");
@@ -246,7 +310,10 @@ function hasSensitiveKeys(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasSensitiveKeys);
   if (!value || typeof value !== "object") return false;
   return Object.entries(value).some(
-    ([key, child]) => /password|secret|token|cookie|authorization|csrf/i.test(key) || hasSensitiveKeys(child),
+    ([key, child]) =>
+      /password|secret|token|cookie|authorization|csrf|xsrf|email|phone|ssn|social.?security|date.?of.?birth/i.test(
+        key,
+      ) || hasSensitiveKeys(child),
   );
 }
 
@@ -272,4 +339,17 @@ function inferSchema(value: unknown): Record<string, unknown> | undefined {
   }
   if (value === null) return { type: "null" };
   return { type: typeof value === "number" ? "number" : typeof value };
+}
+
+function redactDiscoveryDetail(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactDiscoveryDetail);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [
+      key,
+      /password|secret|token|cookie|authorization|csrf|credential/i.test(key)
+        ? "[REDACTED]"
+        : redactDiscoveryDetail(child),
+    ]),
+  );
 }
