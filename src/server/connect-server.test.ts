@@ -1273,7 +1273,10 @@ describe("ConnectServer", () => {
     const transport = new StreamableHTTPClientTransport(new URL("https://connect.test/v1/runtime/mcp/sse"), {
       fetch: fetcher,
     });
-    const client = new Client({ name: "runtime-entry-test", version: "0.0.0" }, { versionNegotiation: { mode: "auto" } });
+    const client = new Client(
+      { name: "runtime-entry-test", version: "0.0.0" },
+      { versionNegotiation: { mode: "auto" } },
+    );
 
     try {
       await expect(client.connect(transport)).resolves.toBeUndefined();
