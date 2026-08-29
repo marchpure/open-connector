@@ -86,6 +86,27 @@ describe("assertPublicHttpUrl", () => {
       expect(() => readPublicUrl(value, true)).toThrow();
     }
   });
+
+  it("allows only an explicitly port-allowlisted localhost in dev mode", () => {
+    expect(() =>
+      readPublicUrl("http://127.0.0.1:3417", false, {
+        allowLocalhostDev: true,
+        allowedLocalhostPorts: [3418],
+      }),
+    ).toThrow("explicitly allowlisted local port");
+    expect(() =>
+      readPublicUrl("http://127.0.0.1:3417", false, {
+        allowLocalhostDev: true,
+        allowedLocalhostPorts: [3417],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      readPublicUrl("http://127.0.0.1:3417", false, {
+        allowLocalhostDev: false,
+        allowedLocalhostPorts: [3417],
+      }),
+    ).toThrow("private or reserved IP addresses");
+  });
 });
 
 describe("isBlockedIpAddress", () => {
@@ -291,11 +312,19 @@ describe("private network access deployment flag", () => {
   });
 });
 
-function readPublicUrl(value: string, allowPrivateNetwork = false): URL {
+function readPublicUrl(
+  value: string,
+  allowPrivateNetwork = false,
+  options: {
+    allowLocalhostDev?: boolean;
+    allowedLocalhostPorts?: readonly number[];
+  } = {},
+): URL {
   return assertPublicHttpUrl(value, {
     fieldName: "url",
     createError: (message) => new Error(message),
     allowPrivateNetwork,
+    ...options,
   });
 }
 

@@ -371,6 +371,25 @@ describe("createGuardedFetch request URL guard", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("allows only an explicitly port-allowlisted localhost in dev mode", async () => {
+    const { transport, calls } = createTransport([new Response("ok", { status: 200 })]);
+    const guarded = createGuardedFetch({
+      fetch: transport,
+      allowLocalhostDev: true,
+      allowedLocalhostPorts: [3417],
+    });
+
+    await expect(guarded("http://127.0.0.1:3417/mcp")).resolves.toMatchObject({ status: 200 });
+    expect(calls).toHaveLength(1);
+
+    const wrongPort = createGuardedFetch({
+      fetch: transport,
+      allowLocalhostDev: true,
+      allowedLocalhostPorts: [3418],
+    });
+    await expect(wrongPort("http://127.0.0.1:3417/mcp")).rejects.toThrow("explicitly allowlisted local port");
+  });
 });
 
 describe("createGuardedFetch trusted egress hosts", () => {

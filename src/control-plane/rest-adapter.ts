@@ -243,6 +243,13 @@ export class RestOpenApiAdapter {
     );
   }
 
+  describe(): { definitionVersion: string; operations: RestOperation[] } {
+    return {
+      definitionVersion: this.definition.definitionVersion,
+      operations: this.definition.operations.map((operation) => ({ ...operation })),
+    };
+  }
+
   async invoke(input: RestInvokeInput): Promise<RestResult> {
     const operation = this.definition.operations.find((candidate) => candidate.operationId === input.operationId);
     if (!operation) {

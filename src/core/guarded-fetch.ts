@@ -28,6 +28,8 @@ export interface GuardedFetchOptions {
    * load are honored.
    */
   allowPrivateNetwork?: boolean | (() => boolean);
+  allowLocalhostDev?: boolean | (() => boolean);
+  allowedLocalhostPorts?: readonly number[];
   /** Error factory for guard violations. Defaults to TypeError. */
   createError?: (message: string) => Error;
   /** Maximum redirect hops followed before the request fails. */
@@ -193,13 +195,24 @@ export function createGuardedFetch(options: GuardedFetchOptions = {}): typeof fe
       typeof options.allowPrivateNetwork === "function"
         ? options.allowPrivateNetwork()
         : options.allowPrivateNetwork === true;
+    const allowLocalhostDev =
+      typeof options.allowLocalhostDev === "function"
+        ? options.allowLocalhostDev()
+        : options.allowLocalhostDev === true;
     const lookup = options.skipDnsValidation
       ? null
       : options.lookup === undefined
         ? await resolveDefaultLookup()
         : options.lookup;
     const guardHop = (value: string, fieldName: string): Promise<URL> =>
-      assertGuardedEgressUrl(value, { fieldName, createError, allowPrivateNetwork, lookup });
+      assertGuardedEgressUrl(value, {
+        fieldName,
+        createError,
+        allowPrivateNetwork,
+        allowLocalhostDev,
+        allowedLocalhostPorts: options.allowedLocalhostPorts,
+        lookup,
+      });
 
     const request = input instanceof Request ? input : undefined;
     let url = await guardHop(request?.url ?? (input instanceof URL ? input.href : String(input)), "request URL");
@@ -286,6 +299,8 @@ export interface GuardedEgressUrlOptions {
   createResolutionError?: (message: string) => Error;
   /** Allow RFC 1918 and other private targets while retaining reserved-target guards. */
   allowPrivateNetwork?: boolean;
+  allowLocalhostDev?: boolean;
+  allowedLocalhostPorts?: readonly number[];
   /**
    * DNS lookup used to validate resolved addresses: `null` disables the check,
    * `undefined` uses the module default (`node:dns` where available).
@@ -328,9 +343,13 @@ export async function resolveGuardedEgressTarget(
     fieldName: options.fieldName,
     createError: options.createError,
     allowPrivateNetwork,
+    allowLocalhostDev: options.allowLocalhostDev === true,
+    allowedLocalhostPorts: options.allowedLocalhostPorts,
   });
   const addresses = await assertResolvedAddressesAllowed(url.hostname, options.fieldName, {
     allowPrivateNetwork,
+    allowLocalhostDev: options.allowLocalhostDev === true,
+    allowedLocalhostPorts: options.allowedLocalhostPorts,
     createError: options.createError,
     createResolutionError: options.createResolutionError ?? options.createError,
     lookup,
@@ -340,6 +359,8 @@ export async function resolveGuardedEgressTarget(
 
 interface ResolvedAddressPolicy {
   allowPrivateNetwork: boolean;
+  allowLocalhostDev: boolean;
+  allowedLocalhostPorts?: readonly number[];
   createError: (message: string) => Error;
   createResolutionError: (message: string) => Error;
   lookup: GuardedFetchDnsLookup | null | undefined;
@@ -384,10 +405,11 @@ async function assertResolvedAddressesAllowed(
   for (const entry of results) {
     if (entry && typeof entry.address === "string") {
       const addressClass = classifyIpAddress(entry.address);
-      if (addressClass === "always-blocked") {
+      const localhost = policy.allowLocalhostDev && (entry.address === "127.0.0.1" || entry.address.startsWith("127."));
+      if (addressClass === "always-blocked" && !localhost) {
         throw policy.createError(`${fieldName} must not resolve to private or reserved IP addresses`);
       }
-      if (addressClass === "public" || (addressClass === "private" && policy.allowPrivateNetwork)) {
+      if (addressClass === "public" || (addressClass === "private" && policy.allowPrivateNetwork) || localhost) {
         continue;
       }
       if (trustedHost) {

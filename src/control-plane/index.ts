@@ -76,6 +76,55 @@ function readEnablement(value: string | undefined): EnablementEntry[] {
   if (!value) {
     return [
       {
+        service: "hackernews",
+        tier: "catalog",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/knowledge-workspace/evidence/step2-existing-replay-final.json",
+      },
+      {
+        service: "postgresql",
+        tier: "verified",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/evidence/postgresql-real-engine.json",
+      },
+      {
+        service: "mysql",
+        tier: "verified",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/evidence/mysql-real-engine.json",
+      },
+      {
+        service: "sql_server",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/evidence/sql-server-external-blocker.json",
+      },
+      {
+        service: "clickhouse",
+        tier: "verified",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/evidence/clickhouse-real-engine.json",
+      },
+      {
+        service: "doris",
+        tier: "verified",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/evidence/doris-real-engine.json",
+      },
+      {
+        service: "starrocks",
+        tier: "verified",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/evidence/starrocks-real-engine.json",
+      },
+      {
         service: "feishu",
         tier: "beta",
         connectorDefinitionVersion: "1.0.0",

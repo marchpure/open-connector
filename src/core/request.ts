@@ -277,6 +277,8 @@ export interface PublicHttpUrlOptions {
   createError: (message: string) => Error;
   /** Allow RFC 1918, shared-address-space, and private hostname targets while retaining reserved-target guards. */
   allowPrivateNetwork?: boolean;
+  allowLocalhostDev?: boolean;
+  allowedLocalhostPorts?: readonly number[];
 }
 
 /**
@@ -398,10 +400,25 @@ export function assertPublicHttpUrl(value: string, options: PublicHttpUrlOptions
   }
 
   const hostname = normalizeHostname(url.hostname);
+  const isLocalHostname = localHostnames.has(hostname);
+  const isLoopbackLiteral = hostname === "127.0.0.1" || hostname === "::1";
+  if (isLocalHostname || isLoopbackLiteral) {
+    if (!options.allowLocalhostDev) {
+      if (isLocalHostname) {
+        throw options.createError(`${options.fieldName} must not target local hosts`);
+      }
+    }
+    if (options.allowLocalhostDev) {
+      const port = Number(url.port || (url.protocol === "https:" ? 443 : 80));
+      if (!options.allowedLocalhostPorts?.includes(port)) {
+        throw options.createError(`${options.fieldName} must use an explicitly allowlisted local port`);
+      }
+    }
+  }
   if (cloudMetadataHostnames.has(hostname)) {
     throw options.createError(`${options.fieldName} must not target cloud metadata hosts`);
   }
-  if (localHostnames.has(hostname) || localHostnameSuffixes.some((suffix) => hostname.endsWith(suffix))) {
+  if (!isLocalHostname && localHostnameSuffixes.some((suffix) => hostname.endsWith(suffix))) {
     throw options.createError(`${options.fieldName} must not target local hosts`);
   }
   if (!options.allowPrivateNetwork && privateHostnameSuffixes.some((suffix) => hostname.endsWith(suffix))) {
@@ -409,7 +426,12 @@ export function assertPublicHttpUrl(value: string, options: PublicHttpUrlOptions
   }
 
   const ipv4 = parseIpv4(hostname);
-  if (ipv4 !== undefined && isAddressClassBlocked(classifyIpv4(ipv4), options.allowPrivateNetwork === true)) {
+  const loopbackAllowed = options.allowLocalhostDev === true && ipv4 !== undefined && ipv4IsLoopback(ipv4);
+  if (
+    ipv4 !== undefined &&
+    !loopbackAllowed &&
+    isAddressClassBlocked(classifyIpv4(ipv4), options.allowPrivateNetwork === true)
+  ) {
     throw options.createError(`${options.fieldName} must not target private or reserved IP addresses`);
   }
 
@@ -421,6 +443,10 @@ export function assertPublicHttpUrl(value: string, options: PublicHttpUrlOptions
     url.hostname = hostname;
   }
   return url;
+}
+
+function ipv4IsLoopback(value: number): boolean {
+  return ((value >>> 24) & 0xff) === 127;
 }
 
 export type IpAddressClass = "public" | "private" | "vpn-mapped" | "always-blocked";

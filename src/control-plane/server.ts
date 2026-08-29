@@ -6,6 +6,7 @@ import type { ITransitFileService } from "../server/files/transit-file-store.ts"
 import type { StagedTransitFile } from "../server/files/transit-file-store.ts";
 import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
 import type { IRunLogStore, RunLog } from "../server/storage/runtime-store.ts";
+import type { AdapterResourceKind } from "./adapter-resource-store.ts";
 import type { EnablementEntry } from "./catalog.ts";
 import type { OracleConnectionConfig, OracleQueryDriver } from "./oracle-adapter.ts";
 import type { OracleDriverOptions } from "./oracle-driver.ts";
@@ -16,6 +17,8 @@ import type { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
 import { ConnectionError } from "../connection-service.ts";
 import { readJsonBody, jsonError } from "../server/api/http-utils.ts";
+import { renderOAuthCompletionPage, renderOAuthErrorPage } from "../server/api/oauth-completion-page.ts";
+import { TenantAdapterResourceStore } from "./adapter-resource-store.ts";
 import { verifyPrincipalToken } from "./auth.ts";
 import { CatalogEnablement } from "./catalog.ts";
 import { isAllowedDataPlatformLeaseAction, isDataPlatformService } from "./data-platform-policy.ts";
@@ -27,6 +30,7 @@ import { OracleDatabaseAdapter } from "./oracle-adapter.ts";
 import { redactSecrets, safeConnectionProfile } from "./redaction.ts";
 import { RestIdempotencyStore, RestOpenApiAdapter } from "./rest-adapter.ts";
 import { createTenantRuntime } from "./service.ts";
+import { TenantOAuthStateStore } from "./tenant-store.ts";
 import { TenantWebDiscoveryStore } from "./web-discovery.ts";
 
 export interface ConnectionControlAppOptions {
@@ -49,6 +53,72 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
   const leases = new ConnectionLeaseService(options.controlDatabase);
 
   app.get("/health", (context) => context.json({ ok: true, service: "connection-service", version: "1.0.0" }));
+  app.get("/oauth/callback", async (context) => {
+    const state = context.req.query("state");
+    const code = context.req.query("code");
+    const providerError = context.req.query("error") || context.req.query("error_description");
+    if (providerError) {
+      if (state) {
+        const consumed = await TenantOAuthStateStore.takeForCallback(
+          options.controlDatabase,
+          options.secretCodec,
+          state,
+        );
+        if (consumed) {
+          TenantOAuthStateStore.updateStatus(options.controlDatabase, state, "provider_error", consumed.principal);
+        }
+      }
+      return context.html(renderOAuthErrorPage("provider"), 400);
+    }
+    if (!state || !code) {
+      return context.html(renderOAuthErrorPage(), 400);
+    }
+
+    const consumed = await TenantOAuthStateStore.takeForCallback(options.controlDatabase, options.secretCodec, state);
+    if (!consumed) {
+      return context.html(renderOAuthErrorPage(), 400);
+    }
+    try {
+      const runtime = tenantRuntime(options, consumed.principal);
+      const result = await runtime.oauthFlow.completeAuthorization({
+        state,
+        code,
+        pendingState: consumed.state,
+        callbackParameters: Object.fromEntries(new URL(context.req.url).searchParams),
+        signal: context.req.raw.signal,
+      });
+      TenantOAuthStateStore.updateStatus(options.controlDatabase, state, "connected", consumed.principal);
+      return context.html(renderOAuthCompletionPage(result.service));
+    } catch (error) {
+      // Callback pages are intentionally generic. OAuth code, state, tokens,
+      // client secrets, provider response bodies, and tenant claims must not
+      // be reflected into a browser or an error response.
+      TenantOAuthStateStore.updateStatus(
+        options.controlDatabase,
+        state,
+        error instanceof Error && "code" in error && error.code === "invalid_oauth_state" ? "expired" : "error",
+        consumed.principal,
+      );
+      return context.html(renderOAuthErrorPage(), 400);
+    }
+  });
+  app.get("/oauth/status", (context) => {
+    const state = context.req.query("state");
+    const principal = verifyPrincipalToken(readBearer(context), options.authSecret);
+    const status = state ? TenantOAuthStateStore.getStatus(options.controlDatabase, state, principal) : undefined;
+    return status
+      ? context.json({
+          service: status.service,
+          connectionName: status.connectionName,
+          status: status.status,
+        })
+      : jsonError(
+          context,
+          principal ? 404 : 401,
+          principal ? "oauth_status_not_found" : "unauthorized",
+          principal ? "OAuth authorization status was not found." : "A valid control-plane bearer token is required.",
+        );
+  });
   app.use("/v1/*", async (context, next) => {
     if (context.req.path === "/v1/health") {
       await next();
@@ -63,6 +133,159 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
   });
   app.get("/v1/health", (context) => context.json({ ok: true }));
   app.get("/v1/catalog", (context) => context.json({ items: catalog.list() }));
+  // These are Connection Service-owned adapters, not OpenConnector providers.
+  // Keep them in a separate capability surface so the browser can present the
+  // real control-plane entry points without inventing provider catalog rows.
+  app.get("/v1/adapters/capabilities", (context) =>
+    context.json({
+      items: [
+        {
+          service: "oracle_database",
+          displayName: "Oracle Database",
+          tier: "beta",
+          connectorDefinitionVersion: "1.0.0",
+          category: "adapter",
+          capabilities: ["validate", "discover"],
+          endpoints: ["/v1/adapters/oracle/validate", "/v1/adapters/oracle/discover"],
+          configSchema: {
+            type: "object",
+            required: ["host", "port"],
+            properties: {
+              host: { type: "string", title: "Host" },
+              port: { type: "integer", title: "Port", default: 1521 },
+              serviceName: { type: "string", title: "Service name" },
+              sid: { type: "string", title: "SID" },
+              allowedSchemas: { type: "array", items: { type: "string" }, title: "Allowed schemas" },
+            },
+          },
+          authSchema: {
+            type: "object",
+            required: ["user", "password"],
+            properties: {
+              user: { type: "string", title: "Username" },
+              password: { type: "string", title: "Password", format: "password" },
+            },
+          },
+        },
+        {
+          service: "rest_openapi",
+          displayName: "REST / OpenAPI",
+          tier: "beta",
+          connectorDefinitionVersion: "1.0.0",
+          category: "adapter",
+          capabilities: ["validate", "invoke"],
+          endpoints: ["/v1/adapters/rest/validate", "/v1/adapters/rest/invoke"],
+          configSchema: {
+            type: "object",
+            required: ["baseUrl", "spec"],
+            properties: {
+              baseUrl: { type: "string", title: "Base URL", format: "uri" },
+              spec: { type: "object", title: "OpenAPI JSON" },
+              confirmed: { type: "boolean", title: "Confirmed" },
+            },
+          },
+          authSchema: {
+            type: "object",
+            properties: {
+              type: { type: "string", title: "Auth type" },
+              header: { type: "string", title: "API key header" },
+              value: { type: "string", title: "API key", format: "password" },
+              token: { type: "string", title: "Bearer token", format: "password" },
+            },
+          },
+        },
+        {
+          service: "mcp",
+          displayName: "MCP Server",
+          tier: "beta",
+          connectorDefinitionVersion: "1.0.0",
+          category: "adapter",
+          capabilities: ["discover", "register", "invoke"],
+          endpoints: ["/v1/adapters/mcp/discover", "/v1/adapters/mcp/definitions"],
+          configSchema: {
+            type: "object",
+            required: ["transport"],
+            properties: {
+              transport: { type: "string", title: "Transport" },
+              endpoint: { type: "string", title: "Endpoint", format: "uri" },
+              command: { type: "string", title: "Local command" },
+              args: { type: "array", items: { type: "string" }, title: "Arguments" },
+              allowedTools: { type: "array", items: { type: "string" }, title: "Allowed tools" },
+              allowLocalhostDev: { type: "boolean", title: "Allow localhost development" },
+              allowedLocalhostPorts: { type: "array", items: { type: "integer" }, title: "Allowed localhost ports" },
+              allowPrivateNetwork: { type: "boolean", title: "Allow private network in dev" },
+            },
+          },
+          authSchema: { type: "object", properties: {} },
+        },
+        {
+          service: "files",
+          displayName: "Files",
+          tier: "beta",
+          connectorDefinitionVersion: "1.0.0",
+          category: "adapter",
+          capabilities: ["upload", "preview", "list"],
+          endpoints: ["/v1/files", "/v1/files/{fileId}/preview"],
+          configSchema: {
+            type: "object",
+            properties: {
+              filename: { type: "string", title: "File" },
+            },
+          },
+          authSchema: { type: "object", properties: {} },
+        },
+      ],
+    }),
+  );
+  app.get("/v1/adapter-resources", (context) => {
+    const resources = new TenantAdapterResourceStore(
+      options.controlDatabase,
+      principalOf(context),
+      options.secretCodec,
+    );
+    return context.json({ items: resources.list() });
+  });
+  app.post("/v1/adapter-resources", async (context) => {
+    try {
+      const body = await readJsonBody(context);
+      const kind = requiredString(body.kind) as AdapterResourceKind;
+      if (!["oracle_database", "rest_openapi", "mcp", "files"].includes(kind)) {
+        return jsonError(context, 400, "invalid_resource_kind", "Unsupported adapter resource kind.");
+      }
+      const resources = new TenantAdapterResourceStore(
+        options.controlDatabase,
+        principalOf(context),
+        options.secretCodec,
+      );
+      const resource = await resources.save({
+        kind,
+        displayName: requiredString(body.displayName),
+        visibility: optionalVisibility(body.visibility) ?? "personal",
+        sourceId: requiredString(body.sourceId),
+        metadata: recordOf(body.metadata),
+        definition: recordOf(body.definition),
+      });
+      return context.json({ resource }, 201);
+    } catch (error) {
+      return jsonError(
+        context,
+        400,
+        "adapter_resource_error",
+        error instanceof Error ? error.message : "Adapter resource could not be saved.",
+      );
+    }
+  });
+  app.get("/v1/adapter-resources/:resourceId", async (context) => {
+    const resources = new TenantAdapterResourceStore(
+      options.controlDatabase,
+      principalOf(context),
+      options.secretCodec,
+    );
+    const resource = await resources.get(context.req.param("resourceId"));
+    return resource
+      ? context.json({ resource: { ...resource, definition: undefined } })
+      : jsonError(context, 404, "adapter_resource_not_found", "Adapter resource was not found.");
+  });
   app.get("/v1/files", async (context) => {
     if (!options.fileStore) return context.json({ items: [] });
     const files = tenantFileAdapter(options, principalOf(context)).list();
@@ -338,7 +561,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
           values: recordOf(body.values),
         });
       } else if (authType === "no_auth") {
-        profile = await runtime.connectionService.connectWithoutAuth(service, { connectionName });
+        profile = await runtime.connectionService.connectAndPersistWithoutAuth(service, { connectionName });
       } else {
         return jsonError(context, 400, "unsupported_auth_type", "OAuth connections use the OAuth flow endpoint.");
       }
@@ -384,15 +607,21 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
   app.post("/v1/oauth/complete", async (context) => {
     const body = await readJsonBody(context);
     const runtime = tenantRuntime(options, principalOf(context));
+    let state: string | undefined;
     try {
+      state = requiredString(body.state);
       const result = await runtime.oauthFlow.completeAuthorization({
-        state: requiredString(body.state),
+        state,
         code: requiredString(body.code),
         callbackParameters: recordOf(body.callbackParameters) as Record<string, string>,
         signal: context.req.raw.signal,
       });
+      TenantOAuthStateStore.updateStatus(options.controlDatabase, state, "connected", principalOf(context));
       return context.json(result);
     } catch (error) {
+      if (state) {
+        TenantOAuthStateStore.updateStatus(options.controlDatabase, state, "error", principalOf(context));
+      }
       return connectionError(context, error);
     }
   });
@@ -695,6 +924,25 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       );
     }
   });
+  app.post("/v1/adapters/rest/validate", async (context) => {
+    const body = await readJsonBody(context);
+    try {
+      const adapter = RestOpenApiAdapter.fromSpec(
+        requiredString(body.baseUrl),
+        body.spec && typeof body.spec === "object" ? (body.spec as Record<string, unknown>) : undefined,
+        parseRestAuth(body.auth),
+        body.confirmed === true,
+      );
+      return context.json({ result: adapter.describe() });
+    } catch (error) {
+      return jsonError(
+        context,
+        400,
+        "rest_adapter_error",
+        error instanceof Error ? error.message : "REST validation failed.",
+      );
+    }
+  });
   app.post("/v1/web-discovery/sessions", async (context) => {
     const body = await readJsonBody(context);
     try {
@@ -856,6 +1104,20 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         400,
         "oracle_adapter_error",
         error instanceof Error ? error.message : "Oracle query failed.",
+      );
+    }
+  });
+  app.post("/v1/adapters/oracle/validate", async (context) => {
+    const body = await readJsonBody(context);
+    try {
+      const adapter = oracleAdapter(options, body);
+      return context.json({ result: await adapter.query("select 1 as ok from dual", {}) });
+    } catch (error) {
+      return jsonError(
+        context,
+        400,
+        "oracle_adapter_error",
+        error instanceof Error ? error.message : "Oracle validation failed.",
       );
     }
   });
@@ -1035,6 +1297,13 @@ function parseMcpDefinition(value: unknown) {
       ? definition.allowedHeaderNames.map(String)
       : undefined,
     allowedTools: Array.isArray(definition.allowedTools) ? definition.allowedTools.map(String) : undefined,
+    allowLocalhostDev: definition.allowLocalhostDev === true,
+    allowedLocalhostPorts: Array.isArray(definition.allowedLocalhostPorts)
+      ? definition.allowedLocalhostPorts
+          .map(Number)
+          .filter((port) => Number.isInteger(port) && port > 0 && port < 65536)
+      : undefined,
+    allowPrivateNetwork: definition.allowPrivateNetwork === true,
     timeoutMs: definition.timeoutMs === undefined ? undefined : Number(definition.timeoutMs),
   };
 }
