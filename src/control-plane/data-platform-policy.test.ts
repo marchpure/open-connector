@@ -7,6 +7,7 @@ describe("data platform lease policy", () => {
     (service) => {
       expect(isAllowedDataPlatformLeaseAction(service, `${service}.execute_read_query`)).toBe(true);
       expect(isAllowedDataPlatformLeaseAction(service, `${service}.list_tables`)).toBe(true);
+      expect(isAllowedDataPlatformLeaseAction(service, `${service}.discover_resources`)).toBe(true);
       expect(isAllowedDataPlatformLeaseAction(service, `${service}.insert`)).toBe(false);
     },
   );

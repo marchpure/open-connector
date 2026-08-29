@@ -737,10 +737,10 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       isDataPlatformService(connection.service) &&
       requestedActions.some((actionId) => {
         const action = options.catalog.actionsById.get(actionId);
+        const isDiscovery = actionId === `${connection.service}.discover_resources`;
         return (
-          !action ||
-          action.service !== connection.service ||
-          !action.execution.locallyExecutable ||
+          (!isDiscovery &&
+            (!action || action.service !== connection.service || !action.execution.locallyExecutable)) ||
           !isAllowedDataPlatformLeaseAction(connection.service, actionId)
         );
       })

@@ -58,6 +58,20 @@ const oauthProvider: ProviderDefinition = {
   actions: [],
 };
 
+const postgresqlProvider: ProviderDefinition = {
+  ...provider,
+  service: "postgresql",
+  displayName: "PostgreSQL",
+  actions: [
+    {
+      ...provider.actions[0],
+      id: "postgresql.execute_read_query",
+      service: "postgresql",
+      name: "execute_read_query",
+    },
+  ],
+};
+
 const principal = {
   tenantId: "tenant-a",
   workspaceId: "workspace-a",
@@ -1350,6 +1364,64 @@ describe("connection control API", () => {
     });
     expect(staleDiscovery.status).toBe(401);
     expect(await staleDiscovery.json()).toMatchObject({ error: { code: "lease_scope_denied" } });
+    database.close();
+  });
+
+  it("issues a scoped SQL discovery lease when discovery is a synthetic control-plane action", async () => {
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([postgresqlProvider], {
+        executableActionIds: ["postgresql.execute_read_query"],
+      }),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          customCredential: async () => ({ profile: { accountId: "postgresql" } }),
+        }),
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [
+        {
+          service: "postgresql",
+          tier: "verified",
+          connectorDefinitionVersion: "1.0.0",
+          owner: "team",
+        },
+      ],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        service: "postgresql",
+        authType: "custom_credential",
+        values: { secret: "secret" },
+      }),
+    });
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+
+    const lease = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["postgresql.discover_resources"],
+        invocationId: "postgresql-discovery",
+        audience: "knowledge-runtime",
+      }),
+    });
+
+    expect(lease.status).toBe(201);
+    await expect(lease.json()).resolves.toMatchObject({
+      claims: {
+        allowedActions: ["postgresql.discover_resources"],
+        invocationId: "postgresql-discovery",
+      },
+    });
     database.close();
   });
 

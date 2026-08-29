@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "status": "BLOCKED",
+  "capturedAt": "2026-08-29T21:48:00+08:00",
+  "connectionSha": "0671335a305efb0c00e196375c503e9471ecfe52",
+  "veadkSha": "187d9ed49047e51116ef0c9494d995d04c732caf",
+  "autoskillSourceSha": "8dc9f14c1a0b0169ef865f3d87d4a6ea3e623533",
+  "postgresql": {
+    "engineImage": "postgres:16-alpine",
+    "create": true,
+    "validate": "succeeded",
+    "protectedDiscovery": "succeeded",
+    "listSchemas": true,
+    "listTables": true,
+    "preview": true,
+    "executeReadQuery": true,
+    "auditPersisted": true,
+    "leaseRevoked": true,
+    "businessRows": 3,
+    "customers": ["Ada", "Lin", "Sam"]
+  },
+  "autoskill": {
+    "stateMode": "stateful",
+    "model": "W0-Verified-Model",
+    "listenAddress": "[::]:38102",
+    "localhostHealth": true,
+    "ipv6Health": true,
+    "ipv4Health": false,
+    "publicHttpsMcp": true,
+    "uploadedMcpConfigMaterializedAtAgentRoot": true,
+    "runtimeMcpLookupUsesSessionRoot": true,
+    "exposedBuiltinTools": 26,
+    "exposedMcpTools": 0,
+    "generateStatus": "failed",
+    "errorCode": "AUTOSKILL_POLICY_UNSATISFIED",
+    "connectionAuditForGenerate": false,
+    "revisionFrozen": false,
+    "syntheticArtifactAccepted": false
+  },
+  "blocker": "The read-only AutoSkill runtime materializes uploaded .mcp_config.yaml under the agent root, but run_react constructs McpManager with the session directory. The configured Connection MCP server is therefore not loaded and the Agent receives no mcp__knowledge-connection-1__execute_action tool.",
+  "requiredToUnblock": [
+    "AutoSkill must resolve agent-scoped .mcp_config.yaml from the agent root or pass that path explicitly to McpManager",
+    "Rerun create/freeze/run/update/freeze/run/publish/fresh-consumer with a successful Connection audit for every invocation"
+  ],
+  "rawEvidence": "/tmp/kp-rerun-20260829/w0/postgresql-publish-live.json",
+  "secrets": "No credentials, lease tokens, internal database addresses, or generated sample rows are included."
+}

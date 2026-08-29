@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-29T10:36:48.944Z",
+  "generatedAt": "2026-08-29T13:50:09.060Z",
   "catalogProviders": 1470,
   "catalogActions": 15297,
   "items": [
@@ -47418,7 +47418,7 @@
         "validate_connection"
       ],
       "tier": "verified",
-      "local_testable": false,
+      "local_testable": true,
       "external_account_required": true,
       "create": true,
       "validate": true,
@@ -47431,8 +47431,8 @@
       "restart": true,
       "skill_context": true,
       "skill_e2e": false,
-      "evidence_ref": "docs/connection-expansion/evidence/postgresql-real-engine-w0.json",
-      "blocker": "AutoSkill HTTP E2E pending: reference runtime native dependencies are platform-incompatible on this host",
+      "evidence_ref": "docs/connection-expansion/evidence/w0-postgresql-autoskill-live-blocker.json",
+      "blocker": "AutoSkill 8dc9f14 stores uploaded MCP config at the agent root but resolves it from the session root, so the live Agent exposes zero MCP tools",
       "owner": "knowledge-platform"
     },
     {

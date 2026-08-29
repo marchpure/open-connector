@@ -1,4 +1,5 @@
 const sqlReadActions = new Set([
+  "discover_resources",
   "validate_connection",
   "list_databases",
   "list_schemas",
@@ -21,9 +22,16 @@ const sqlServices = new Set([
   "hive",
   "trino",
 ]);
-const maxcomputeReadActions = new Set(["validate_connection", "list_projects", "list_tables", "describe_table"]);
+const maxcomputeReadActions = new Set([
+  "discover_resources",
+  "validate_connection",
+  "list_projects",
+  "list_tables",
+  "describe_table",
+]);
 
 const elasticsearchReadActions = new Set([
+  "discover_resources",
   "ping_cluster",
   "list_indices",
   "get_index_schema",

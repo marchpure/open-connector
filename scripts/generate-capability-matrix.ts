@@ -21,6 +21,8 @@ const enabled = new Map([
   ["aliyun_oss", ["beta", "docs/connection-expansion/w2-office-storage-handoff.json#/connections/4"]],
   ["volcengine_tos", ["beta", "docs/connection-expansion/w2-office-storage-handoff.json#/connections/5"]],
 ]);
+const postgresqlSkillBlocker =
+  "AutoSkill 8dc9f14 stores uploaded MCP config at the agent root but resolves it from the session root, so the live Agent exposes zero MCP tools";
 
 function fields(provider: (typeof catalog.providers)[number]): string[] {
   return provider.auth.flatMap((auth) => {
@@ -47,7 +49,7 @@ const providers = catalog.providers.map((provider) => {
     executor_present: executorPresent,
     actions,
     tier: state?.[0] ?? "catalog",
-    local_testable: executorPresent && provider.authTypes.includes("no_auth"),
+    local_testable: provider.service === "postgresql" || (executorPresent && provider.authTypes.includes("no_auth")),
     external_account_required: !provider.authTypes.includes("no_auth"),
     create: state !== undefined,
     validate: executorPresent,
@@ -60,8 +62,18 @@ const providers = catalog.providers.map((provider) => {
     restart: state !== undefined,
     skill_context: state !== undefined && executorPresent,
     skill_e2e: false,
-    evidence_ref: state?.[1] ?? null,
-    blocker: state && !executorPresent ? "enabled_without_executor" : (state ? "external_account_or_lifecycle_evidence" : null),
+    evidence_ref:
+      provider.service === "postgresql"
+        ? "docs/connection-expansion/evidence/w0-postgresql-autoskill-live-blocker.json"
+        : (state?.[1] ?? null),
+    blocker:
+      provider.service === "postgresql"
+        ? postgresqlSkillBlocker
+        : state && !executorPresent
+          ? "enabled_without_executor"
+          : state
+            ? "external_account_or_lifecycle_evidence"
+            : null,
     owner: "knowledge-platform",
   };
 });
@@ -70,7 +82,8 @@ const adapters = ["oracle_database", "rest_openapi", "mcp", "files"].map((servic
   service_id,
   display_name: service_id === "oracle_database" ? "Oracle Database" : service_id === "rest_openapi" ? "REST / OpenAPI" : service_id === "mcp" ? "MCP Server" : "Files",
   category: ["adapter"], frontend_visible: true, frontend_enabled: true, configuration_fields: [], credential_mode: [], oauth_callback: false,
-  executor_present: true, actions: [], tier: "beta", local_testable: service_id === "files" || service_id === "rest_openapi" || service_id === "mcp",
+  executor_present: true, actions: [], tier: "beta",
+  local_testable: service_id === "files" || service_id === "rest_openapi" || service_id === "mcp",
   external_account_required: service_id === "oracle_database", create: true, validate: true, discover: true, preview: service_id === "files", lease: true, action: true, audit: true, revoke: true, restart: true,
   skill_context: false, skill_e2e: false, evidence_ref: null, blocker: service_id === "oracle_database" ? "external_account_required" : null, owner: "knowledge-platform",
 }));
