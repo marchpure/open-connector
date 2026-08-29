@@ -5,16 +5,7 @@
   "implementationSha": "4542d5c6f774e3b6e72f3fc64ff1007d9820fb7d",
   "branch": "feat/connection-expansion-p1-data-platforms",
   "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms",
-  "scope": [
-    "oceanbase",
-    "tidb_sql",
-    "maxcompute",
-    "hologres",
-    "hive",
-    "trino",
-    "elasticsearch",
-    "opensearch"
-  ],
+  "scope": ["oceanbase", "tidb_sql", "maxcompute", "hologres", "hive", "trino", "elasticsearch", "opensearch"],
   "canonicalIds": {
     "tidb": "Unchanged TiDB Cloud management API provider.",
     "tidb_sql": "New canonical SQL data-access provider. No migration or alias from tidb because the credentials and actions are semantically different.",
@@ -172,13 +163,7 @@
     "npmAuditOmitDev": "0 vulnerabilities",
     "npmAudit": "0 vulnerabilities",
     "gitDiffCheck": "passed",
-    "realEngines": [
-      "TiDB 8.5.3",
-      "Apache Hive 4.0.1",
-      "Trino 477",
-      "Elasticsearch 8.19.4",
-      "OpenSearch 2.19.3"
-    ]
+    "realEngines": ["TiDB 8.5.3", "Apache Hive 4.0.1", "Trino 477", "Elasticsearch 8.19.4", "OpenSearch 2.19.3"]
   },
   "supplyChain": {
     "cycloneDx": "artifacts/npm-sbom-cyclonedx.json",

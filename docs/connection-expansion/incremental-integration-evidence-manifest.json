@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "artifact": "connection-expansion-incremental-integration-evidence",
+  "redaction": {
+    "credentials": "No credential values, tokens, cookies, signed URLs, or external account identifiers are included.",
+    "evidence": "Provider evidence is repository-relative and preserves catalog/beta/verified boundaries."
+  },
+  "baseline": {
+    "baseSha": "3bbd44624933300487a54ee3acba23190b66ee98",
+    "sourceBranch": "feat/connection-expansion-integration",
+    "sourceRemote": "fork/feat/connection-expansion-integration",
+    "sourceWorktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-expansion-integration",
+    "integrationBranch": "feat/connection-expansion-incremental-integration",
+    "integrationWorktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-expansion-incremental-integration",
+    "inputs": {
+      "p1": {
+        "branch": "feat/connection-expansion-p1-data-platforms",
+        "sha": "b351805866403fef7e62eb962605da0f5a629c2f",
+        "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-p1-data-platforms",
+        "handoff": "docs/connection-expansion/p1-incremental-data-platforms-handoff.json"
+      },
+      "p2": {
+        "branch": "feat/connection-expansion-p2-cn-office-storage",
+        "sha": "9184d731b1620a9d10b1d2cc3a12f2b2e3dda32d",
+        "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-p2-cn-office-storage",
+        "handoff": "docs/connection-expansion/p2-incremental-cn-office-storage-handoff.json",
+        "tipNote": "The branch tip includes the freeze commit; implementationSha c69c71ca09ba2c26cfe14f3b5282a27c0c2cf242 is not the integration input."
+      },
+      "p3": {
+        "branch": "feat/connection-expansion-p3-dingtalk-ecosystem",
+        "sha": "2823b028a5d6544dc746c7a1270d51810da6f8c7",
+        "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-expansion-p3-dingtalk-ecosystem-20260829-010827",
+        "handoff": "docs/connection-expansion/p3-dingtalk-ecosystem-handoff.json"
+      },
+      "p4": {
+        "branch": "feat/connection-expansion-p4-erp-ecosystem",
+        "sha": "5082d4a09288550faea7f8be52c5c8b06da337b8",
+        "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-expansion-p4-erp-ecosystem-20260829-010647",
+        "handoff": "docs/connection-expansion/p4-erp-ecosystem-handoff.json"
+      }
+    },
+    "workerWorktreesCleanAtGate": true,
+    "sourceWorktreeCleanAtGate": true,
+    "sourceLocalRemoteShaEqualAtGate": true
+  },
+  "integration": {
+    "order": ["P1", "P2", "P3", "P4"],
+    "method": "Full-history branch merges into a new worktree from base; generated artifacts regenerated after source integration.",
+    "mergeCommits": ["a5f0d650b4a09a163a980c0c65af8313ca8d5f52", "89e639a", "2643bfb", "5b7e753"],
+    "conflictResolution": [
+      "P1 and P2 default enablement entries were unioned with unique service IDs and evidence references.",
+      "P1 data-platform bounded Agent lease policy and P2 office/storage mutation policy are both enforced.",
+      "P4 ERP provider ownership, invalid cross-provider action handling, and mutation denial were composed with existing lease checks.",
+      "ResourceRef and ProviderResourceCandidate unions retain P2 resource observation and add all P4 ERP resource types.",
+      "Generated catalog, provider registries, action contracts, and SBOM were regenerated; generated catalog/registry files remain ignored by repository convention."
+    ],
+    "excluded": [
+      "No P1/P2/P3/P4 worker worktree was modified.",
+      "No Knowledge Asset Workbench 18403 frontend/BFF/AutoSkill final e2e branch was merged.",
+      "No unrelated session changes were merged."
+    ]
+  },
+  "generatedArtifacts": {
+    "catalogDirectory": "catalog/apps",
+    "catalogProviders": 1470,
+    "catalogActions": 15297,
+    "nodeRegistryProviders": 1470,
+    "cloudflareRegistryProviders": 1456,
+    "actionContractProviders": 1470,
+    "serviceIdsUnique": true,
+    "requiredLegacyAndIncrementalServicesPresent": true
+  },
+  "tierMatrix": {
+    "p1DataPlatforms": {
+      "verified": ["tidb_sql", "hive", "trino", "elasticsearch", "opensearch"],
+      "betaBlocked": ["oceanbase", "maxcompute", "hologres"],
+      "evidence": "docs/connection-expansion/p1-incremental-data-platforms-handoff.json"
+    },
+    "p2CnOfficeStorage": {
+      "beta": ["tencent_docs", "wps_mcp", "baidu_netdisk", "tencent_cos", "huawei_obs", "minio", "qiniu_kodo"],
+      "legacyProvidersRetained": ["tidb", "elasticsearch", "aws_s3", "aliyun_oss", "volcengine_tos"],
+      "evidence": "docs/connection-expansion/p2-incremental-cn-office-storage-handoff.json"
+    },
+    "p3Dingtalk": {
+      "beta": ["dingtalk"],
+      "catalogOnly": ["dingtalk_docs", "dingtalk_drive", "dingtalk_meetings", "dingtalk_approvals", "dingtalk_yida"],
+      "compatibilityRetained": ["dingtalk_bot"],
+      "evidence": "docs/connection-expansion/p3-dingtalk-ecosystem-handoff.json"
+    },
+    "p4Erp": {
+      "beta": [
+        "erpnext",
+        "netsuite",
+        "sap_s4hana",
+        "oracle_fusion_erp",
+        "dynamics_365_finance",
+        "dynamics_365_business_central",
+        "odoo",
+        "kingdee_cloud",
+        "yonyou_bip"
+      ],
+      "adjacentRetained": ["workday", "sage_hr", "sage_sales_management", "cin7_core"],
+      "evidence": "docs/connection-expansion/p4-erp-ecosystem-handoff.json"
+    }
+  },
+  "enablement": {
+    "defaultServices": ["feishu", "dingtalk", "wecom", "aws_s3", "aliyun_oss", "volcengine_tos"],
+    "policy": "Only the pre-existing baseline services are enabled by default. New P1-P4 providers remain catalog/beta/verified according to evidence and require explicit evidence-referenced configuration; catalog presence alone does not enable a provider.",
+    "policySource": "src/control-plane/index.ts"
+  },
+  "securityAndRuntime": {
+    "singleConnectionService": true,
+    "covered": [
+      "Tenant/workspace isolation and connection owner/visibility checks",
+      "Connection revision binding, lease allowlists, lease revoke, and IDOR rejection",
+      "Encrypted credential persistence and secret redaction",
+      "ResourceRef discovery allowlists and stale/cross-tenant resource rejection",
+      "SSRF/private-network/egress guards and bounded reads",
+      "Timeout/cancellation and provider resource cleanup",
+      "Agent payload boundary: refs, leases, and redacted schemas/results only"
+    ],
+    "agentWrites": "ERP mutation and legacy generic ERP actions are denied for Agent leases; office/storage writes, deletes, and presign actions remain owner-controlled or denied by provider policy.",
+    "realLifecycle": {
+      "p1": "TiDB SQL real lifecycle evidence is retained; other blocked providers remain beta/catalog where required.",
+      "p2": "Frozen handoff evidence is retained; external account lifecycle blockers remain explicit.",
+      "p3": "No real DingTalk enterprise lifecycle evidence was available; no catalog-only domain is promoted.",
+      "p4": "ERPNext and Odoo local official-container evidence is retained as beta evidence; hosted/licensed tenant evidence remains blocked."
+    }
+  },
+  "verification": {
+    "npmCi": "passed; 698 packages added; 0 vulnerabilities",
+    "generateCatalog": "passed; 1470 providers and 15297 actions",
+    "generateRegistry": "passed; 1470 node / 1456 Cloudflare providers and 1470 action-contract providers",
+    "fixCheck": "passed; lint/format/typecheck",
+    "typecheck": "passed for src, scripts-all, examples",
+    "focusedControlPlane": "passed; 14 tests",
+    "fullTests": "passed; 180 files passed, 1 skipped; 1634 tests passed, 4 skipped",
+    "build": "passed",
+    "npmAudit": "passed; 0 vulnerabilities",
+    "npmAuditOmitDev": "passed; 0 vulnerabilities",
+    "gitDiffCheck": "passed",
+    "licenseSbom": {
+      "cycloneDx": "artifacts/npm-sbom-cyclonedx.json",
+      "format": "CycloneDX 1.5",
+      "components": 658,
+      "sha256": "eee586a7c948095ec68b6035389030330aa7219ee40d0b32919dfb64fdb34a40",
+      "npmLs": "artifacts/npm-sbom.json",
+      "npmLsSha256": "3b075f0c420249b001a3f71b713de7ec546280d494b8b6a1489e944c9c354601",
+      "missingLicenseMetadata": ["@oomol/connect-web@0.1.0", "pause-stream@0.0.11"],
+      "missingLicenseMetadataReason": "Upstream package metadata did not declare a license; no license was inferred."
+    }
+  },
+  "externalBlockers": [
+    "P1: OceanBase MySQL/Oracle services, Hologres endpoint, MaxCompute account/data-plane, and Hive Kerberos KDC/service principal unavailable.",
+    "P2: Required Feishu/WeCom/DingTalk and cloud storage accounts, credentials, tenants, and upstream lifecycle matrices unavailable.",
+    "P3: DingTalk organization/app/OAuth/user/resources, internal-app credential model, entitlements, and lifecycle matrix unavailable.",
+    "P4: NetSuite/SAP/Fusion/Dynamics/Kingdee/YonBIP licensed tenants and credentials unavailable; ERPNext/Odoo hosted/Enterprise deployment coverage remains unverified.",
+    "Real private-network/TLS/bounded-read target matrices not available for blocked providers."
+  ],
+  "rollback": {
+    "baseSha": "3bbd44624933300487a54ee3acba23190b66ee98",
+    "method": "Redeploy the base integration artifact or remove this candidate deployment; preserve control database backups and do not reuse expansion credentials after rollback.",
+    "otherWorktreesUntouched": true
+  }
+}

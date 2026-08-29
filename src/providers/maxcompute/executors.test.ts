@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-
 import { assertMaxComputeProjectScope } from "./executors.ts";
 
 describe("MaxCompute project scope", () => {

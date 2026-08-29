@@ -416,6 +416,9 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         (actionId) => !actionId.startsWith(`${connectionService}.`) || !declaredActions.has(actionId),
       )
     ) {
+      if (isErpService(connectionService)) {
+        return jsonError(context, 400, "invalid_action", "Every leased action must belong to the selected connection.");
+      }
       return jsonError(
         context,
         403,

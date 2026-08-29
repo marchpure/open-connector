@@ -237,9 +237,6 @@ function boundedPageSize(value: unknown): number {
 
 export function assertMaxComputeProjectScope(project: string, configuredProject: string): void {
   if (project !== configuredProject) {
-    throw new ProviderRequestError(
-      403,
-      "MaxCompute table operations are restricted to the configured project.",
-    );
+    throw new ProviderRequestError(403, "MaxCompute table operations are restricted to the configured project.");
   }
 }

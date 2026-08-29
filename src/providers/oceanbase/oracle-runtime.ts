@@ -58,12 +58,7 @@ class OceanbaseOracleBackend implements DatabaseBackend {
   }
 
   async validate(): Promise<DatabaseIdentity> {
-    const result = await this.read(
-      "select banner as VERSION from v$version where rownum = 1",
-      {},
-      1,
-      10_000,
-    );
+    const result = await this.read("select banner as VERSION from v$version where rownum = 1", {}, 1, 10_000);
     const version = String(result.rows[0]?.VERSION ?? result.rows[0]?.version ?? "");
     if (!/oceanbase/i.test(version)) {
       throw new DatabaseRuntimeError("database_query_failed", "Connected server did not identify as OceanBase.");
@@ -122,9 +117,7 @@ class OceanbaseOracleBackend implements DatabaseBackend {
         nullable: String(row.NULLABLE ?? row.nullable) === "Y",
         ordinal: Number(row.COLUMN_ID ?? row.column_id),
         defaultValue:
-          row.DATA_DEFAULT == null && row.data_default == null
-            ? null
-            : String(row.DATA_DEFAULT ?? row.data_default),
+          row.DATA_DEFAULT == null && row.data_default == null ? null : String(row.DATA_DEFAULT ?? row.data_default),
       })),
     };
   }
