@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "status": "BLOCKED_EXTERNAL",
+  "connectionService": {
+    "port": 38101,
+    "listener": "127.0.0.1:38101",
+    "catalogProviderCount": 1470,
+    "catalogActionCount": 15297,
+    "reachability": "Connection runtime MCP initialized and served tools to an MCP client"
+  },
+  "autoskillSha": "8dc9f14c1a0b0169ef865f3d87d4a6ea3e623533",
+  "client": "AutoSkill src.mcp.mcp_manager.McpManager",
+  "failure": "McpManager._register_tools accesses tool.inputSchema, but the installed Python MCP SDK Tool object has no inputSchema attribute. Tool registration returns zero tools and action invocation cannot proceed.",
+  "impact": "AutoSkill MCP consumer E2E cannot reach execute_action despite a healthy Connection runtime endpoint.",
+  "requiredFixOwner": "AutoSkill/runtime integration owner",
+  "requiredFix": "Normalize MCP Tool schema access for the pinned SDK (for example input_schema/model_dump compatibility) and rerun initialize -> tools/list -> tools/call.",
+  "connectionEvidence": "docs/connection-expansion/evidence/postgresql-real-engine-w0.json",
+  "logs": "/tmp/kp-rerun-20260829/w0/autoskill/runtime-mcp-autoskill-final.log",
+  "secrets": "No credentials, lease tokens, or database values are included."
+}
