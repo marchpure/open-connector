@@ -211,6 +211,10 @@ export class ConnectServer {
     app.post("/api/oauth/authorizations", (context) => this.createOAuthAuthorization(context));
     app.get("/oauth/callback", (context) => this.completeOAuth(context));
     app.post("/mcp", (context) => this.handleMcp(context));
+    // Stable cross-service handoff endpoint. Keep the implementation shared
+    // with /mcp so authentication, leases, policy, audit, and tool semantics
+    // cannot drift between entry points.
+    app.post("/v1/runtime/mcp/sse", (context) => this.handleMcp(context));
     app.get("/mcp", (context) => this.rejectMcpMethod(context));
     app.delete("/mcp", (context) => this.rejectMcpMethod(context));
     app.get("/mcp/tools", (context) => context.json({ tools: listMcpToolSummaries() }));

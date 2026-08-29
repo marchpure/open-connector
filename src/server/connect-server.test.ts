@@ -139,7 +139,10 @@ describe("ConnectServer", () => {
 
     const response = await app.request("/api/connections/catalog_only", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      },
       body: JSON.stringify({ authType: "api_key", values: { apiKey: "secret" } }),
     });
 
@@ -1261,6 +1264,24 @@ describe("ConnectServer", () => {
         },
         id: null,
       });
+    }
+  });
+
+  it("exposes the frozen runtime MCP entry point through the same authenticated handler", async () => {
+    const app = createTestServer([apiKeyProvider]).createApp();
+    const fetcher: typeof fetch = async (input, init) => app.fetch(new Request(input, init));
+    const transport = new StreamableHTTPClientTransport(new URL("https://connect.test/v1/runtime/mcp/sse"), {
+      fetch: fetcher,
+    });
+    const client = new Client({ name: "runtime-entry-test", version: "0.0.0" }, { versionNegotiation: { mode: "auto" } });
+
+    try {
+      await expect(client.connect(transport)).resolves.toBeUndefined();
+      await expect(client.listTools()).resolves.toMatchObject({
+        tools: expect.arrayContaining([expect.objectContaining({ name: "execute_action" })]),
+      });
+    } finally {
+      await client.close();
     }
   });
 

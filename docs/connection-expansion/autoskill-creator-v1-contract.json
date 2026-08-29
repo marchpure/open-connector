@@ -1,0 +1,44 @@
+{
+  "contractVersion": "autoskill-creator-v1",
+  "ownership": {
+    "browserEntry": "knowledge-bff-only",
+    "connectionServiceAuthority": true,
+    "autoskillPolicyIsSecurityBoundary": false
+  },
+  "runtime": {
+    "mcpEntryPoint": "/v1/runtime/mcp/sse",
+    "transportOwner": "connection-service",
+    "browserMayCall": ["knowledge-bff"],
+    "browserMayNotCall": ["connection-service", "autoskill"]
+  },
+  "skillBundle": {
+    "allowedFields": ["connection_ref", "connector_key", "allowed_action_ids"],
+    "forbiddenFields": ["credentials", "lease", "lease_token", "internal_url", "connection_service_url", "runtime_url"]
+  },
+  "autoskill": {
+    "multipartField": {
+      "name": "invocation_policy",
+      "type": "JSON",
+      "optional": true,
+      "backwardCompatibleWhenAbsent": true
+    },
+    "version": 1,
+    "requiredFields": ["allowed_mcp_servers", "allowed_mcp_tools", "required_successful_calls", "allowed_action_ids"],
+    "executeActionConstraint": {
+      "tool": "execute_action",
+      "argumentsField": "actionId",
+      "constraint": "enum",
+      "source": "allowed_action_ids"
+    },
+    "requestSummary": {
+      "field": "policy_evaluation",
+      "fields": ["satisfied", "matched_calls", "unmet_requirements"]
+    }
+  },
+  "security": {
+    "finalDecisionMaker": "connection-service",
+    "leaseAndAuditRemainRequired": true,
+    "ssrfControlsRemainRequired": true,
+    "policyEvaluationMode": "post-execution-observational"
+  }
+}
