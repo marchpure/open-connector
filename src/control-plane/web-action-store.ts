@@ -2,9 +2,11 @@ import type { ActionDefinition, CredentialProfile, ResolvedCredential } from "..
 import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
 import type { TenantPrincipal } from "./types.ts";
 import type { WebCandidate } from "./web-discovery.ts";
+import type { WebEgressPolicy } from "./service.ts";
 import type { DatabaseSync } from "node:sqlite";
 
 import { randomUUID } from "node:crypto";
+import { assertPublicHttpUrl } from "../core/request.ts";
 import { redactSecrets, safeConnectionProfile } from "./redaction.ts";
 
 export type WebAuthProfile =
@@ -101,11 +103,18 @@ export class TenantWebActionStore {
   private readonly database: DatabaseSync;
   private readonly principal: TenantPrincipal;
   private readonly secretCodec: ISecretCodec;
+  private readonly webEgress?: WebEgressPolicy;
 
-  constructor(database: DatabaseSync, principal: TenantPrincipal, secretCodec: ISecretCodec) {
+  constructor(
+    database: DatabaseSync,
+    principal: TenantPrincipal,
+    secretCodec: ISecretCodec,
+    webEgress?: WebEgressPolicy,
+  ) {
     this.database = database;
     this.principal = principal;
     this.secretCodec = secretCodec;
+    this.webEgress = webEgress;
     this.database.exec(`
       create table if not exists tenant_connections (
         id text primary key,
@@ -181,7 +190,7 @@ export class TenantWebActionStore {
   }
 
   async confirm(input: ConfirmedWebActionInput): Promise<WebActionDefinition> {
-    validateCandidate(input.candidate);
+    validateCandidate(input.candidate, this.webEgress);
     const write = !input.candidate.readOnly;
     if (write && input.sideEffectConfirmed !== true) {
       throw new WebActionError("side_effect_confirmation_required", "Write Web Actions require explicit confirmation.");
@@ -439,9 +448,9 @@ export class TenantWebActionStore {
   }
 }
 
-function validateCandidate(candidate: WebCandidate): void {
+function validateCandidate(candidate: WebCandidate, webEgress?: WebEgressPolicy): void {
   if (
-    !isHttpsOrigin(candidate.origin) ||
+    !isHttpsOrigin(candidate.origin, webEgress) ||
     !["GET", "POST", "PUT", "PATCH", "DELETE"].includes(candidate.method) ||
     !candidate.path.startsWith("/") ||
     candidate.path.includes("?") ||
@@ -466,12 +475,26 @@ function pathProperties(path: string): Record<string, unknown> {
   return Object.fromEntries([...path.matchAll(/\{([^}]+)\}/g)].map(([_, name]) => [name, { type: "string" }]));
 }
 
-function isHttpsOrigin(value: string): boolean {
+function isHttpsOrigin(value: string, webEgress?: WebEgressPolicy): boolean {
   try {
     const url = new URL(value);
-    return (
-      url.protocol === "https:" && url.pathname === "/" && !url.username && !url.password && !url.search && !url.hash
-    );
+    if (
+      url.protocol !== "https:" ||
+      url.pathname !== "/" ||
+      Boolean(url.username) ||
+      Boolean(url.password) ||
+      Boolean(url.search) ||
+      Boolean(url.hash)
+    ) {
+      return false;
+    }
+    assertPublicHttpUrl(url.origin, {
+      fieldName: "Web Action origin",
+      createError: (message) => new Error(message),
+      allowLocalhostDev: webEgress?.allowLocalhostDev === true,
+      allowedLocalhostPorts: webEgress?.allowedLocalhostPorts,
+    });
+    return true;
   } catch {
     return false;
   }
