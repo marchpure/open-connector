@@ -14,6 +14,7 @@ import type { ResourceRef, TenantPrincipal } from "./types.ts";
 import type { Context } from "hono";
 import type { DatabaseSync } from "node:sqlite";
 
+import { createMcpHandler } from "@modelcontextprotocol/server";
 import { Hono } from "hono";
 import { ConnectionError } from "../connection-service.ts";
 import { readJsonBody, jsonError } from "../server/api/http-utils.ts";
@@ -29,6 +30,11 @@ import { ControlledMcpAdapter, TenantMcpDefinitionStore } from "./mcp-adapter.ts
 import { OracleDatabaseAdapter } from "./oracle-adapter.ts";
 import { redactSecrets, safeConnectionProfile } from "./redaction.ts";
 import { RestIdempotencyStore, RestOpenApiAdapter } from "./rest-adapter.ts";
+import {
+  assertLeaseRuntimeRequest,
+  createLeaseRuntimeMcpServer,
+  resolveLeaseRuntimeMcpContext,
+} from "./runtime-mcp.ts";
 import { createTenantRuntime } from "./service.ts";
 import { TenantOAuthStateStore } from "./tenant-store.ts";
 import { TenantWebDiscoveryStore } from "./web-discovery.ts";
@@ -120,7 +126,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         );
   });
   app.use("/v1/*", async (context, next) => {
-    if (context.req.path === "/v1/health") {
+    if (context.req.path === "/v1/health" || context.req.path === "/v1/runtime/mcp/sse") {
       await next();
       return;
     }
@@ -132,6 +138,51 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     await next();
   });
   app.get("/v1/health", (context) => context.json({ ok: true }));
+  app.post("/v1/runtime/mcp/sse", async (context) => {
+    let leaseContext;
+    try {
+      leaseContext = resolveLeaseRuntimeMcpContext(
+        leases,
+        context.req.header("x-connection-lease"),
+        context.req.header("x-connection-invocation-id") ?? context.req.header("invocationId"),
+        context.req.header("x-connection-audience") ?? context.req.header("audience"),
+      );
+      assertLeaseRuntimeRequest(
+        {
+          catalog: options.catalog,
+          providerLoader: options.providerLoader,
+          controlDatabase: options.controlDatabase,
+          secretCodec: options.secretCodec,
+          publicOrigin: options.publicOrigin,
+          transitFiles: options.transitFiles,
+        },
+        leaseContext,
+      );
+    } catch (error) {
+      return leaseError(context, error);
+    }
+    const handler = createMcpHandler(
+      () =>
+        createLeaseRuntimeMcpServer(
+          {
+            catalog: options.catalog,
+            providerLoader: options.providerLoader,
+            controlDatabase: options.controlDatabase,
+            secretCodec: options.secretCodec,
+            publicOrigin: options.publicOrigin,
+            transitFiles: options.transitFiles,
+          },
+          leaseContext,
+          context.req.raw.signal,
+        ),
+      { legacy: "stateless", responseMode: "json" },
+    );
+    try {
+      return await handler.fetch(context.req.raw);
+    } finally {
+      await handler.close();
+    }
+  });
   app.get("/v1/catalog", (context) => context.json({ items: catalog.list() }));
   // These are Connection Service-owned adapters, not OpenConnector providers.
   // Keep them in a separate capability surface so the browser can present the
@@ -672,7 +723,9 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         "Storage write, delete, and presign actions require the connection owner.",
       );
     }
-    const prohibitedAgentActions = requestedActions.filter(isProhibitedAgentLeaseAction);
+    const prohibitedAgentActions = requestedActions.filter(
+      (actionId) => !isErpMutationAction(actionId) && isProhibitedAgentLeaseAction(actionId),
+    );
     if (prohibitedAgentActions.length > 0) {
       return jsonError(
         context,
@@ -870,7 +923,13 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
   });
   app.get("/v1/audit", async (context) => {
     const runtime = tenantRuntime(options, principalOf(context));
-    return context.json({ items: (await runtime.actions.listRuns()).items });
+    return context.json({
+      items: (
+        await runtime.actions.listRuns({
+          invocationId: optionalString(context.req.query("invocationId")),
+        })
+      ).items,
+    });
   });
   app.post("/v1/adapters/rest/invoke", async (context) => {
     const body = await readJsonBody(context);
@@ -1235,8 +1294,15 @@ function isOwnerControlledStorageAction(actionId: string): boolean {
 }
 
 function isProhibitedAgentLeaseAction(actionId: string): boolean {
-  return /^(?:(?:tencent_docs)\.(?:create_file|rename_file|convert_file_id|batch_update_sheet|batch_update_doc|update_form_collection_deadline|generate_form_result)|(?:wps_mcp)\.(?:list_tools|call_tool|create_file_with_content|create_folder)|(?:baidu_netdisk)\.(?:upload_file_from_url|create_text_file|create_folder|create_share_link|copy|move|rename)|(?:aws_s3|aliyun_oss|volcengine_tos|tencent_cos|huawei_obs|minio|qiniu_kodo)\.(?:put_object|delete_object|generate_presigned_url))$/u.test(
-    actionId,
+  const actionName = actionId.slice(actionId.indexOf(".") + 1);
+  return (
+    /(?:^|_)(?:create|add|append|update|set|patch|edit|rename|move|copy|delete|remove|archive|restore|upload|import|send|reply|forward|publish|put|write|execute|run|trigger|start|stop|cancel|approve|reject|invite|share|grant|revoke|generate_presigned)(?:_|$)/u.test(
+      actionName,
+    ) ||
+    /^post(?:_|$)/u.test(actionName) ||
+    /^(?:(?:tencent_docs)\.(?:batch_update_sheet|batch_update_doc)|(?:wps_mcp)\.(?:list_tools|call_tool))$/u.test(
+      actionId,
+    )
   );
 }
 

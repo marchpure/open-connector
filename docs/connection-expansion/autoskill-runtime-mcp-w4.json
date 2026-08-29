@@ -1,0 +1,86 @@
+{
+  "milestone": "AutoSkill Creator V1 W4",
+  "status": "frozen",
+  "baseSha": "a3c37f5ae4371bf7efa5d13e252707f19c32af7d",
+  "branch": "feat/connection-autoskill-runtime-mcp",
+  "endpoint": "/v1/runtime/mcp/sse",
+  "transport": "MCP Streamable HTTP with legacy protocol negotiation",
+  "tools": ["list_allowed_actions", "get_action_guide", "execute_action"],
+  "leaseBoundary": {
+    "token": "HMAC-signed claims with hash-backed expiry and revocation state",
+    "requiredHeaders": ["X-Connection-Lease", "X-Connection-Invocation-Id", "X-Connection-Audience"],
+    "identitySource": "signed lease only; URL and bearer identity are ignored",
+    "bindings": [
+      "tenant",
+      "workspace",
+      "subject",
+      "owner",
+      "invocation",
+      "audience",
+      "connection",
+      "connection revision",
+      "allowed actions"
+    ],
+    "defaultAuthorization": "read-only; mutation-named actions and reviewed generic mutation tools are denied at lease issuance",
+    "execution": "existing tenant ProviderLoader, ActionRunner, resource authorization, audit, and guarded provider fetch",
+    "termination": "request disconnect, 30-second timeout, and periodic lease expiry/revocation/revision checks share one abort signal"
+  },
+  "outputBoundary": {
+    "maxBytes": 16384,
+    "maxDepth": 4,
+    "maxNodes": 256,
+    "maxArrayItems": 20,
+    "maxObjectFields": 50,
+    "redacted": ["credentials", "tokens", "cookies", "authorization", "secrets", "internal URLs"]
+  },
+  "audit": {
+    "query": "/v1/audit?invocationId=<id>",
+    "fields": [
+      "connectionId",
+      "actionId",
+      "caller",
+      "startedAt",
+      "completedAt",
+      "ok",
+      "errorCode"
+    ],
+    "redacted": true
+  },
+  "securityTests": [
+    "wrong action id",
+    "cross-connection URL selection ignored",
+    "expired lease",
+    "revoked lease",
+    "cross-tenant bearer and audit isolation",
+    "invocation replay",
+    "wrong audience",
+    "stale connection revision",
+    "signed lease payload tampering"
+  ],
+  "verification": {
+    "fixCheck": "passed",
+    "fullTests": "181 files passed, 1 skipped; 1646 tests passed, 4 skipped",
+    "focusedRuntimeTests": "3 files and 115 tests passed",
+    "build": "passed",
+    "catalog": "1470 providers and 15297 actions",
+    "npmAudit": "0 vulnerabilities",
+    "sbom": "npm ls --all --json completed; 64 direct dependency entries and 6 known optional WASM packages reported extraneous",
+    "realSmoke": {
+      "status": "passed",
+      "command": "node scripts/verify-runtime-mcp.ts",
+      "service": "real local Connection Service process",
+      "client": "@modelcontextprotocol/client",
+      "protocolSteps": ["initialize", "tools/list", "tools/call"],
+      "provider": "hackernews",
+      "actionId": "hackernews.get_max_item_id",
+      "network": "real public provider endpoint",
+      "auditPersisted": true
+    },
+    "oauthRegression": "included in full test suite; Feishu callback, status, replay, expiry, and tenant isolation preserved"
+  },
+  "remote": {
+    "target": "fork/feat/connection-autoskill-runtime-mcp",
+    "baselineBranchPublishedClaim": false,
+    "ancestry": "feature branch descends exactly from the supplied local base SHA"
+  }
+}

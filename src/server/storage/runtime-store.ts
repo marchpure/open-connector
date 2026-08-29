@@ -31,6 +31,7 @@ export interface RunLog {
 export interface RunLogListInput {
   limit?: number;
   cursor?: string;
+  invocationId?: string;
   service?: string;
   actionId?: string;
   caller?: RunLogCaller;

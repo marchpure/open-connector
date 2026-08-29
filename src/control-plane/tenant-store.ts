@@ -69,6 +69,7 @@ export class TenantConnectionStore implements IConnectionStore {
         workspace_id text not null,
         subject text not null,
         invocation_id text not null,
+        caller text,
         connection_id text not null,
         action_id text not null,
         ok integer not null,
@@ -80,6 +81,7 @@ export class TenantConnectionStore implements IConnectionStore {
       create index if not exists idx_control_execution_audit_scope
         on control_execution_audit (tenant_id, workspace_id, started_at);
     `);
+    ensureAuditCallerColumn(this.database);
   }
 
   async get(service: string, connectionName: string): Promise<StoredConnection | undefined> {
@@ -406,8 +408,8 @@ export class TenantRunLogStore implements IRunLogStore {
       .prepare(
         `insert into control_execution_audit
           (id, tenant_id, workspace_id, subject, invocation_id, connection_id,
-           action_id, ok, error_code, started_at, completed_at, detail_json)
-         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           caller, action_id, ok, error_code, started_at, completed_at, detail_json)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -416,6 +418,7 @@ export class TenantRunLogStore implements IRunLogStore {
         this.principal.subject,
         run.invocationId ?? run.id,
         run.connectionId ?? "",
+        run.caller,
         run.actionId,
         run.ok ? 1 : 0,
         run.errorCode ?? null,
@@ -433,12 +436,22 @@ export class TenantRunLogStore implements IRunLogStore {
     return row ? rowToRun(row) : undefined;
   }
 
-  async list(_input: RunLogListInput = {}): Promise<RunLogPage> {
-    const rows = this.database
-      .prepare(
-        "select * from control_execution_audit where tenant_id=? and workspace_id=? order by started_at desc limit 100",
-      )
-      .all(this.principal.tenantId, this.principal.workspaceId) as Record<string, unknown>[];
+  async list(input: RunLogListInput = {}): Promise<RunLogPage> {
+    const rows = input.invocationId
+      ? (this.database
+          .prepare(
+            `select * from control_execution_audit
+              where tenant_id=? and workspace_id=? and invocation_id=?
+              order by started_at desc limit 100`,
+          )
+          .all(this.principal.tenantId, this.principal.workspaceId, input.invocationId) as Record<string, unknown>[])
+      : (this.database
+          .prepare(
+            `select * from control_execution_audit
+              where tenant_id=? and workspace_id=?
+              order by started_at desc limit 100`,
+          )
+          .all(this.principal.tenantId, this.principal.workspaceId) as Record<string, unknown>[]);
     return { items: rows.map(rowToRun) };
   }
 }
@@ -800,7 +813,7 @@ function rowToRun(row: Record<string, unknown>): RunLog {
     invocationId: String(row.invocation_id),
     service: String(row.action_id).split(".")[0] ?? "",
     actionId: String(row.action_id),
-    caller: "http",
+    caller: row.caller === "mcp" || row.caller === "web" ? row.caller : "http",
     startedAt: String(row.started_at),
     completedAt: String(row.completed_at),
     durationMs: new Date(String(row.completed_at)).getTime() - new Date(String(row.started_at)).getTime(),
@@ -811,4 +824,11 @@ function rowToRun(row: Record<string, unknown>): RunLog {
     errorCode: row.error_code ? String(row.error_code) : undefined,
     errorMessage: typeof detail.error === "string" ? detail.error : undefined,
   };
+}
+
+function ensureAuditCallerColumn(database: DatabaseSync): void {
+  const columns = database.prepare("pragma table_info(control_execution_audit)").all() as Array<{ name?: unknown }>;
+  if (!columns.some((column) => column.name === "caller")) {
+    database.exec("alter table control_execution_audit add column caller text");
+  }
 }

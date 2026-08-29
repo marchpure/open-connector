@@ -37,6 +37,26 @@ describe("ConnectionLeaseService", () => {
 
     expect(issued.token).toMatch(/^cl_/);
     expect(issued.claims.connectionIds).toEqual(["connection-1"]);
+    expect(leases.resolve(issued.token, { invocationId: "invocation-1", audience: principal.audience })).toMatchObject({
+      tenantId: principal.tenantId,
+      workspaceId: principal.workspaceId,
+      subject: principal.subject,
+      ownerId: principal.ownerId,
+    });
+    expect(() =>
+      leases.resolve(issued.token, { invocationId: "replayed-invocation", audience: principal.audience }),
+    ).toThrowError(/does not grant/);
+    const [payload, signature] = issued.token.slice(3).split(".");
+    const tamperedPayload = Buffer.from(JSON.stringify({ ...issued.claims, tenantId: "tenant-b" }), "utf8").toString(
+      "base64url",
+    );
+    expect(() =>
+      leases.resolve(`cl_${tamperedPayload}.${signature}`, {
+        invocationId: "invocation-1",
+        audience: principal.audience,
+      }),
+    ).toThrowError(/Malformed/);
+    expect(payload).toBeTruthy();
     expect(() =>
       leases.verify(
         issued.token,

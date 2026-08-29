@@ -1,7 +1,7 @@
 import type { ConnectionLeaseClaims, TenantPrincipal } from "./types.ts";
 import type { DatabaseSync } from "node:sqlite";
 
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
 export class LeaseError extends Error {
   readonly code: "invalid_lease" | "lease_expired" | "lease_revoked" | "lease_scope_denied";
@@ -16,17 +16,23 @@ export class LeaseError extends Error {
 export class ConnectionLeaseService {
   private readonly database: DatabaseSync;
   private readonly now: () => Date;
+  private readonly signingKey: string;
 
   constructor(database: DatabaseSync, now: () => Date = () => new Date()) {
     this.database = database;
     this.now = now;
     this.database.exec(`
+      create table if not exists connection_lease_signing_key (
+        singleton integer primary key check (singleton = 1),
+        signing_key text not null
+      );
       create table if not exists connection_leases (
         token_hash text primary key,
         jti text not null unique,
         tenant_id text not null,
         workspace_id text not null,
         subject text not null,
+        owner_id text,
         invocation_id text not null,
         audience text not null,
         connection_ids_json text not null,
@@ -40,6 +46,15 @@ export class ConnectionLeaseService {
         on connection_leases (tenant_id, workspace_id, expires_at);
     `);
     ensureConnectionRevisionColumn(this.database);
+    ensureOwnerIdColumn(this.database);
+    this.database
+      .prepare("insert or ignore into connection_lease_signing_key (singleton, signing_key) values (1, ?)")
+      .run(randomBytes(32).toString("base64url"));
+    const key = this.database
+      .prepare("select signing_key from connection_lease_signing_key where singleton=1")
+      .get() as { signing_key?: unknown } | undefined;
+    if (!key?.signing_key) throw new Error("Connection lease signing key is unavailable.");
+    this.signingKey = String(key.signing_key);
   }
 
   issue(
@@ -72,6 +87,7 @@ export class ConnectionLeaseService {
       tenantId: principal.tenantId,
       workspaceId: principal.workspaceId,
       subject: principal.subject,
+      ownerId: principal.ownerId,
       invocationId: input.invocationId,
       audience: input.audience,
       connectionIds,
@@ -81,13 +97,14 @@ export class ConnectionLeaseService {
       expiresAt: expires.toISOString(),
       jti: randomUUID(),
     };
-    const token = `cl_${randomBytes(32).toString("base64url")}`;
+    const payload = Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
+    const token = `cl_${payload}.${signLease(payload, this.signingKey)}`;
     this.database
       .prepare(
         `insert into connection_leases
           (token_hash, jti, tenant_id, workspace_id, subject, invocation_id, audience,
-           connection_ids_json, connection_revisions_json, allowed_actions_json, issued_at, expires_at)
-         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           owner_id, connection_ids_json, connection_revisions_json, allowed_actions_json, issued_at, expires_at)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         hashToken(token),
@@ -97,6 +114,7 @@ export class ConnectionLeaseService {
         claims.subject,
         claims.invocationId,
         claims.audience,
+        claims.ownerId,
         JSON.stringify(claims.connectionIds),
         claims.connectionRevisions ? JSON.stringify(claims.connectionRevisions) : null,
         JSON.stringify(claims.allowedActions),
@@ -117,7 +135,33 @@ export class ConnectionLeaseService {
       invocationId: string;
     },
   ): ConnectionLeaseClaims {
-    if (!token.startsWith("cl_")) {
+    const claims = this.resolve(token, {
+      audience: expected.audience,
+      invocationId: expected.invocationId,
+    });
+    if (
+      claims.tenantId !== principal.tenantId ||
+      claims.workspaceId !== principal.workspaceId ||
+      claims.subject !== principal.subject ||
+      claims.ownerId !== principal.ownerId ||
+      !claims.connectionIds.includes(expected.connectionId) ||
+      (expected.connectionRevision !== undefined &&
+        claims.connectionRevisions?.[expected.connectionId] !== expected.connectionRevision) ||
+      !claims.allowedActions.includes(expected.actionId)
+    ) {
+      throw new LeaseError("lease_scope_denied", "Connection lease does not grant this invocation.");
+    }
+    return claims;
+  }
+
+  resolve(
+    token: string,
+    expected: {
+      audience: string;
+      invocationId: string;
+    },
+  ): ConnectionLeaseClaims {
+    if (!isSignedLease(token, this.signingKey)) {
       throw new LeaseError("invalid_lease", "Malformed connection lease.");
     }
     const tokenHash = hashToken(token);
@@ -134,17 +178,7 @@ export class ConnectionLeaseService {
       throw new LeaseError("lease_expired", "Connection lease expired.");
     }
     const claims = rowToClaims(row);
-    if (
-      claims.tenantId !== principal.tenantId ||
-      claims.workspaceId !== principal.workspaceId ||
-      claims.subject !== principal.subject ||
-      claims.audience !== expected.audience ||
-      claims.invocationId !== expected.invocationId ||
-      !claims.connectionIds.includes(expected.connectionId) ||
-      (expected.connectionRevision !== undefined &&
-        claims.connectionRevisions?.[expected.connectionId] !== expected.connectionRevision) ||
-      !claims.allowedActions.includes(expected.actionId)
-    ) {
+    if (claims.audience !== expected.audience || claims.invocationId !== expected.invocationId) {
       throw new LeaseError("lease_scope_denied", "Connection lease does not grant this invocation.");
     }
     return claims;
@@ -179,6 +213,13 @@ function ensureConnectionRevisionColumn(database: DatabaseSync): void {
   }
 }
 
+function ensureOwnerIdColumn(database: DatabaseSync): void {
+  const columns = database.prepare("pragma table_info(connection_leases)").all() as Array<{ name?: unknown }>;
+  if (!columns.some((column) => column.name === "owner_id")) {
+    database.exec("alter table connection_leases add column owner_id text");
+  }
+}
+
 function uniqueNonEmpty(values: string[]): string[] {
   return [...new Set(values.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim()))];
 }
@@ -193,6 +234,17 @@ function equalHash(left: string, right: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+function signLease(payload: string, signingKey: string): string {
+  return createHmac("sha256", signingKey).update(payload).digest("base64url");
+}
+
+function isSignedLease(token: string, signingKey: string): boolean {
+  if (!token.startsWith("cl_")) return false;
+  const [payload, signature, ...extra] = token.slice(3).split(".");
+  if (!payload || !signature || extra.length > 0) return false;
+  return equalHash(signature, signLease(payload, signingKey));
+}
+
 function rowToClaims(row: Record<string, unknown>): ConnectionLeaseClaims {
   const connectionRevisions = row.connection_revisions_json
     ? (JSON.parse(String(row.connection_revisions_json)) as Record<string, number>)
@@ -201,6 +253,7 @@ function rowToClaims(row: Record<string, unknown>): ConnectionLeaseClaims {
     tenantId: String(row.tenant_id),
     workspaceId: String(row.workspace_id),
     subject: String(row.subject),
+    ownerId: String(row.owner_id ?? row.subject),
     invocationId: String(row.invocation_id),
     audience: String(row.audience),
     connectionIds: JSON.parse(String(row.connection_ids_json)) as string[],

@@ -1267,25 +1267,10 @@ describe("ConnectServer", () => {
     }
   });
 
-  it("exposes the frozen runtime MCP entry point through the same authenticated handler", async () => {
+  it("reserves the lease-scoped runtime MCP entry point for Connection Service", async () => {
     const app = createTestServer([apiKeyProvider]).createApp();
-    const fetcher: typeof fetch = async (input, init) => app.fetch(new Request(input, init));
-    const transport = new StreamableHTTPClientTransport(new URL("https://connect.test/v1/runtime/mcp/sse"), {
-      fetch: fetcher,
-    });
-    const client = new Client(
-      { name: "runtime-entry-test", version: "0.0.0" },
-      { versionNegotiation: { mode: "auto" } },
-    );
-
-    try {
-      await expect(client.connect(transport)).resolves.toBeUndefined();
-      await expect(client.listTools()).resolves.toMatchObject({
-        tools: expect.arrayContaining([expect.objectContaining({ name: "execute_action" })]),
-      });
-    } finally {
-      await client.close();
-    }
+    const response = await app.request("/v1/runtime/mcp/sse", { method: "POST" });
+    expect(response.status).toBe(404);
   });
 
   it.each([

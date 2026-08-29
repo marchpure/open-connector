@@ -77,6 +77,7 @@ export interface ConnectionLeaseClaims {
   tenantId: string;
   workspaceId: string;
   subject: string;
+  ownerId: string;
   invocationId: string;
   audience: string;
   connectionIds: string[];
