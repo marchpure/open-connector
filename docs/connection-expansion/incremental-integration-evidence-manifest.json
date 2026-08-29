@@ -207,14 +207,7 @@
     "health": "passed; GET /health returned ok=true",
     "catalogAuth": "passed; unauthenticated GET /v1/catalog returned 401",
     "connectionsAuth": "passed; unauthenticated GET /v1/connections returned 401",
-    "defaultEnablement": [
-      "feishu",
-      "dingtalk",
-      "wecom",
-      "aws_s3",
-      "aliyun_oss",
-      "volcengine_tos"
-    ]
+    "defaultEnablement": ["feishu", "dingtalk", "wecom", "aws_s3", "aliyun_oss", "volcengine_tos"]
   },
   "externalBlockers": [
     "P1: OceanBase MySQL/Oracle services, Hologres endpoint, MaxCompute account/data-plane, and Hive Kerberos KDC/service principal unavailable.",
