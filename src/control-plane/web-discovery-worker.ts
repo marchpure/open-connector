@@ -11,6 +11,10 @@ export interface WebDiscoveryCaptureOptions {
   durationMs?: number;
   submitObservation(observation: WebObservation): Promise<void>;
   interact?: (page: Page) => Promise<void>;
+  interactAfterNavigate?: (page: Page) => Promise<void>;
+  onAuthenticatedCookies?: (
+    cookies: Array<{ name: string; value: string; domain: string; path: string }>,
+  ) => Promise<void>;
 }
 
 export async function runWebDiscoveryCapture(
@@ -31,6 +35,7 @@ export async function runWebDiscoveryCapture(
   try {
     context = await browser.newContext({
       serviceWorkers: "block",
+      ignoreHTTPSErrors: true,
       ...(options.storageStatePath ? { storageState: options.storageStatePath } : {}),
     });
     await context.route("**/*", async (route) => {
@@ -53,6 +58,15 @@ export async function runWebDiscoveryCapture(
     });
     if (options.interact) await options.interact(page);
     await page.goto(pageUrl.href, { waitUntil: "networkidle" });
+    if (options.interactAfterNavigate) {
+      await options.interactAfterNavigate(page);
+      await page.waitForLoadState("networkidle").catch(() => undefined);
+    }
+    if (options.onAuthenticatedCookies) {
+      await options.onAuthenticatedCookies(
+        (await context.cookies()).map(({ name, value, domain, path }) => ({ name, value, domain, path })),
+      );
+    }
     if (options.durationMs) await page.waitForTimeout(options.durationMs);
     await Promise.all(pending);
     return { observationsSubmitted, crossOriginNavigationsBlocked };

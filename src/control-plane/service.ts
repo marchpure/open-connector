@@ -29,6 +29,12 @@ export interface ControlPlaneDependencies {
   secretCodec: ISecretCodec;
   publicOrigin: string;
   transitFiles?: TransitFileWriter;
+  webEgress?: WebEgressPolicy;
+}
+
+export interface WebEgressPolicy {
+  allowLocalhostDev?: boolean;
+  allowedLocalhostPorts?: readonly number[];
 }
 
 export interface TenantRuntime {
