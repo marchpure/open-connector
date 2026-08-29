@@ -255,9 +255,10 @@ function toOAuthCredential(input: Record<string, unknown>): Extract<ResolvedCred
       displayName: optionalString(input.displayName) ?? accountId,
       grantedScopes: Array.isArray(input.grantedScopes) ? input.grantedScopes.map(String) : [],
     },
-    metadata: input.metadata && typeof input.metadata === "object" && !Array.isArray(input.metadata)
-      ? input.metadata as Record<string, unknown>
-      : {},
+    metadata:
+      input.metadata && typeof input.metadata === "object" && !Array.isArray(input.metadata)
+        ? (input.metadata as Record<string, unknown>)
+        : {},
   };
 }
 

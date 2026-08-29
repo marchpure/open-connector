@@ -1,8 +1,13 @@
 {
   "schemaVersion": 1,
-  "status": "CONNECTION_INCREMENTAL_P2_CANDIDATE_WITH_EXTERNAL_BLOCKERS",
+  "status": "CONNECTION_INCREMENTAL_P2_FROZEN_WITH_EXTERNAL_BLOCKERS",
   "baseSha": "3bbd44624933300487a54ee3acba23190b66ee98",
+  "implementationSha": "c69c71ca09ba2c26cfe14f3b5282a27c0c2cf242",
+  "finalSha": "c69c71ca09ba2c26cfe14f3b5282a27c0c2cf242",
+  "finalShaMeaning": "Last verified implementation commit before this handoff-only freeze commit; the terminal freeze output records the pushed branch tip.",
   "branch": "feat/connection-expansion-p2-cn-office-storage",
+  "remoteBranch": "fork/feat/connection-expansion-p2-cn-office-storage",
+  "pushed": true,
   "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-p2-cn-office-storage",
   "scope": ["tencent_docs", "wps_mcp", "baidu_netdisk", "tencent_cos", "huawei_obs", "minio", "qiniu_kodo"],
   "sharedChanges": [
@@ -126,6 +131,7 @@
           "list_files",
           "search_files",
           "semantic_search_files",
+          "get_file_metadata",
           "download_file"
         ],
         "notDelegable": [
@@ -139,7 +145,7 @@
         ]
       },
       "tier": "beta",
-      "evidence": "Tests cover MCP cancellation, semantic-folder authorization binding, bounded download, unsafe MIME rejection, and ResourceRef normalization.",
+      "evidence": "Tests cover MCP cancellation, semantic-folder authorization binding, provider-observed discovery-to-read authorization, fsId-bound get_file_metadata, bounded download, unsafe MIME rejection, and ResourceRef normalization.",
       "revocation": "Connection revision and lease checks fail closed after revoke/delete; refresh persists encrypted replacement tokens and invalidates leases from the prior revision.",
       "externalBlocker": "No Baidu Netdisk application and user authorization were available for a real refresh/quota/download/revoke lifecycle."
     },
@@ -151,7 +157,7 @@
       "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
       "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
       "tier": "beta",
-      "evidence": "Contract tests cover an exact COS SDK q-sign vector including temporary-token signing, configured-bucket discovery, required bucket binding, prefix enforcement, official endpoint restriction, bounded download, MIME checks, redacted provider error codes, timeouts, and generated registry reachability.",
+      "evidence": "Contract tests cover an exact COS SDK q-sign vector including temporary-token signing, configured-bucket discovery, required bucket binding, prefix enforcement, official endpoint restriction, HEAD-before-download automatic version/ETag pinning and race rejection, bounded download, MIME checks, redacted provider error codes, timeouts, and generated registry reachability.",
       "revocation": "Connection deletion and credential replacement advance the revision, invalidating existing leases and discovered resources on the next invocation; cloud credential revocation requires a real account.",
       "externalBlocker": "No Tencent Cloud account/COS credential was available for real service, credential rotation, and revocation evidence."
     },
@@ -163,7 +169,7 @@
       "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
       "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
       "tier": "beta",
-      "evidence": "Contract tests cover a deterministic OBS canonical-signature vector including the temporary token, OBS endpoint and ResourceRef MIME, required bucket binding, allowlists, bounded reads, safe vendor-code preservation, redacted error bodies, and request timeouts.",
+      "evidence": "Contract tests cover a deterministic OBS canonical-signature vector including the temporary token, OBS endpoint and ResourceRef MIME, required bucket binding, allowlists, HEAD-before-download automatic version/ETag pinning and race rejection, bounded reads, safe vendor-code preservation, redacted error bodies, and request timeouts.",
       "revocation": "Connection deletion and credential replacement advance the revision, invalidating existing leases and discovered resources on the next invocation; cloud credential revocation requires a real account.",
       "externalBlocker": "No Huawei Cloud account/OBS credential was available for real service, credential rotation, and revocation evidence."
     },
@@ -175,7 +181,7 @@
       "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
       "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
       "tier": "beta",
-      "evidence": "Contract tests prove path-style request construction, configured bucket/prefix discovery, required bucket binding, endpoint pinning, invalid-CA rejection, bounded CA-agent caching, shared bounded-read controls, and a 30-second validation timeout across bucket fallback.",
+      "evidence": "Contract tests prove path-style request construction, configured bucket/prefix discovery, required bucket binding, endpoint pinning, stat-before-download automatic version/ETag pinning and race rejection, invalid-CA rejection, bounded CA-agent caching, shared bounded-read controls, and a 30-second validation timeout across bucket fallback.",
       "limitations": [
         "Private endpoints require OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK and remain subject to metadata, loopback, link-local, redirect, and DNS guards.",
         "A custom PEM CA is supported on Node deployments and validated before use; Cloudflare cannot reach private MinIO networks.",
@@ -201,7 +207,7 @@
     "credentialOwnership": "All credentials remain encrypted behind credential_ref and are resolved only inside the server runtime.",
     "authorization": "Discovery is connection-scoped; resource-bound reads exact-match the latest revision's ResourceRef and upstream access is checked again on every invocation. Successful leased Tencent Docs, WPS MCP, and Baidu Netdisk list/search actions append only bounded provider-returned identities after an atomic tenant/service/revision recheck; failed actions, guessed IDs, stale revisions, and cross-tenant observations add nothing. Expired OAuth credentials refresh before validation, discovery, lease issuance, and action execution; the atomic credential update advances the connection revision so pre-refresh leases fail closed.",
     "leasePolicy": "Office mutations, generic WPS tool calls, storage writes/deletes, and presigned URLs cannot enter Agent leases.",
-    "storage": "Bucket and prefix are allowlisted, endpoint overrides are pinned to the configured origin, reads are streamed/bounded, unsafe MIME is rejected, and version/ETag preconditions are preserved.",
+    "storage": "Bucket and prefix are allowlisted, endpoint overrides are pinned to the configured origin, reads are streamed/bounded, unsafe MIME is rejected, and version/ETag preconditions are preserved. COS and OBS perform native HEAD-before-download, while MinIO and Qiniu perform stat-before-download, pinning the observed version/ETag and rejecting object replacement races.",
     "ssrf": "Public storage endpoints use public-only DNS validation. MinIO private networking requires the deployment-level opt-in and cannot reach cloud metadata or other always-blocked addresses."
   },
   "integrationNotes": [
@@ -211,16 +217,67 @@
     "The existing Feishu, DingTalk, WeCom, AWS S3, Aliyun OSS, and Volcengine TOS implementations are regression baselines."
   ],
   "verification": {
-    "generateCatalog": "passed; 1457 providers and 15226 actions",
+    "generateCatalog": "passed; 1457 providers and 15227 actions",
     "generateRegistry": "passed; 1457 Node providers and 1449 Cloudflare providers",
     "fixCheck": "passed; lint, format, registry generation, and src/scripts/examples typecheck",
-    "focusedTests": "passed; targeted Control Plane, ResourceStore, and P2 provider run covered 3 files and 47 tests",
-    "fullTests": "passed; 172 files passed, 1 skipped; 1587 tests passed, 4 skipped",
-    "build": "passed",
+    "focusedTests": "passed; complete P2/control-plane run covered 12 files and 137 tests; metadata/version-race run covered 2 files and 41 tests",
+    "fullTests": "passed; 172 files passed, 1 skipped; 1593 tests passed, 4 skipped",
+    "build": "passed; generated catalog and registries, then typechecked src, scripts-all, and examples",
     "npmAuditOmitDev": "passed; 0 vulnerabilities",
     "npmAudit": "passed; 0 vulnerabilities",
-    "catalogVerifier": "passed; all seven canonical providers have actions and generated lazy registry entries",
+    "catalogVerifier": "passed; all seven canonical providers have actions, required bounded reads, storage bucket bindings, disabled writes, beta tiers, explicit external blockers, and generated lazy registry entries",
+    "credentialGatedLifecycle": "blocked as designed; scripts/verify-p2-real-lifecycle.ts reproducibly reports BLOCKED for all seven providers when real credentials and known bounded-read targets are absent; it performs encrypted configure, validate, leased discovery/read, audit, tenant isolation, delete, and post-revoke rejection when gates are supplied",
     "gitDiffCheck": "passed",
     "sbom": "passed; CycloneDX 1.5 regenerated with 627 components and undici 7.29.0 as a direct MIT-licensed production component; SHA-256 af562e6a75e544d0b423c37d7a47e37f84242cdb47c0c841519b2d207f3473dc."
+  },
+  "providerMatrix": [
+    {
+      "providerId": "tencent_docs",
+      "contractRuntimeSecurity": "PASS",
+      "realAccountLifecycle": "BLOCKED",
+      "blocker": "Tencent Docs enterprise OAuth app and user account unavailable."
+    },
+    {
+      "providerId": "wps_mcp",
+      "contractRuntimeSecurity": "PASS",
+      "realAccountLifecycle": "BLOCKED",
+      "blocker": "Real WPS account token unavailable."
+    },
+    {
+      "providerId": "baidu_netdisk",
+      "contractRuntimeSecurity": "PASS",
+      "realAccountLifecycle": "BLOCKED",
+      "blocker": "Baidu Netdisk application and user authorization unavailable."
+    },
+    {
+      "providerId": "tencent_cos",
+      "contractRuntimeSecurity": "PASS",
+      "realAccountLifecycle": "BLOCKED",
+      "blocker": "Tencent Cloud account and COS credential unavailable."
+    },
+    {
+      "providerId": "huawei_obs",
+      "contractRuntimeSecurity": "PASS",
+      "realAccountLifecycle": "BLOCKED",
+      "blocker": "Huawei Cloud account and OBS credential unavailable."
+    },
+    {
+      "providerId": "minio",
+      "contractRuntimeSecurity": "PASS",
+      "realAccountLifecycle": "BLOCKED",
+      "blocker": "Controlled TLS/private-CA MinIO deployment unavailable."
+    },
+    {
+      "providerId": "qiniu_kodo",
+      "contractRuntimeSecurity": "PASS",
+      "realAccountLifecycle": "BLOCKED",
+      "blocker": "Qiniu account, Kodo credential, and bucket download domain unavailable."
+    }
+  ],
+  "freezeEvidence": {
+    "smartSheetBoundedRead": "Tencent Docs get_smartsheet_records is bounded and provider-observed Smart Sheet identities are authorized for subsequent reads.",
+    "baiduMetadata": "Baidu get_file_metadata is bound to a provider-observed fsId.",
+    "observedResourceAuthorization": "Tencent Docs, WPS MCP, and Baidu Netdisk add only successful, bounded, provider-returned identities after atomic tenant/service/revision checks; guessed IDs, failures, stale revisions, and cross-tenant observations add nothing.",
+    "storageVersionRaceProtection": "COS/OBS native HEAD and MinIO/Qiniu stat pin version or ETag before download and reject replacement races."
   }
 }
