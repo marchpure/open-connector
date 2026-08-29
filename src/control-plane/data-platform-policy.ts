@@ -8,7 +8,20 @@ const sqlReadActions = new Set([
   "execute_read_query",
 ]);
 
-const sqlServices = new Set(["oceanbase", "tidb_sql", "hologres", "hive", "trino"]);
+const sqlServices = new Set([
+  "postgresql",
+  "mysql",
+  "oracle_database",
+  "sql_server",
+  "clickhouse",
+  "doris",
+  "starrocks",
+  "oceanbase",
+  "tidb_sql",
+  "hologres",
+  "hive",
+  "trino",
+]);
 const maxcomputeReadActions = new Set(["validate_connection", "list_projects", "list_tables", "describe_table"]);
 
 const elasticsearchReadActions = new Set([

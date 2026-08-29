@@ -4,11 +4,12 @@ import { describe, expect, it } from "vitest";
 import { provider as clickhouse } from "../../providers/clickhouse/definition.ts";
 import { provider as doris } from "../../providers/doris/definition.ts";
 import { provider as mysql } from "../../providers/mysql/definition.ts";
+import { provider as oracle } from "../../providers/oracle_database/definition.ts";
 import { provider as postgresql } from "../../providers/postgresql/definition.ts";
 import { provider as sqlServer } from "../../providers/sql_server/definition.ts";
 import { provider as starrocks } from "../../providers/starrocks/definition.ts";
 
-const providers: ProviderDefinition[] = [postgresql, mysql, sqlServer, clickhouse, doris, starrocks];
+const providers: ProviderDefinition[] = [postgresql, mysql, oracle, sqlServer, clickhouse, doris, starrocks];
 const requiredActions = [
   "validate_connection",
   "list_databases",
@@ -20,10 +21,11 @@ const requiredActions = [
 ];
 
 describe("database provider contracts", () => {
-  it("uses the six canonical service ids without aliases", () => {
+  it("uses canonical service ids without aliases", () => {
     expect(providers.map((provider) => provider.service)).toEqual([
       "postgresql",
       "mysql",
+      "oracle_database",
       "sql_server",
       "clickhouse",
       "doris",
@@ -43,6 +45,14 @@ describe("database provider contracts", () => {
     expect(auth.fields.find((field) => field.key === "password")?.secret).toBe(true);
     const caCertificate = auth.fields.find((field) => field.key === "caCertificate");
     if (caCertificate) expect(caCertificate.secret).toBe(true);
+  });
+
+  it("declares Oracle service name and SID as mutually exclusive connection fields", () => {
+    const auth = oracle.auth.find((entry) => entry.type === "custom_credential");
+    if (auth?.type !== "custom_credential") throw new Error("Missing Oracle custom credential definition.");
+    expect(auth.fields.map((field) => field.key)).toEqual(
+      expect.arrayContaining(["serviceName", "sid", "allowedSchemas"]),
+    );
   });
 
   it("keeps SQL Server instance and certificate semantics explicit", () => {

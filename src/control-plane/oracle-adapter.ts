@@ -54,11 +54,13 @@ export interface OracleQueryLimits {
 
 export class OracleAdapterError extends Error {
   readonly code: "invalid_config" | "write_query" | "schema_denied" | "query_limit" | "query_failed";
+  readonly cause?: unknown;
 
-  constructor(code: OracleAdapterError["code"], message: string) {
+  constructor(code: OracleAdapterError["code"], message: string, cause?: unknown) {
     super(message);
     this.name = "OracleAdapterError";
     this.code = code;
+    this.cause = cause;
   }
 }
 
@@ -80,10 +82,14 @@ export class OracleDatabaseAdapter {
     }
   }
 
-  async query(sql: string, binds: Record<string, unknown> = {}): Promise<OracleQueryResult> {
+  async query(
+    sql: string,
+    binds: Record<string, unknown> = {},
+    overrides: Partial<Pick<OracleQueryLimits, "maxRows" | "maxBytes" | "timeoutMs">> = {},
+  ): Promise<OracleQueryResult> {
     const lineage = analyzeReadOnlyQuery(sql);
     assertAllowedSchemas(lineage, this.limits.allowedSchemas);
-    return { ...(await this.execute(sql, binds)), lineage };
+    return { ...(await this.execute(sql, binds, overrides)), lineage };
   }
 
   async discover(input: { schema?: string; table?: string } = {}): Promise<OracleDiscoveryResult> {
@@ -132,23 +138,30 @@ export class OracleDatabaseAdapter {
     };
   }
 
-  private async execute(sql: string, binds: Record<string, unknown>): Promise<OracleQueryResult> {
+  private async execute(
+    sql: string,
+    binds: Record<string, unknown>,
+    overrides: Partial<Pick<OracleQueryLimits, "maxRows" | "maxBytes" | "timeoutMs">> = {},
+  ): Promise<OracleQueryResult> {
     if (this.active >= this.limits.maxConcurrent) {
       throw new OracleAdapterError("query_limit", "Oracle concurrency limit exceeded.");
     }
+    const maxRows = overrides.maxRows ?? this.limits.maxRows;
+    const maxBytes = overrides.maxBytes ?? this.limits.maxBytes;
+    const timeoutMs = overrides.timeoutMs ?? this.limits.timeoutMs;
     this.active += 1;
     try {
       const result = await this.driver.query(sql, binds, {
-        maxRows: this.limits.maxRows,
-        timeoutMs: this.limits.timeoutMs,
+        maxRows,
+        timeoutMs,
       });
-      if (result.rows.length > this.limits.maxRows || result.bytes > this.limits.maxBytes) {
+      if (result.rows.length > maxRows || result.bytes > maxBytes) {
         throw new OracleAdapterError("query_limit", "Oracle result limit exceeded.");
       }
       return result;
     } catch (error) {
       if (error instanceof OracleAdapterError) throw error;
-      throw new OracleAdapterError("query_failed", "Oracle query failed.");
+      throw new OracleAdapterError("query_failed", "Oracle query failed.", error);
     } finally {
       this.active -= 1;
     }
