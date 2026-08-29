@@ -129,18 +129,9 @@ export async function downloadBaiduNetdiskFile(
     throw new ProviderRequestError(400, "baidu_netdisk download_file requires local transit file storage");
   }
 
-  const requestedFsId = requiredString(input.fsId, "fsId", (message) => new ProviderRequestError(400, message));
-  if (!/^\d+$/u.test(requestedFsId)) {
-    throw new ProviderRequestError(400, "fsId must be a decimal string");
-  }
+  const requestedFsId = requireBaiduFsId(input.fsId);
 
-  const metadataUrl = new URL("/rest/2.0/xpan/multimedia", baiduPanBaseUrl);
-  metadataUrl.searchParams.set("method", "filemetas");
-  metadataUrl.searchParams.set("dlink", "1");
-  metadataUrl.searchParams.set("fsids", `[${requestedFsId}]`);
-  const metadataPayload = await requestBaiduNetdiskApi(metadataUrl, context.accessToken, context.fetcher, "read", {
-    signal: context.signal,
-  });
+  const metadataPayload = await fetchBaiduNetdiskMetadataPayload(requestedFsId, true, context);
   const metadata = readDownloadMetadata(metadataPayload, requestedFsId);
   if (metadata.sizeBytes > context.transitFiles.maxBytes) {
     throw new ProviderRequestError(
@@ -190,6 +181,61 @@ export async function downloadBaiduNetdiskFile(
   };
 }
 
+export async function getBaiduNetdiskFileMetadata(
+  input: Record<string, unknown>,
+  context: BaiduNetdiskRequestContext,
+): Promise<Record<string, unknown>> {
+  const requestedFsId = requireBaiduFsId(input.fsId);
+  const payload = await fetchBaiduNetdiskMetadataPayload(requestedFsId, false, context);
+  if (!Array.isArray(payload.list) || payload.list.length !== 1) {
+    throw new ProviderRequestError(502, "baidu_netdisk metadata is missing the requested item");
+  }
+  const value = payload.list[0];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ProviderRequestError(502, "baidu_netdisk metadata is malformed");
+  }
+  const item = value as Record<string, unknown>;
+  const fileId = requireLosslessId(item.fs_id, "list[0].fs_id");
+  if (fileId !== requestedFsId) {
+    throw new ProviderRequestError(502, "baidu_netdisk returned metadata for a different item");
+  }
+  const path = requiredString(item.path, "path", (message) => new ProviderRequestError(502, message));
+  const kind = item.isdir === 1 ? "folder" : "file";
+  return {
+    id: fileId,
+    name: optionalString(item.server_filename) ?? optionalString(item.filename) ?? posix.basename(path),
+    path,
+    kind,
+    category: kind === "folder" ? null : normalizeFileCategory(item.category),
+    sizeBytes: kind === "folder" ? null : (optionalInteger(item.size) ?? null),
+    createdAt: normalizeOptionalTimestamp(item.server_ctime ?? item.ctime),
+    modifiedAt: normalizeOptionalTimestamp(item.server_mtime ?? item.mtime),
+    cloudMd5: optionalString(item.md5) ?? null,
+  };
+}
+
+async function fetchBaiduNetdiskMetadataPayload(
+  requestedFsId: string,
+  includeDownloadUrl: boolean,
+  context: BaiduNetdiskRequestContext,
+): Promise<Record<string, unknown>> {
+  const metadataUrl = new URL("/rest/2.0/xpan/multimedia", baiduPanBaseUrl);
+  metadataUrl.searchParams.set("method", "filemetas");
+  metadataUrl.searchParams.set("dlink", includeDownloadUrl ? "1" : "0");
+  metadataUrl.searchParams.set("fsids", `[${requestedFsId}]`);
+  return requestBaiduNetdiskApi(metadataUrl, context.accessToken, context.fetcher, "read", {
+    signal: context.signal,
+  });
+}
+
+function requireBaiduFsId(value: unknown): string {
+  const fsId = requiredString(value, "fsId", (message) => new ProviderRequestError(400, message));
+  if (!/^\d+$/u.test(fsId)) {
+    throw new ProviderRequestError(400, "fsId must be a decimal string");
+  }
+  return fsId;
+}
+
 interface BaiduDownloadMetadata {
   fileId: string;
   name: string;
@@ -220,6 +266,13 @@ function readDownloadMetadata(payload: Record<string, unknown>, requestedFsId: s
   const sizeBytes = requireInteger(metadata.size, "list[0].size");
   const downloadUrl = requiredString(metadata.dlink, "dlink", (message) => new ProviderRequestError(502, message));
   return { fileId, name, sizeBytes, downloadUrl };
+}
+
+function normalizeFileCategory(value: unknown): string | null {
+  const category = optionalInteger(value);
+  return category && category >= 1
+    ? (["video", "audio", "image", "document", "application", "other", "torrent"][category - 1] ?? "other")
+    : "other";
 }
 
 function readBaiduDownloadUrl(value: string): URL {

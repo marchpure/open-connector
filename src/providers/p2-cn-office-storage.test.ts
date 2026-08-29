@@ -17,6 +17,7 @@ import { executors as qiniuKodoExecutors } from "./qiniu_kodo/executors.ts";
 import { qiniuAuthorization } from "./qiniu_kodo/executors.ts";
 import { actions as tencentCosActions } from "./tencent_cos/actions.ts";
 import { discoverResources as discoverTencentCosResources } from "./tencent_cos/executors.ts";
+import { executors as tencentCosExecutors } from "./tencent_cos/executors.ts";
 import { provider as tencentDocsProvider } from "./tencent_docs/definition.ts";
 import { credentialValidators as tencentDocsValidators } from "./tencent_docs/executors.ts";
 import { discoverResources as discoverTencentDocsResources } from "./tencent_docs/executors.ts";
@@ -502,6 +503,101 @@ describe("P2 CN office and storage discovery", () => {
       error: { code: "invalid_input", details: { status: 412 } },
     });
     expect(new Headers(fetcher.mock.calls[1]?.[1]?.headers).get("if-match")).toBe("etag-before");
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  for (const profile of [
+    {
+      service: "tencent_cos",
+      executor: tencentCosExecutors["tencent_cos.download_object"],
+      endpoint: "https://cos.ap-guangzhou.myqcloud.com",
+    },
+    {
+      service: "huawei_obs",
+      executor: huaweiObsExecutors["huawei_obs.download_object"],
+      endpoint: "https://obs.cn-north-4.myhuaweicloud.com",
+    },
+    {
+      service: "minio",
+      executor: minioExecutors["minio.download_object"],
+      endpoint: "https://minio.example.com",
+    },
+  ] as const) {
+    it(`pins ${profile.service} downloads to metadata observed immediately before the read`, async () => {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(null, { headers: { etag: '"etag-before"' } }))
+        .mockResolvedValueOnce(
+          new Response("data", { headers: { etag: '"etag-before"', "content-type": "text/plain" } }),
+        );
+      vi.stubGlobal("fetch", fetcher);
+      const create = vi.fn<TransitFileStore["create"]>(async (file) => ({
+        fileId: "transit-file",
+        downloadUrl: "https://local.test/transit-file",
+        sizeBytes: file.size,
+        name: file.name,
+        mimeType: file.type,
+      }));
+      const result = await profile.executor!(
+        { bucket: "documents", objectKey: "knowledge/file.txt" },
+        {
+          ...contextFor(profile.service, storageCredential(profile.endpoint)),
+          transitFiles: transitFiles(1024, create),
+        },
+      );
+
+      expect(result).toMatchObject({ ok: true, output: { etag: '"etag-before"' } });
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      const secondRequest = fetcher.mock.calls[1]?.[0];
+      const secondHeaders =
+        secondRequest instanceof Request ? secondRequest.headers : new Headers(fetcher.mock.calls[1]?.[1]?.headers);
+      expect(secondHeaders.get("if-match")).toBe('"etag-before"');
+      expect(create).toHaveBeenCalledOnce();
+    });
+  }
+
+  it("fails closed when object metadata cannot provide a COS version or ETag", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(null));
+    vi.stubGlobal("fetch", fetcher);
+    const create = vi.fn<TransitFileStore["create"]>();
+    const result = await tencentCosExecutors["tencent_cos.download_object"]!(
+      { bucket: "documents", objectKey: "knowledge/file.txt" },
+      {
+        ...contextFor("tencent_cos", storageCredential("https://cos.ap-guangzhou.myqcloud.com")),
+        transitFiles: transitFiles(1024, create),
+      },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "invalid_input", details: { status: 412 } },
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a native storage download when the object changes after metadata lookup", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { headers: { etag: '"etag-before"' } }))
+      .mockResolvedValueOnce(
+        new Response("changed", {
+          status: 412,
+          headers: { "content-type": "application/xml" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetcher);
+    const create = vi.fn<TransitFileStore["create"]>();
+    const result = await huaweiObsExecutors["huawei_obs.download_object"]!(
+      { bucket: "documents", objectKey: "knowledge/file.txt" },
+      {
+        ...contextFor("huawei_obs", storageCredential("https://obs.cn-north-4.myhuaweicloud.com")),
+        transitFiles: transitFiles(1024, create),
+      },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "invalid_input", details: { status: 412 } },
+    });
     expect(create).not.toHaveBeenCalled();
   });
 

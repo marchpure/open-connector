@@ -8,6 +8,7 @@ const profile = createS3CompatibleExecutors({
   displayName: "MinIO",
   defaultEndpoint: (values) => values.endpoint,
   forcePathStyle: true,
+  pinDownloadVersion: true,
 });
 export const executors: ProviderExecutors = profile.executors;
 export const credentialValidators: CredentialValidators = profile.credentialValidators;

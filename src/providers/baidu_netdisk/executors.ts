@@ -16,6 +16,7 @@ import {
   createBaiduNetdiskFolder,
   downloadBaiduNetdiskFile,
   fetchBaiduNetdiskAccount,
+  getBaiduNetdiskFileMetadata,
   getBaiduNetdiskQuota,
 } from "./runtime.ts";
 
@@ -45,6 +46,8 @@ const handlers: ProviderActionHandlers<"baidu_netdisk", BaiduNetdiskHandler> = m
         };
       case "get_quota":
         return (_input, context) => getBaiduNetdiskQuota(context);
+      case "get_file_metadata":
+        return getBaiduNetdiskFileMetadata;
       case "download_file":
         return downloadBaiduNetdiskFile;
       case "create_folder":

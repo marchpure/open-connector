@@ -225,6 +225,7 @@ export function createS3CompatibleExecutors(profile: {
   displayName: string;
   defaultEndpoint(values: Record<string, string>): string | undefined;
   forcePathStyle?: boolean;
+  pinDownloadVersion?: boolean;
 }): {
   executors: ProviderExecutors;
   credentialValidators: CredentialValidators;
@@ -252,7 +253,7 @@ export function createS3CompatibleExecutors(profile: {
         async (input: unknown, context: ExecutionContext) => {
           const timeout = createProviderTimeout(context.signal, s3CompatibleRequestTimeoutMs);
           try {
-            const result = await executor(input, {
+            const actionContext: ExecutionContext = {
               ...context,
               signal: timeout.signal,
               getCredential: async (requestedService) => {
@@ -266,7 +267,45 @@ export function createS3CompatibleExecutors(profile: {
                   metadata: profileMetadata(credential.metadata, values),
                 };
               },
-            });
+            };
+            let actionInput = input;
+            if (
+              profile.pinDownloadVersion &&
+              actionId === "aws_s3.download_object" &&
+              input &&
+              typeof input === "object" &&
+              !Array.isArray(input)
+            ) {
+              const inputRecord = input as Record<string, unknown>;
+              if (!optionalString(inputRecord.versionId) && !optionalString(inputRecord.ifMatch)) {
+                const head = await executors["aws_s3.head_object"]!(inputRecord, actionContext);
+                if (!head.ok) return head;
+                const object =
+                  head.output &&
+                  typeof head.output === "object" &&
+                  !Array.isArray(head.output) &&
+                  "object" in head.output &&
+                  head.output.object &&
+                  typeof head.output.object === "object" &&
+                  !Array.isArray(head.output.object)
+                    ? (head.output.object as Record<string, unknown>)
+                    : {};
+                const versionId = optionalString(object.versionId);
+                const ifMatch = optionalString(object.etag);
+                if (!versionId && !ifMatch) {
+                  return {
+                    ok: false,
+                    error: {
+                      code: "invalid_input",
+                      message: `${profile.service} cannot safely download an object without a version ID or ETag`,
+                      details: { status: 412 },
+                    },
+                  };
+                }
+                actionInput = { ...inputRecord, versionId, ifMatch };
+              }
+            }
+            const result = await executor(actionInput, actionContext);
             return timeout.didTimeout()
               ? {
                   ok: false,

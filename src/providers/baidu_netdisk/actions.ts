@@ -239,6 +239,17 @@ export const baiduNetdiskActions: ProviderActionDefinition[] = [
     resourceBindingsOptional: { path: ["application/vnd.baidu-netdisk.folder"] },
   }),
   defineProviderAction("baidu_netdisk", {
+    name: "get_file_metadata",
+    description: "Get current metadata for one discovered Baidu Netdisk file or folder.",
+    requiredScopes: [baiduNetdiskConnectorScopes.rootFilesRead],
+    providerPermissions: [baiduNetdiskProviderScopes.netdisk],
+    inputSchema: s.requiredObject("Input for reading Baidu Netdisk file metadata.", {
+      fsId: shareFileIdSchema,
+    }),
+    outputSchema: fileSchema,
+    resourceBindings: { fsId: [] },
+  }),
+  defineProviderAction("baidu_netdisk", {
     name: "download_file",
     description: "Download one Baidu Netdisk file by fs_id into local transit file storage.",
     requiredScopes: [baiduNetdiskConnectorScopes.rootFilesRead],

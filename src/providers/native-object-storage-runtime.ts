@@ -113,12 +113,30 @@ export function createNativeObjectStorageRuntime(profile: NativeStorageProfile):
         }
         const bucket = resolveBucket(input, context);
         const objectKey = allowedObjectKey(input, context);
+        const requestedVersion = optionalString(input.versionId);
+        const requestedEtag = optionalString(input.ifMatch);
+        const metadataResponse = await nativeRequest(profile, context, {
+          method: "HEAD",
+          bucket,
+          objectKey,
+          query: compactObject({ versionId: requestedVersion }),
+          headers: compactObject({ "if-match": requestedEtag }),
+        });
+        const metadata = (profile.parseHead ?? parseHead)(metadataResponse.headers, bucket, objectKey);
+        const pinnedVersion = requestedVersion ?? optionalString(metadata.versionId);
+        const pinnedEtag = requestedEtag ?? optionalString(metadata.etag);
+        if (!pinnedVersion && !pinnedEtag) {
+          throw new ProviderRequestError(
+            412,
+            `${profile.displayName} cannot safely download an object without a version ID or ETag`,
+          );
+        }
         const response = await nativeRequest(profile, context, {
           method: "GET",
           bucket,
           objectKey,
-          query: compactObject({ versionId: optionalString(input.versionId) }),
-          headers: compactObject({ "if-match": optionalString(input.ifMatch) }),
+          query: compactObject({ versionId: pinnedVersion }),
+          headers: compactObject({ "if-match": pinnedEtag }),
         });
         try {
           assertSafeObjectResponse(response, {
