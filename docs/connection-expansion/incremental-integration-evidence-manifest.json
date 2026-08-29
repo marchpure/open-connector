@@ -127,6 +127,57 @@
       "p4": "ERPNext and Odoo local official-container evidence is retained as beta evidence; hosted/licensed tenant evidence remains blocked."
     }
   },
+  "workerLeaseValidation": {
+    "P1": {
+      "status": "PASS_AND_BLOCKED",
+      "connector": "tidb_sql",
+      "passEvidence": "docs/connection-expansion/evidence/tidb-sql-real-engine.json",
+      "passScope": "Real configure, encrypted credential verification, validate job, Agent lease invocation, bounded read, redacted audit, revoke/replay rejection, and delete.",
+      "blockedConnectors": ["oceanbase", "maxcompute", "hologres"],
+      "blockedEvidence": "docs/connection-expansion/p1-incremental-data-platforms-handoff.json"
+    },
+    "P2": {
+      "status": "BLOCKED_WITH_REPRODUCIBLE_GATE",
+      "connector": "tencent_cos",
+      "blockedConnectors": [
+        "tencent_docs",
+        "wps_mcp",
+        "baidu_netdisk",
+        "tencent_cos",
+        "huawei_obs",
+        "minio",
+        "qiniu_kodo"
+      ],
+      "contractEvidence": "node scripts/verify-p2-cn-office-storage.ts",
+      "leaseLifecycleEvidence": "node scripts/verify-p2-real-lifecycle.ts",
+      "result": "Contract verifier PASS; credential-gated verifier reports BLOCKED for every provider because real credentials and bounded-read targets are absent. No fixture is treated as success.",
+      "handoff": "docs/connection-expansion/p2-incremental-cn-office-storage-handoff.json"
+    },
+    "P3": {
+      "status": "BLOCKED_WITH_POLICY_TESTS",
+      "connector": "dingtalk",
+      "blockedEvidence": "docs/connection-expansion/p3-dingtalk-ecosystem-handoff.json#/verification/realLifecycle",
+      "policyEvidence": "src/providers/dingtalk/ecosystem.test.ts and src/control-plane/server.test.ts",
+      "result": "Canonical dingtalk lease/resource policy tests pass; real enterprise lifecycle is BLOCKED by missing organization, app, OAuth user grant, and resources."
+    },
+    "P4": {
+      "status": "PASS_BETA_AND_BLOCKED",
+      "connectors": ["erpnext", "odoo"],
+      "passEvidence": "docs/connection-expansion/p4-erp-ecosystem-handoff.json#/verification/localContainerPolicy",
+      "passScope": "Official local ERPNext/Odoo containers completed encrypted configure, validation, capability discovery, bounded reads, distinct Agent leases, audit, revoke, and delete; providers remain beta.",
+      "blockedConnectors": [
+        "netsuite",
+        "sap_s4hana",
+        "oracle_fusion_erp",
+        "dynamics_365_finance",
+        "dynamics_365_business_central",
+        "kingdee_cloud",
+        "yonyou_bip"
+      ],
+      "blockedEvidence": "docs/connection-expansion/p4-erp-ecosystem-handoff.json",
+      "result": "No ERP mutation or unrestricted legacy action is delegated to Agent leases."
+    }
+  },
   "verification": {
     "npmCi": "passed; 698 packages added; 0 vulnerabilities",
     "generateCatalog": "passed; 1470 providers and 15297 actions",
