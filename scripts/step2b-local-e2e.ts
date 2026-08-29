@@ -326,9 +326,24 @@ const validated = await controlApp.request(`/v1/connections/${connectionId}/vali
   method: "POST",
   headers: { authorization: `Bearer ${token}` },
 });
+const discoveryLeaseResponse = await controlApp.request(`/v1/connections/${connectionId}/lease`, {
+  method: "POST",
+  headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+  body: JSON.stringify({
+    allowedActions: ["fixture.discover_resources"],
+    invocationId: "local-e2e-discovery",
+    audience: "runtime",
+  }),
+});
+const discoveryLease = (await discoveryLeaseResponse.json()) as { token: string };
 const discovered = await controlApp.request(`/v1/connections/${connectionId}/discover`, {
   method: "POST",
-  headers: { authorization: `Bearer ${token}` },
+  headers: {
+    authorization: `Bearer ${token}`,
+    "x-connection-lease": discoveryLease.token,
+    "x-connection-invocation-id": "local-e2e-discovery",
+    "x-connection-audience": "runtime",
+  },
 });
 const updated = await controlApp.request(`/v1/connections/${connectionId}`, {
   method: "PATCH",
@@ -400,6 +415,7 @@ checks.controlPlane = {
     discovered.status === 202 &&
     updated.status === 200 &&
     issued.status === 201 &&
+    discoveryLeaseResponse.status === 201 &&
     invoked.status === 200 &&
     revoked.status === 200 &&
     rejectedAfterRevocation.status === 400 &&
