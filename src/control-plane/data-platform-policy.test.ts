@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { isAllowedDataPlatformLeaseAction } from "./data-platform-policy.ts";
 
 describe("data platform lease policy", () => {
+  it.each(["postgresql", "mysql", "sql_server", "clickhouse", "doris", "starrocks"])(
+    "allows bounded read actions for %s",
+    (service) => {
+      expect(isAllowedDataPlatformLeaseAction(service, `${service}.execute_read_query`)).toBe(true);
+      expect(isAllowedDataPlatformLeaseAction(service, `${service}.list_tables`)).toBe(true);
+      expect(isAllowedDataPlatformLeaseAction(service, `${service}.insert`)).toBe(false);
+    },
+  );
   it("allows only canonical SQL read actions for SQL data connectors", () => {
     expect(isAllowedDataPlatformLeaseAction("tidb_sql", "tidb_sql.execute_read_query")).toBe(true);
     expect(isAllowedDataPlatformLeaseAction("tidb_sql", "tidb.execute_read_query")).toBe(false);

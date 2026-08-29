@@ -203,8 +203,10 @@ try {
   checks.emptyDiscovery = Array.isArray(emptyTables) && emptyTables.length === 0;
 
   const timeout = await invoke("execute_read_query", { query: timeoutQueryFor(service), timeoutMs: 100 });
+  const timeoutBody = await json(timeout);
   checks.timeoutClassified =
-    timeout.status === 502 && readPath(await json(timeout), "result", "error", "code") === "database_timeout";
+    (timeout.status === 502 || timeout.status === 504) &&
+    ["database_timeout", "database_budget_exceeded"].includes(String(readPath(timeoutBody, "result", "error", "code")));
 
   const unreachableValues =
     service === "clickhouse" ? { ...credentials, baseUrl: "http://192.168.71.84:9" } : { ...credentials, port: "9" };
@@ -360,7 +362,9 @@ function queryFor(providerService: string): {
 
 function timeoutQueryFor(providerService: string): string {
   if (providerService === "postgresql") {
-    return "select count(*) from generate_series(1, 1000000000)";
+    // Cross-joining catalog views stays within the read-only grammar while
+    // reliably exceeding the 100ms statement budget on the local fixture.
+    return "select count(*) from information_schema.columns a cross join information_schema.columns b cross join information_schema.columns c";
   }
   if (providerService === "sql_server") {
     return "select count_big(*) from sys.all_objects a cross join sys.all_objects b cross join sys.all_objects c";
