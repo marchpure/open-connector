@@ -2,7 +2,7 @@ import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { OAuthProviderContext } from "../provider-runtime.ts";
 
 import { compactObject, optionalInteger, optionalRecord, optionalString } from "../../core/cast.ts";
-import { ProviderRequestError } from "../provider-runtime.ts";
+import { ProviderRequestError, readProviderJsonBody } from "../provider-runtime.ts";
 
 const tencentDocsUserInfoUrl = "https://docs.qq.com/oauth/v2/userinfo";
 export const tencentDocsApiBaseUrl: string = "https://docs.qq.com";
@@ -21,8 +21,8 @@ type TencentDocsEnvelope = {
 type TencentDocsActionHandler = (input: Record<string, unknown>, context: TencentDocsActionContext) => Promise<unknown>;
 
 export const tencentDocsActionHandlers: ProviderActionHandlers<"tencent_docs", TencentDocsActionHandler> = {
-  get_current_user(_input, { accessToken, fetcher }) {
-    return tencentDocsGetCurrentUser(accessToken, fetcher);
+  get_current_user(_input, { accessToken, fetcher, signal }) {
+    return tencentDocsGetCurrentUser(accessToken, fetcher, signal);
   },
   create_file(input, context) {
     return tencentDocsCreateFile(input, context);
@@ -63,6 +63,9 @@ export const tencentDocsActionHandlers: ProviderActionHandlers<"tencent_docs", T
   list_smartsheet_sheets(input, context) {
     return tencentDocsListSmartsheetSheets(input, context);
   },
+  get_smartsheet_records(input, context) {
+    return tencentDocsGetSmartsheetRecords(input, context);
+  },
   update_form_collection_deadline(input, context) {
     return tencentDocsUpdateFormCollectionDeadline(input, context);
   },
@@ -71,8 +74,8 @@ export const tencentDocsActionHandlers: ProviderActionHandlers<"tencent_docs", T
   },
 };
 
-async function tencentDocsGetCurrentUser(accessToken: string, fetcher: typeof fetch) {
-  const user = await fetchTencentDocsUser(accessToken, fetcher);
+async function tencentDocsGetCurrentUser(accessToken: string, fetcher: typeof fetch, signal?: AbortSignal) {
+  const user = await fetchTencentDocsUser(accessToken, fetcher, signal);
   return {
     ret: 0,
     msg: "Succeed",
@@ -80,10 +83,10 @@ async function tencentDocsGetCurrentUser(accessToken: string, fetcher: typeof fe
   };
 }
 
-async function fetchTencentDocsUser(accessToken: string, fetcher: typeof fetch) {
+async function fetchTencentDocsUser(accessToken: string, fetcher: typeof fetch, signal?: AbortSignal) {
   const url = new URL(tencentDocsUserInfoUrl);
   url.searchParams.set("access_token", accessToken);
-  const envelope = await requestTencentDocsOAuthEnvelope(url, fetcher);
+  const envelope = await requestTencentDocsOAuthEnvelope(url, fetcher, signal);
   return requireRecord(envelope.data, "tencent_docs userinfo response data");
 }
 
@@ -152,7 +155,7 @@ async function tencentDocsListFolder(input: Record<string, unknown>, context: Te
         sortType: optionalString(input.sortType),
         asc: optionalInteger(input.asc),
         start: optionalInteger(input.start),
-        limit: optionalInteger(input.limit),
+        limit: Math.min(optionalInteger(input.limit) ?? 20, 100),
       }),
     },
     context,
@@ -162,8 +165,8 @@ async function tencentDocsListFolder(input: Record<string, unknown>, context: Te
     ret: normalizeTencentDocsRet(envelope.ret),
     msg: normalizeTencentDocsMsg(envelope.msg),
     next: normalizeNullableInteger(data.next),
-    items: normalizeTencentDocsFileList(data.list),
-    raw: data,
+    items: normalizeTencentDocsFileList(data.list).slice(0, 100),
+    raw: { bounded: true },
   };
 }
 
@@ -178,7 +181,7 @@ async function tencentDocsSearchFiles(input: Record<string, unknown>, context: T
         resultType: optionalString(input.resultType),
         folderID: optionalString(input.folderID),
         offset: optionalInteger(input.offset),
-        size: optionalInteger(input.size),
+        size: Math.min(optionalInteger(input.size) ?? 20, 50),
         sortType: optionalString(input.sortType),
         asc: optionalInteger(input.asc),
         byOwnership: optionalInteger(input.byOwnership),
@@ -194,8 +197,8 @@ async function tencentDocsSearchFiles(input: Record<string, unknown>, context: T
     next: normalizeNullableInteger(data.next),
     total: normalizeNullableInteger(data.total),
     hasMore: normalizeNullableBoolean(data.hasMore),
-    items: normalizeTencentDocsFileList(data.list),
-    raw: data,
+    items: normalizeTencentDocsFileList(data.list).slice(0, 50),
+    raw: { bounded: true },
   };
 }
 
@@ -218,12 +221,14 @@ async function tencentDocsStartExport(input: Record<string, unknown>, context: T
     msg: normalizeTencentDocsMsg(envelope.msg),
     fileID,
     operationID,
-    exportHandle: createTencentDocsExportHandle(fileID, operationID),
   };
 }
 
 async function tencentDocsGetExportProgress(input: Record<string, unknown>, context: TencentDocsActionContext) {
-  const exportInput = resolveTencentDocsExportProgressInput(input);
+  const exportInput = {
+    fileID: requireActionInputString(input.fileID, "fileID"),
+    operationID: requireActionInputString(input.operationID, "operationID"),
+  };
   const envelope = await requestTencentDocsOpenApi(
     {
       path: `/openapi/drive/v2/files/${encodeURIComponent(exportInput.fileID)}/export-progress`,
@@ -241,8 +246,8 @@ async function tencentDocsGetExportProgress(input: Record<string, unknown>, cont
     msg: normalizeTencentDocsMsg(envelope.msg),
     status: progress >= 100 ? "succeeded" : "running",
     progress,
-    url: optionalString(data.url) ?? null,
-    raw: data,
+    downloadReady: progress >= 100 && Boolean(optionalString(data.url)),
+    raw: { bounded: true },
   };
 }
 
@@ -363,8 +368,33 @@ async function tencentDocsListSmartsheetSheets(input: Record<string, unknown>, c
   return {
     ret: normalizeTencentDocsRet(envelope.ret),
     msg: normalizeTencentDocsMsg(envelope.msg),
-    sheets: normalizeTencentDocsSmartsheetSheets(data.getSheet),
+    sheets: normalizeTencentDocsSmartsheetSheets(data.sheets ?? data.getSheet),
     raw: data,
+  };
+}
+
+async function tencentDocsGetSmartsheetRecords(input: Record<string, unknown>, context: TencentDocsActionContext) {
+  const limit = Math.min(optionalInteger(input.limit) ?? 20, 100);
+  const offset = optionalInteger(input.offset) ?? 0;
+  const envelope = await requestTencentDocsOpenApi(
+    {
+      path: `/openapi/smartbook/v2/files/${encodeURIComponent(
+        String(input.fileID),
+      )}/sheets/${encodeURIComponent(String(input.sheetID))}`,
+      method: "POST",
+      json: { action: "getRecords", limit, offset },
+    },
+    context,
+  );
+  const data = requireRecord(envelope.data, "tencent_docs get_smartsheet_records data");
+  return {
+    ret: normalizeTencentDocsRet(envelope.ret),
+    msg: normalizeTencentDocsMsg(envelope.msg),
+    records: normalizeRecordArray(data.records).slice(0, 100),
+    total: normalizeNullableInteger(data.total),
+    hasMore: normalizeNullableBoolean(data.hasMore),
+    offset,
+    raw: { bounded: true },
   };
 }
 
@@ -446,35 +476,35 @@ async function requestTencentDocsOpenApi(
     method: input.method,
     headers,
     ...(body ? { body } : {}),
+    signal: context.signal,
   });
-  const envelope = await parseTencentDocsJson<TencentDocsEnvelope>(response, "openapi");
+  const envelope = await parseTencentDocsJson<TencentDocsEnvelope>(response, "openapi", context.signal);
   assertTencentDocsEnvelopeSuccess(envelope, response.status);
   return envelope;
 }
 
-async function requestTencentDocsOAuthEnvelope(url: URL, fetcher: typeof fetch) {
+async function requestTencentDocsOAuthEnvelope(url: URL, fetcher: typeof fetch, signal?: AbortSignal) {
   const response = await fetcher(url.toString(), {
     method: "GET",
     headers: {
       accept: "application/json",
     },
+    signal,
   });
-  const envelope = await parseTencentDocsJson<TencentDocsEnvelope>(response, "oauth");
+  const envelope = await parseTencentDocsJson<TencentDocsEnvelope>(response, "oauth", signal);
   assertTencentDocsEnvelopeSuccess(envelope, response.status);
   return envelope;
 }
 
-async function parseTencentDocsJson<T>(response: Response, context: string) {
-  let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch {
-    throw mapTencentDocsHttpError(response.status, `tencent_docs ${context} returned invalid JSON`);
-  }
+async function parseTencentDocsJson<T>(response: Response, context: string, signal?: AbortSignal) {
+  const payload = await readProviderJsonBody(response, {
+    emptyBody: {},
+    invalidJsonMessage: `tencent_docs ${context} returned invalid JSON`,
+    maxBytes: 4 * 1024 * 1024,
+    signal,
+  });
 
-  if (!response.ok) {
-    throw mapTencentDocsHttpError(response.status, extractTencentDocsErrorMessage(payload));
-  }
+  if (!response.ok) throw mapTencentDocsHttpError(response.status);
 
   return payload as T;
 }
@@ -496,43 +526,31 @@ function assertTencentDocsEnvelopeSuccess(envelope: TencentDocsEnvelope, status:
     return;
   }
 
-  const message =
-    normalizeTencentDocsMsg(envelope.msg ?? envelopeRecord?.message) || `tencent_docs API returned ret ${ret}`;
-  throw mapTencentDocsBusinessError(ret, message, status);
+  throw mapTencentDocsBusinessError(ret, status);
 }
 
-function mapTencentDocsBusinessError(ret: number, message: string, status: number) {
+function mapTencentDocsBusinessError(ret: number, status: number) {
+  const details = Number.isSafeInteger(ret) ? { providerCode: ret } : undefined;
   if (ret === 37019 || ret === 10313 || ret === 10303 || ret === 10302) {
-    return new ProviderRequestError(401, message);
+    return new ProviderRequestError(401, "tencent_docs credential is invalid or expired", details);
   }
   if (ret === 429) {
-    return new ProviderRequestError(429, message);
+    return new ProviderRequestError(429, "tencent_docs rate limit exceeded", details);
   }
-  return new ProviderRequestError(status || 502, message);
+  return new ProviderRequestError(status >= 400 && status < 500 ? status : 502, "tencent_docs request failed", details);
 }
 
-function mapTencentDocsHttpError(status: number, message: string) {
+function mapTencentDocsHttpError(status: number) {
   if (status === 400) {
-    return new ProviderRequestError(400, message);
+    return new ProviderRequestError(400, "tencent_docs rejected the request");
   }
   if (status === 401 || status === 403) {
-    return new ProviderRequestError(status, message);
+    return new ProviderRequestError(status, "tencent_docs authorization failed");
   }
   if (status === 429) {
-    return new ProviderRequestError(429, message);
+    return new ProviderRequestError(429, "tencent_docs rate limit exceeded");
   }
-  return new ProviderRequestError(status || 502, message);
-}
-
-function extractTencentDocsErrorMessage(payload: unknown) {
-  const record = optionalRecord(payload);
-  return (
-    optionalString(record?.message) ??
-    optionalString(record?.msg) ??
-    optionalString(record?.error_description) ??
-    optionalString(record?.error) ??
-    "tencent_docs request failed"
-  );
+  return new ProviderRequestError(status >= 500 ? 502 : status || 502, "tencent_docs request failed");
 }
 
 function normalizeTencentDocsUser(input: Record<string, unknown>) {
@@ -589,13 +607,13 @@ function normalizeRecordArray(value: unknown) {
 
 function normalizeTencentDocsSmartsheetSheets(value: unknown) {
   if (!Array.isArray(value)) {
-    throw new ProviderRequestError(502, "tencent_docs response missing getSheet array");
+    throw new ProviderRequestError(502, "tencent_docs response missing sheets array");
   }
 
   return value.map((item) => {
     const sheet = requireRecord(item, "tencent_docs smartsheet sheet item");
     return {
-      sheetID: requireString(sheet.sheetID, "tencent_docs smartsheet sheet missing sheetID"),
+      sheetID: requireString(sheet.sheetID ?? sheet.sheetId, "tencent_docs smartsheet sheet missing sheetID"),
       title: optionalString(sheet.title) ?? null,
       isVisible: normalizeNullableBoolean(sheet.isVisible ?? sheet.isVibile),
       rowCount: normalizeNullableInteger(sheet.rowCount),
@@ -603,40 +621,6 @@ function normalizeTencentDocsSmartsheetSheets(value: unknown) {
       raw: sheet,
     };
   });
-}
-
-function createTencentDocsExportHandle(fileID: string, operationID: string) {
-  return JSON.stringify({ fileID, operationID });
-}
-
-function resolveTencentDocsExportProgressInput(input: Record<string, unknown>) {
-  const exportHandle = optionalString(input.exportHandle);
-  if (exportHandle) {
-    return parseTencentDocsExportHandle(exportHandle);
-  }
-
-  return {
-    fileID: requireActionInputString(input.fileID, "fileID"),
-    operationID: requireActionInputString(input.operationID, "operationID"),
-  };
-}
-
-function parseTencentDocsExportHandle(exportHandle: string) {
-  let payload: unknown;
-  try {
-    payload = JSON.parse(exportHandle);
-  } catch {
-    throw new ProviderRequestError(400, "tencent_docs exportHandle must be returned by start_export");
-  }
-
-  const record = optionalRecord(payload);
-  const fileID = optionalString(record?.fileID);
-  const operationID = optionalString(record?.operationID);
-  if (!fileID || !operationID) {
-    throw new ProviderRequestError(400, "tencent_docs exportHandle must include fileID and operationID");
-  }
-
-  return { fileID, operationID };
 }
 
 function normalizeTencentDocsRet(value: unknown) {

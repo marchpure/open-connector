@@ -6,7 +6,7 @@ import type {
   ActionPolicySnapshot,
   PolicyErrorCode,
 } from "../../core/action-policy.ts";
-import type { ExecutionContext, ExecutionResult, TransitFileWriter } from "../../core/types.ts";
+import type { ActionDefinition, ExecutionContext, ExecutionResult, TransitFileWriter } from "../../core/types.ts";
 import type { IProviderLoader } from "../../providers/provider-loader.ts";
 import type { Logger } from "../logger.ts";
 import type { IRunLogStore, RunLog, RunLogCaller, RunLogListInput, RunLogPage } from "../storage/runtime-store.ts";
@@ -112,6 +112,14 @@ export class ActionRunner {
         if (connectionPolicy && !connectionPolicy.allowed) {
           policy = connectionPolicy;
           result = { ok: false, error: { code: policy.code, message: policy.message } };
+        } else if (summary && !hasRequiredScopes(action, summary)) {
+          result = {
+            ok: false,
+            error: {
+              code: "insufficient_scope",
+              message: `${action.id} requires permissions not granted to this connection.`,
+            },
+          };
         } else {
           const resourcePolicy =
             summary?.id &&
@@ -267,6 +275,14 @@ export class ActionRunner {
       return "[unavailable]";
     }
   }
+}
+
+function hasRequiredScopes(action: ActionDefinition, connection: ConnectionSummary): boolean {
+  if (!["tencent_docs", "wps_mcp", "baidu_netdisk"].includes(action.service)) return true;
+  const granted = connection.profile.grantedScopes;
+  if (granted.length === 0) return true;
+  const required = connection.authType === "oauth2" ? action.providerPermissions : action.requiredScopes;
+  return required.every((scope) => granted.includes(scope));
 }
 
 function cancelledExecutionResult(): ExecutionResult {

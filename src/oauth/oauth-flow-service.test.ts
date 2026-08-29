@@ -227,6 +227,7 @@ describe("OAuthFlowService", () => {
     expect(await services.states.take(started.state)).toMatchObject({
       service: "example",
       connectionName: "work",
+      requestedScopes: ["read", "write"],
     });
   });
 
@@ -245,8 +246,31 @@ describe("OAuthFlowService", () => {
     expect(new URL(started.authorizationUrl).searchParams.get("scope")).toBe("read");
   });
 
+  it("uses provider least-privilege defaults when no scope subset or actions are supplied", async () => {
+    const provider = structuredClone(oauthProvider);
+    const auth = provider.auth[0];
+    if (auth?.type !== "oauth2") throw new Error("Expected OAuth fixture.");
+    auth.defaultScopes = ["read"];
+    const services = createServices([provider]);
+    await services.clientConfigs.upsertConfig({
+      service: "example",
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      extra: { tenant: "default" },
+    });
+
+    const started = await services.flow.startAuthorization({ service: "example" });
+
+    expect(new URL(started.authorizationUrl).searchParams.get("scope")).toBe("read");
+    expect(await services.states.take(started.state)).toMatchObject({ requestedScopes: ["read"] });
+  });
+
   it("derives the OAuth scope union from explicitly requested actions", async () => {
     const services = createServices([oauthProvider]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ access_token: "access-token", token_type: "Bearer" })),
+    );
     await services.clientConfigs.upsertConfig({
       service: "example",
       clientId: "client-id",
@@ -257,6 +281,10 @@ describe("OAuthFlowService", () => {
     const started = await services.flow.startAuthorization({ service: "example", actionIds: ["example.read"] });
 
     expect(new URL(started.authorizationUrl).searchParams.get("scope")).toBe("read");
+    await services.flow.completeAuthorization({ state: started.state, code: "code" });
+    await expect(services.connections.getCredential("example", "default")).resolves.toMatchObject({
+      profile: { grantedScopes: ["read"] },
+    });
   });
 
   it("requires OAuth client config before authorization", async () => {
@@ -309,6 +337,7 @@ describe("OAuthFlowService", () => {
     });
     await services.flow.completeAuthorization({ state: second.state, code: "code" });
     await expect(services.connections.getCredential("custom_oauth", "tenant-a")).resolves.toMatchObject({
+      profile: { grantedScopes: ["read"] },
       metadata: {
         oauthClientConfig: {
           clientId: "custom-client-id",

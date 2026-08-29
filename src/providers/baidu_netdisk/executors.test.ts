@@ -27,6 +27,34 @@ afterEach(() => {
 });
 
 describe("Baidu Netdisk download_file", () => {
+  it("returns current metadata without exposing a download URL", async () => {
+    const requests = stubResponses([
+      new Response(
+        '{"errno":0,"list":[{"fs_id":9007199254740993,"server_filename":"report.pdf","path":"/reports/report.pdf","size":42,"isdir":0,"category":4,"server_ctime":1700000000,"server_mtime":1700000100,"md5":"etag-1","dlink":"https://d.pcs.baidu.com/secret"}]}',
+        { headers: { "content-type": "application/json" } },
+      ),
+    ]);
+
+    const result = await executeAction("baidu_netdisk.get_file_metadata", { fsId: "9007199254740993" });
+
+    expect(result).toEqual({
+      ok: true,
+      output: {
+        id: "9007199254740993",
+        name: "report.pdf",
+        path: "/reports/report.pdf",
+        kind: "file",
+        category: "document",
+        sizeBytes: 42,
+        createdAt: "2023-11-14T22:13:20.000Z",
+        modifiedAt: "2023-11-14T22:15:00.000Z",
+        cloudMd5: "etag-1",
+      },
+    });
+    expect(requests[0]?.url.searchParams.get("dlink")).toBe("0");
+    expect(JSON.stringify(result)).not.toContain("d.pcs.baidu.com");
+  });
+
   it("downloads the requested fs_id byte-for-byte into transit storage", async () => {
     const content = new Uint8Array([0, 1, 2, 254, 255]);
     const requests = stubResponses([
@@ -198,6 +226,37 @@ describe("Baidu Netdisk download_file", () => {
     });
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("does not expose an arbitrary provider body from a failed download", async () => {
+    stubResponses([
+      Response.json({
+        errno: 0,
+        list: [
+          {
+            fs_id: 123,
+            filename: "secret.bin",
+            size: 1,
+            isdir: 0,
+            dlink: "https://d.pcs.baidu.com/file/secret",
+          },
+        ],
+      }),
+      new Response("access_token=secret-provider-value", { status: 403 }),
+    ]);
+    const { store } = createTransitFileStore(1024);
+
+    const result = await executeDownload("123", store);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "authorization_failed",
+        message: "baidu_netdisk authorization failed",
+        details: { status: 403 },
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("secret-provider-value");
+  });
 });
 
 function stubResponses(responses: Response[]): CapturedRequest[] {
@@ -244,6 +303,14 @@ function createTransitFileStore(maxBytes: number): {
 }
 
 async function executeDownload(fsId: string, transitFiles?: TransitFileStore) {
+  return executeAction("baidu_netdisk.download_file", { fsId }, transitFiles);
+}
+
+async function executeAction(
+  actionId: `${string}.${string}`,
+  input: Record<string, unknown>,
+  transitFiles?: TransitFileStore,
+) {
   const context: ExecutionContext = {
     getCredential: async (service) => {
       expect(service).toBe("baidu_netdisk");
@@ -253,5 +320,5 @@ async function executeDownload(fsId: string, transitFiles?: TransitFileStore) {
   if (transitFiles) {
     context.transitFiles = transitFiles;
   }
-  return executors["baidu_netdisk.download_file"]!({ fsId }, context);
+  return executors[actionId]!(input, context);
 }

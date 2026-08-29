@@ -97,6 +97,107 @@ describe("OAuthClientConfigService", () => {
       }),
     ).toThrow("requestedScopes must contain at least one scope.");
   });
+
+  it("uses provider-native permissions for action-scoped OAuth authorization", () => {
+    const provider = oauthProvider("example");
+    provider.actions = [
+      {
+        id: "example.read",
+        service: "example",
+        name: "read",
+        description: "Read provider data.",
+        requiredScopes: ["example.internal.read"],
+        providerPermissions: ["read"],
+        inputSchema: { type: "object" },
+        outputSchema: { type: "object" },
+      },
+    ];
+    const service = new OAuthClientConfigService({
+      catalog: createCatalogStore([provider]),
+      origin: "http://localhost:3000",
+      store: new MemoryOAuthClientConfigStore(),
+    });
+
+    expect(
+      service.getEffectiveScopes(
+        "example",
+        {
+          service: "example",
+          clientId: "client-id",
+          clientSecret: "client-secret",
+          extra: {},
+          secretExtra: {},
+        },
+        ["example.read"],
+      ),
+    ).toEqual(["read"]);
+  });
+
+  it("uses provider least-privilege defaults when no actions or configured subset are supplied", async () => {
+    const provider = oauthProvider("example");
+    const auth = provider.auth[0];
+    if (auth?.type !== "oauth2") throw new Error("Expected OAuth fixture.");
+    auth.defaultScopes = ["read"];
+    const service = new OAuthClientConfigService({
+      catalog: createCatalogStore([provider]),
+      origin: "http://localhost:3000",
+      store: new MemoryOAuthClientConfigStore(),
+    });
+    const config = {
+      service: "example",
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      extra: {},
+      secretExtra: {},
+    };
+
+    expect(service.getEffectiveScopes("example", config)).toEqual(["read"]);
+    await expect(service.listConfigs()).resolves.toMatchObject([{ service: "example", effectiveScopes: ["read"] }]);
+  });
+
+  it("rejects provider default scopes that are not declared as supported", () => {
+    const provider = oauthProvider("example");
+    const auth = provider.auth[0];
+    if (auth?.type !== "oauth2") throw new Error("Expected OAuth fixture.");
+    auth.defaultScopes = ["undeclared"];
+    const service = new OAuthClientConfigService({
+      catalog: createCatalogStore([provider]),
+      origin: "http://localhost:3000",
+      store: new MemoryOAuthClientConfigStore(),
+    });
+
+    expect(() =>
+      service.getEffectiveScopes("example", {
+        service: "example",
+        clientId: "client-id",
+        clientSecret: "client-secret",
+        extra: {},
+        secretExtra: {},
+      }),
+    ).toThrow("OAuth default scope is not declared by example: undeclared.");
+  });
+
+  it("rejects an empty provider default scope set", () => {
+    const provider = oauthProvider("example");
+    const auth = provider.auth[0];
+    if (auth?.type !== "oauth2") throw new Error("Expected OAuth fixture.");
+    auth.defaultScopes = [];
+    const service = new OAuthClientConfigService({
+      catalog: createCatalogStore([provider]),
+      origin: "http://localhost:3000",
+      store: new MemoryOAuthClientConfigStore(),
+    });
+
+    expect(() =>
+      service.getEffectiveScopes("example", {
+        service: "example",
+        clientId: "client-id",
+        clientSecret: "client-secret",
+        extra: {},
+        secretExtra: {},
+      }),
+    ).toThrow("OAuth default scopes must not be empty for example.");
+  });
 });
 
 function oauthProvider(service: string): ProviderDefinition {

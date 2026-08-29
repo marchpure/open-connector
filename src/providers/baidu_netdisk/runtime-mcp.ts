@@ -56,32 +56,42 @@ const semanticSourceByCode = new Map<number, (typeof baiduNetdiskSemanticMatchSo
 export type BaiduNetdiskMcpContext = {
   accessToken: string;
   fetcher: ProviderFetch;
+  signal?: AbortSignal;
 };
 
-export async function verifyBaiduNetdiskMcpConnection(accessToken: string, fetcher: ProviderFetch): Promise<void> {
-  await withBaiduNetdiskMcpClient(accessToken, fetcher, async (client) => {
-    const result = await client.listTools({}, { timeout: requestTimeoutMs });
-    const toolsByName = new Map(result.tools.map((tool) => [tool.name, tool]));
-    for (const toolName of requiredToolNames) {
-      const tool = toolsByName.get(toolName);
-      if (!tool) {
-        throw new ProviderRequestError(502, `baidu_netdisk MCP server is missing required tool: ${toolName}`);
-      }
-      const properties = tool.inputSchema.properties;
-      for (const [property, expectedType] of Object.entries(requiredToolInputProperties.get(toolName) ?? {})) {
-        const schema = properties?.[property];
-        if (
-          !schema ||
-          typeof schema !== "object" ||
-          Array.isArray(schema) ||
-          !("type" in schema) ||
-          schema.type !== expectedType
-        ) {
-          throw new ProviderRequestError(502, `baidu_netdisk MCP tool ${toolName} has an incompatible input schema`);
+export async function verifyBaiduNetdiskMcpConnection(
+  accessToken: string,
+  fetcher: ProviderFetch,
+  signal?: AbortSignal,
+): Promise<void> {
+  await withBaiduNetdiskMcpClient(
+    accessToken,
+    fetcher,
+    async (client) => {
+      const result = await client.listTools({}, { timeout: requestTimeoutMs, signal });
+      const toolsByName = new Map(result.tools.map((tool) => [tool.name, tool]));
+      for (const toolName of requiredToolNames) {
+        const tool = toolsByName.get(toolName);
+        if (!tool) {
+          throw new ProviderRequestError(502, `baidu_netdisk MCP server is missing required tool: ${toolName}`);
+        }
+        const properties = tool.inputSchema.properties;
+        for (const [property, expectedType] of Object.entries(requiredToolInputProperties.get(toolName) ?? {})) {
+          const schema = properties?.[property];
+          if (
+            !schema ||
+            typeof schema !== "object" ||
+            Array.isArray(schema) ||
+            !("type" in schema) ||
+            schema.type !== expectedType
+          ) {
+            throw new ProviderRequestError(502, `baidu_netdisk MCP tool ${toolName} has an incompatible input schema`);
+          }
         }
       }
-    }
-  });
+    },
+    signal,
+  );
 }
 
 export async function executeBaiduNetdiskMcpAction(
@@ -226,6 +236,7 @@ export async function withBaiduNetdiskMcpClient<T>(
   accessToken: string,
   fetcher: ProviderFetch,
   run: (client: Client) => Promise<T>,
+  signal?: AbortSignal,
 ): Promise<T> {
   return withMcpClient(
     {
@@ -233,6 +244,7 @@ export async function withBaiduNetdiskMcpClient<T>(
       transport: "sse",
       headers: { authorization: `Bearer ${accessToken}` },
       fetcher,
+      signal,
       mapError: normalizeBaiduNetdiskMcpTransportError,
     },
     run,
@@ -245,21 +257,29 @@ async function callBaiduNetdiskMcpTool(
   phase: "read" | "write",
   context: BaiduNetdiskMcpContext,
 ) {
-  return withBaiduNetdiskMcpClient(context.accessToken, context.fetcher, async (client) => {
-    const result = await client.callTool({ name, arguments: args }, { timeout: requestTimeoutMs });
-    const payload =
-      result.structuredContent && !hasUnsafeBaiduId(result.structuredContent)
-        ? requireObject(result.structuredContent)
-        : parseMcpTextResult(result.content);
-    const errno = readOptionalInteger(payload.errno ?? payload.error_no ?? payload.error_code);
-    if (errno != null && errno !== 0) {
-      throw normalizeBaiduNetdiskError(errno, 200, payload.request_id, phase);
-    }
-    if (result.isError) {
-      throw new ProviderRequestError(502, "baidu_netdisk MCP tool call failed");
-    }
-    return payload;
-  });
+  return withBaiduNetdiskMcpClient(
+    context.accessToken,
+    context.fetcher,
+    async (client) => {
+      const result = await client.callTool(
+        { name, arguments: args },
+        { timeout: requestTimeoutMs, signal: context.signal },
+      );
+      const payload =
+        result.structuredContent && !hasUnsafeBaiduId(result.structuredContent)
+          ? requireObject(result.structuredContent)
+          : parseMcpTextResult(result.content);
+      const errno = readOptionalInteger(payload.errno ?? payload.error_no ?? payload.error_code);
+      if (errno != null && errno !== 0) {
+        throw normalizeBaiduNetdiskError(errno, 200, payload.request_id, phase);
+      }
+      if (result.isError) {
+        throw new ProviderRequestError(502, "baidu_netdisk MCP tool call failed");
+      }
+      return payload;
+    },
+    context.signal,
+  );
 }
 
 function parseMcpTextResult(content: Array<{ type: string; [key: string]: unknown }>) {

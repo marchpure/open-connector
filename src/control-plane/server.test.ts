@@ -22,7 +22,18 @@ const provider: ProviderDefinition = {
       fields: [{ key: "secret", label: "Secret", inputType: "password", required: true, secret: true }],
     },
   ],
-  actions: [],
+  actions: [
+    {
+      id: "fixture.read",
+      service: "fixture",
+      name: "read",
+      description: "Read fixture data.",
+      requiredScopes: [],
+      providerPermissions: [],
+      inputSchema: { type: "object" },
+      outputSchema: { type: "object" },
+    },
+  ],
 };
 
 const principal = {
@@ -42,23 +53,8 @@ afterEach(async () => {
 describe("connection control API", () => {
   it("persists the lease invocation id in the redacted audit feed", async () => {
     const database = new DatabaseSync(":memory:");
-    const executableProvider: ProviderDefinition = {
-      ...provider,
-      actions: [
-        {
-          id: "fixture.read",
-          service: "fixture",
-          name: "read",
-          description: "Read fixture data.",
-          requiredScopes: [],
-          providerPermissions: [],
-          inputSchema: { type: "object" },
-          outputSchema: { type: "object" },
-        },
-      ],
-    };
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([executableProvider], { executableActionIds: ["fixture.read"] }),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => async () => ({ ok: true, output: { value: "safe" } }),
         loadProxyExecutor: async () => undefined,
@@ -127,6 +123,125 @@ describe("connection control API", () => {
     database.close();
   });
 
+  it("authorizes provider-observed resources only after a successful leased action", async () => {
+    const database = new DatabaseSync(":memory:");
+    const officeProvider: ProviderDefinition = {
+      service: "tencent_docs",
+      displayName: "Tencent Docs fixture",
+      categories: ["test"],
+      authTypes: ["custom_credential"],
+      auth: [
+        {
+          type: "custom_credential",
+          fields: [{ key: "secret", label: "Secret", inputType: "password", required: true, secret: true }],
+        },
+      ],
+      actions: [
+        {
+          id: "tencent_docs.search_files",
+          service: "tencent_docs",
+          name: "search_files",
+          description: "Search fixture files.",
+          requiredScopes: [],
+          providerPermissions: [],
+          inputSchema: { type: "object" },
+          outputSchema: { type: "object" },
+        },
+        {
+          id: "tencent_docs.get_doc_content",
+          service: "tencent_docs",
+          name: "get_doc_content",
+          description: "Read a discovered fixture document.",
+          requiredScopes: [],
+          providerPermissions: [],
+          inputSchema: { type: "object" },
+          outputSchema: { type: "object" },
+          resourceBindings: { fileID: ["application/vnd.tencent-docs.doc"] },
+        },
+      ],
+    };
+    let searchSucceeds = false;
+    const observeActionResources = vi.fn(async () => [
+      {
+        sourceType: "tencent_docs" as const,
+        resourceId: "nested-doc",
+        mimeType: "application/vnd.tencent-docs.doc",
+      },
+    ]);
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([officeProvider], {
+        executableActionIds: ["tencent_docs.search_files", "tencent_docs.get_doc_content"],
+      }),
+      providerLoader: {
+        loadActionExecutor: async (_service, actionId) =>
+          actionId === "tencent_docs.search_files"
+            ? async () =>
+                searchSucceeds
+                  ? { ok: true, output: { items: [{ ID: "nested-doc" }] } }
+                  : { ok: false, error: { code: "provider_error", message: "search failed" } }
+            : async () => ({ ok: true, output: { document: "safe" } }),
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          customCredential: async () => ({ profile: { accountId: "validated" } }),
+        }),
+        observeActionResources,
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [{ service: "tencent_docs", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        service: "tencent_docs",
+        authType: "custom_credential",
+        values: { secret: "secret" },
+      }),
+    });
+    const connectionId = ((await created.json()) as { connection: { id: string } }).connection.id;
+    const leaseResponse = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["tencent_docs.search_files", "tencent_docs.get_doc_content"],
+        invocationId: "observe-invocation",
+        audience: "knowledge-runtime",
+      }),
+    });
+    const lease = (await leaseResponse.json()) as { token: string };
+    const invoke = (actionId: string, input: Record<string, unknown>) =>
+      app.request(`/v1/runtime/actions/${actionId}`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${auth}`,
+          "content-type": "application/json",
+          "x-connection-lease": lease.token,
+        },
+        body: JSON.stringify({
+          connectionId,
+          invocationId: "observe-invocation",
+          audience: "knowledge-runtime",
+          input,
+        }),
+      });
+
+    expect((await invoke("tencent_docs.get_doc_content", { fileID: "nested-doc" })).status).toBe(502);
+    expect((await invoke("tencent_docs.search_files", {})).status).toBe(502);
+    expect(observeActionResources).not.toHaveBeenCalled();
+    expect((await invoke("tencent_docs.get_doc_content", { fileID: "nested-doc" })).status).toBe(502);
+
+    searchSucceeds = true;
+    expect((await invoke("tencent_docs.search_files", {})).status).toBe(200);
+    expect(observeActionResources).toHaveBeenCalledOnce();
+    expect((await invoke("tencent_docs.get_doc_content", { fileID: "nested-doc" })).status).toBe(200);
+    expect((await invoke("tencent_docs.get_doc_content", { fileID: "guessed-doc" })).status).toBe(502);
+    database.close();
+  });
+
   it("streams an authenticated multipart upload through staged tenant file intake", async () => {
     const root = await mkdtemp(join(tmpdir(), "connection-control-upload-"));
     tempRoots.push(root);
@@ -142,7 +257,7 @@ describe("connection control API", () => {
       consume({ path: stagedPath, sizeBytes: 19, name: "people.csv", mimeType: "text/csv" }),
     );
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -174,7 +289,7 @@ describe("connection control API", () => {
   it("isolates tenants and never returns credentials", async () => {
     const database = new DatabaseSync(":memory:");
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -225,7 +340,7 @@ describe("connection control API", () => {
       bytes: 25,
     });
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -264,7 +379,7 @@ describe("connection control API", () => {
   it("enforces personal/team visibility and owner-only connection management", async () => {
     const database = new DatabaseSync(":memory:");
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -333,7 +448,7 @@ describe("connection control API", () => {
   it("revokes a connection and all of its active leases", async () => {
     const database = new DatabaseSync(":memory:");
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -382,7 +497,7 @@ describe("connection control API", () => {
   it("grants and removes explicit connection use ACLs with lease revocation", async () => {
     const database = new DatabaseSync(":memory:");
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -445,7 +560,7 @@ describe("connection control API", () => {
   it("runs durable tenant-scoped validation and discovery jobs", async () => {
     const database = new DatabaseSync(":memory:");
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -520,7 +635,11 @@ describe("connection control API", () => {
     });
     expect(leasedDiscovery.status).toBe(202);
     expect(await leasedDiscovery.json()).toMatchObject({
-      job: { kind: "discover", status: "succeeded", result: { service: "fixture", resources: [], actions: [] } },
+      job: {
+        kind: "discover",
+        status: "succeeded",
+        result: { service: "fixture", resources: [], actions: [expect.objectContaining({ id: "fixture.read" })] },
+      },
     });
 
     const updated = await app.request(`/v1/connections/${connectionId}`, {
@@ -546,7 +665,7 @@ describe("connection control API", () => {
   it("does not let a shared-connection teammate lease storage mutation or presign capabilities", async () => {
     const database = new DatabaseSync(":memory:");
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,
@@ -587,10 +706,94 @@ describe("connection control API", () => {
     expect(lease.status).toBe(403);
     expect(await lease.json()).toMatchObject({
       error: {
-        code: "connection_forbidden",
-        message: "Storage write, delete, and presign actions require the connection owner.",
+        code: "lease_action_forbidden",
+        message: "A connection lease may include only actions owned by that connection.",
       },
     });
+    database.close();
+  });
+
+  it("does not issue Agent leases for office mutations or generic MCP calls", async () => {
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          customCredential: async () => ({ profile: { accountId: "validated" } }),
+        }),
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const token = createPrincipalToken(principal, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "secret" } }),
+    });
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+    const lease = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: [
+          "tencent_docs.batch_update_doc",
+          "tencent_docs.convert_file_id",
+          "wps_mcp.list_tools",
+          "wps_mcp.call_tool",
+          "baidu_netdisk.create_share_link",
+        ],
+        invocationId: "inv-read-only",
+        audience: "knowledge-runtime",
+      }),
+    });
+    expect(lease.status).toBe(403);
+    expect(await lease.json()).toMatchObject({ error: { code: "lease_action_forbidden" } });
+    database.close();
+  });
+
+  it("does not issue a lease for actions owned by another provider", async () => {
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          customCredential: async () => ({ profile: { accountId: "validated" } }),
+        }),
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [{ service: "fixture", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const token = createPrincipalToken(principal, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "fixture", authType: "custom_credential", values: { secret: "secret" } }),
+    });
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+
+    const lease = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["baidu_netdisk.download_file"],
+        invocationId: "inv-cross-provider",
+        audience: "knowledge-runtime",
+      }),
+    });
+
+    expect(lease.status).toBe(403);
+    expect(await lease.json()).toMatchObject({ error: { code: "lease_action_forbidden" } });
     database.close();
   });
 
@@ -601,7 +804,7 @@ describe("connection control API", () => {
       .mockResolvedValueOnce({ profile: { accountId: "created" } })
       .mockRejectedValueOnce(new Error("upstream rejected credential"));
     const app = createConnectionControlApp({
-      catalog: createCatalogStore([provider]),
+      catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
         loadActionExecutor: async () => undefined,
         loadProxyExecutor: async () => undefined,

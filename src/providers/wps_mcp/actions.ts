@@ -60,7 +60,7 @@ export const wpsMcpActions: ActionDefinition[] = [
     name: "search_files",
     description:
       "Search WPS cloud documents and folders across drives by file name, content, creator, location, type, or time.",
-    requiredScopes: [],
+    requiredScopes: ["wps_mcp.files.read"],
     inputSchema: s.object(
       "Filters and pagination for searching WPS cloud documents.",
       {
@@ -143,7 +143,7 @@ export const wpsMcpActions: ActionDefinition[] = [
     name: "list_my_files",
     description:
       "List entries in the root of the connected user's WPS cloud documents with filtering, sorting, and pagination.",
-    requiredScopes: [],
+    requiredScopes: ["wps_mcp.files.read"],
     inputSchema: s.object(
       "Filters and pagination for the WPS cloud document root.",
       {
@@ -174,7 +174,7 @@ export const wpsMcpActions: ActionDefinition[] = [
   defineProviderAction(service, {
     name: "list_files",
     description: "List entries in a known WPS drive folder with filtering, sorting, and pagination.",
-    requiredScopes: [],
+    requiredScopes: ["wps_mcp.files.read"],
     inputSchema: s.object(
       "The WPS drive folder and optional listing controls.",
       {
@@ -203,78 +203,62 @@ export const wpsMcpActions: ActionDefinition[] = [
       },
     ),
     outputSchema: dynamicToolOutputSchema,
+    resourceBindings: { parent_id: ["application/vnd.wps.folder"] },
   }),
   defineProviderAction(service, {
     name: "get_file_info",
-    description: "Get metadata, drive details, extended attributes, or permissions for a WPS file.",
-    requiredScopes: [],
-    inputSchema: {
-      ...s.object(
-        "At least one WPS file selector and optional metadata expansions.",
-        {
-          ...fileSelectorProperties,
-          with_drive: s.boolean("Whether the response should include the containing drive."),
-          with_ext_attrs: s.boolean("Whether the response should include extended attributes."),
-          with_permission: s.boolean("Whether the response should include operation permissions."),
-        },
-        {
-          optional: ["file_id", "link_id", "url", "with_drive", "with_ext_attrs", "with_permission"],
-        },
-      ),
-      anyOf: [{ required: ["file_id"] }, { required: ["link_id"] }, { required: ["url"] }],
-    },
+    description: "Get metadata, drive details, extended attributes, or permissions for a discovered WPS file.",
+    requiredScopes: ["wps_mcp.files.read"],
+    inputSchema: s.object(
+      "A discovered WPS file ID and optional metadata expansions.",
+      {
+        file_id: fileSelectorProperties.file_id,
+        with_drive: s.boolean("Whether the response should include the containing drive."),
+        with_ext_attrs: s.boolean("Whether the response should include extended attributes."),
+        with_permission: s.boolean("Whether the response should include operation permissions."),
+      },
+      {
+        optional: ["with_drive", "with_ext_attrs", "with_permission"],
+      },
+    ),
     outputSchema: dynamicToolOutputSchema,
+    resourceBindings: { file_id: [] },
   }),
   defineProviderAction(service, {
     name: "read_file",
     description:
-      "Read a WPS cloud document as Markdown, plain text, structured KDC data, or spreadsheet cells according to its format.",
-    requiredScopes: [],
-    inputSchema: {
-      ...s.object(
-        "At least one WPS file selector and format-specific reading options. When several selectors are supplied, WPS prioritizes url, then link_id, then file_id.",
-        {
-          ...fileSelectorProperties,
-          format: s.stringEnum("The output format for supported text documents.", ["markdown", "plain", "kdc"]),
-          enable_upload_medias: s.boolean(
-            "Whether extracted media should be uploaded and returned as temporary download URLs.",
-          ),
-          sheet_id: s.number("The numeric spreadsheet sheet ID. It takes priority over sheet_name."),
-          sheet_name: s.string("The spreadsheet sheet name."),
-          sheet_range: s.object(
-            "A zero-based inclusive spreadsheet cell range.",
-            {
-              row_from: s.number("The zero-based first row."),
-              row_to: s.number("The zero-based last row, inclusive."),
-              col_from: s.number("The zero-based first column."),
-              col_to: s.number("The zero-based last column, inclusive."),
-            },
-            { optional: ["row_from", "row_to", "col_from", "col_to"] },
-          ),
-          task_id: s.string("The task ID returned by a previous incomplete read request."),
-        },
-        {
-          optional: [
-            "file_id",
-            "link_id",
-            "url",
-            "format",
-            "enable_upload_medias",
-            "sheet_id",
-            "sheet_name",
-            "sheet_range",
-            "task_id",
-          ],
-        },
-      ),
-      anyOf: [{ required: ["file_id"] }, { required: ["link_id"] }, { required: ["url"] }],
-    },
+      "Read a discovered WPS cloud document as bounded Markdown, plain text, structured KDC data, or spreadsheet cells according to its format.",
+    requiredScopes: ["wps_mcp.files.read"],
+    inputSchema: s.object(
+      "A discovered WPS file ID and format-specific bounded reading options.",
+      {
+        file_id: fileSelectorProperties.file_id,
+        format: s.stringEnum("The output format for supported text documents.", ["markdown", "plain", "kdc"]),
+        sheet_id: s.number("The numeric spreadsheet sheet ID. It takes priority over sheet_name."),
+        sheet_name: s.string("The spreadsheet sheet name."),
+        sheet_range: s.object(
+          "A zero-based inclusive spreadsheet cell range.",
+          {
+            row_from: s.number("The zero-based first row."),
+            row_to: s.number("The zero-based last row, inclusive."),
+            col_from: s.number("The zero-based first column."),
+            col_to: s.number("The zero-based last column, inclusive."),
+          },
+          { optional: ["row_from", "row_to", "col_from", "col_to"] },
+        ),
+        task_id: s.string("The task ID returned by a previous incomplete read request."),
+      },
+      {
+        optional: ["format", "sheet_id", "sheet_name", "sheet_range", "task_id"],
+      },
+    ),
     outputSchema: dynamicToolOutputSchema,
+    resourceBindings: { file_id: [] },
   }),
   defineProviderAction(service, {
     name: "create_file_with_content",
     description: "Create a WPS document, PDF, spreadsheet, or smart sheet and populate it with JSON-friendly content.",
-    requiredScopes: [],
+    requiredScopes: ["wps_mcp.files.write"],
     inputSchema: s.object(
       "The new WPS file name, type, location, and format-specific content.",
       {
@@ -311,7 +295,7 @@ export const wpsMcpActions: ActionDefinition[] = [
   defineProviderAction(service, {
     name: "create_folder",
     description: "Create a folder in a known WPS drive and parent folder.",
-    requiredScopes: [],
+    requiredScopes: ["wps_mcp.files.write"],
     inputSchema: s.object(
       "The destination and name for a new WPS folder.",
       {
@@ -332,7 +316,7 @@ export const wpsMcpActions: ActionDefinition[] = [
     name: "list_tools",
     description:
       "Discover the current WPS document, spreadsheet, presentation, PDF, and workspace MCP tools with their live input schemas.",
-    requiredScopes: [],
+    requiredScopes: ["wps_mcp.tools.inspect"],
     inputSchema: s.object("No input is required.", {}),
     outputSchema: s.object("The current WPS MCP tool catalog.", {
       tools: s.array("Tools currently exposed to the connected WPS MCP account.", mcpToolSummarySchema),
@@ -342,7 +326,7 @@ export const wpsMcpActions: ActionDefinition[] = [
     name: "call_tool",
     description:
       "Call a current WPS MCP tool with JSON arguments after checking its live schema and behavior annotations.",
-    requiredScopes: [],
+    requiredScopes: ["wps_mcp.tools.invoke"],
     inputSchema: s.object(
       "Input for invoking one current WPS MCP tool.",
       {

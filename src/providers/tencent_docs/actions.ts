@@ -90,6 +90,17 @@ const tencentDocsSmartsheetSheetSchema = s.object("A Tencent Docs Smartsheet chi
   raw: rawObjectSchema,
 });
 
+const readSmartsheetRecordsInputSchema = s.object(
+  "Input for reading one bounded page of Tencent Docs Smartsheet records.",
+  {
+    fileID: nonEmptyString("The Tencent Docs Smartsheet file ID."),
+    sheetID: nonEmptyString("The child sheet ID returned by list_smartsheet_sheets."),
+    limit: s.positiveInteger("The maximum number of records to return, capped at 100.", { maximum: 100 }),
+    offset: s.nonNegativeInteger("The zero-based record offset."),
+  },
+  { optional: ["limit", "offset"] },
+);
+
 const createFileInputSchema = s.object(
   "Input for creating a Tencent Docs online file.",
   {
@@ -223,17 +234,10 @@ const startExportInputSchema = s.object(
   },
 );
 
-const exportProgressInputSchema = s.object(
-  "Input for checking Tencent Docs export progress. Provide exportHandle, or both fileID and operationID.",
-  {
-    exportHandle: nonEmptyString("The opaque export handle returned by start_export."),
-    fileID: nonEmptyString("The Tencent Docs file ID being exported."),
-    operationID: nonEmptyString("The export operation ID returned by start_export."),
-  },
-  {
-    optional: ["exportHandle", "fileID", "operationID"],
-  },
-);
+const exportProgressInputSchema = s.object("Input for checking Tencent Docs export progress.", {
+  fileID: nonEmptyString("The Tencent Docs file ID being exported."),
+  operationID: nonEmptyString("The export operation ID returned by start_export."),
+});
 
 const convertFileIdInputSchema = s.object("Input for converting Tencent Docs file IDs.", {
   type: s.integer("The conversion type. Use 1 for fileID to encodedID or 2 for encodedID to fileID.", {
@@ -288,6 +292,7 @@ export const tencentDocsActions: ActionDefinition[] = [
       ...apiResponseBaseSchema,
       file: tencentDocsFileSchema,
     }),
+    resourceBindings: { fileID: [] },
   }),
   defineAction({
     service: "tencent_docs",
@@ -313,6 +318,7 @@ export const tencentDocsActions: ActionDefinition[] = [
       items: s.array("The files and folders in the folder.", tencentDocsFileSchema),
       raw: rawObjectSchema,
     }),
+    resourceBindingsOptional: { folderID: ["application/vnd.tencent-docs.folder"] },
   }),
   defineAction({
     service: "tencent_docs",
@@ -329,6 +335,7 @@ export const tencentDocsActions: ActionDefinition[] = [
       items: s.array("The search result files and folders.", tencentDocsFileSchema),
       raw: rawObjectSchema,
     }),
+    resourceBindingsOptional: { folderID: ["application/vnd.tencent-docs.folder"] },
   }),
   defineAction({
     service: "tencent_docs",
@@ -341,13 +348,13 @@ export const tencentDocsActions: ActionDefinition[] = [
       ...apiResponseBaseSchema,
       fileID: s.string("The Tencent Docs file ID being exported."),
       operationID: s.string("The Tencent Docs export operation ID."),
-      exportHandle: s.string("An opaque handle that can be passed to get_export_progress."),
     }),
+    resourceBindings: { fileID: [] },
   }),
   defineAction({
     service: "tencent_docs",
     name: "get_export_progress",
-    description: "Check a Tencent Docs asynchronous export operation and return the download URL when ready.",
+    description: "Check a Tencent Docs asynchronous export operation without exposing its temporary download URL.",
     requiredScopes: [tencentDocsConnectorScopes.driveExport],
     providerPermissions: [tencentDocsProviderScopes.driveExportable],
     inputSchema: exportProgressInputSchema,
@@ -355,9 +362,12 @@ export const tencentDocsActions: ActionDefinition[] = [
       ...apiResponseBaseSchema,
       status: s.stringEnum("The normalized export status.", ["running", "succeeded", "failed"]),
       progress: s.integer("The export progress from 0 to 100.", { minimum: 0, maximum: 100 }),
-      url: s.nullable(s.url("The temporary download URL when export has succeeded.")),
+      downloadReady: s.boolean(
+        "Whether Tencent Docs reports that the export is ready. Temporary provider URLs are not exposed.",
+      ),
       raw: rawObjectSchema,
     }),
+    resourceBindings: { fileID: [] },
   }),
   defineAction({
     service: "tencent_docs",
@@ -382,20 +392,21 @@ export const tencentDocsActions: ActionDefinition[] = [
     name: "get_sheet_range",
     description: "Read cell values and metadata from a Tencent Docs spreadsheet range.",
     requiredScopes: [tencentDocsConnectorScopes.sheetRead],
-    providerPermissions: [tencentDocsProviderScopes.sheet],
+    providerPermissions: [tencentDocsProviderScopes.sheetReadonly],
     inputSchema: sheetRangeInputSchema,
     outputSchema: s.object("The Tencent Docs spreadsheet range response.", {
       ...apiResponseBaseSchema,
       gridData: rawObjectSchema,
       raw: rawObjectSchema,
     }),
+    resourceBindings: { fileID: ["application/vnd.tencent-docs.sheet"] },
   }),
   defineAction({
     service: "tencent_docs",
     name: "batch_update_sheet",
     description: "Apply up to five Tencent Docs spreadsheet V3 batch update operations.",
     requiredScopes: [tencentDocsConnectorScopes.sheetWrite],
-    providerPermissions: [tencentDocsProviderScopes.sheet],
+    providerPermissions: [tencentDocsProviderScopes.sheetEditable],
     inputSchema: batchUpdateSheetInputSchema,
     outputSchema: s.object("The Tencent Docs spreadsheet batch update response.", {
       ...apiResponseBaseSchema,
@@ -408,7 +419,7 @@ export const tencentDocsActions: ActionDefinition[] = [
     name: "get_doc_content",
     description: "Get the structured content and version of a Tencent Docs document.",
     requiredScopes: [tencentDocsConnectorScopes.docRead],
-    providerPermissions: [tencentDocsProviderScopes.doc],
+    providerPermissions: [tencentDocsProviderScopes.docReadonly],
     inputSchema: fileIdInputSchema,
     outputSchema: s.object("The Tencent Docs document content response.", {
       ...apiResponseBaseSchema,
@@ -416,6 +427,7 @@ export const tencentDocsActions: ActionDefinition[] = [
       version: s.integer("The Tencent Docs document version."),
       raw: rawObjectSchema,
     }),
+    resourceBindings: { fileID: ["application/vnd.tencent-docs.doc"] },
   }),
   defineAction({
     service: "tencent_docs",
@@ -441,6 +453,27 @@ export const tencentDocsActions: ActionDefinition[] = [
       sheets: s.array("The Smartsheet child sheets returned by Tencent Docs.", tencentDocsSmartsheetSheetSchema),
       raw: rawObjectSchema,
     }),
+    resourceBindings: { fileID: ["application/vnd.tencent-docs.smartsheet"] },
+  }),
+  defineAction({
+    service: "tencent_docs",
+    name: "get_smartsheet_records",
+    description: "Read up to one hundred records from a discovered Tencent Docs Smartsheet child sheet.",
+    requiredScopes: [tencentDocsConnectorScopes.smartsheetRead],
+    providerPermissions: [tencentDocsProviderScopes.smartsheetReadonly],
+    inputSchema: readSmartsheetRecordsInputSchema,
+    outputSchema: s.object("One bounded Tencent Docs Smartsheet record page.", {
+      ...apiResponseBaseSchema,
+      records: s.array("The records returned by Tencent Docs.", rawObjectSchema, { maxItems: 100 }),
+      total: nullableInteger("The total record count returned by Tencent Docs."),
+      hasMore: nullableBoolean("Whether Tencent Docs reports more records."),
+      offset: s.nonNegativeInteger("The zero-based record offset."),
+      raw: rawObjectSchema,
+    }),
+    resourceBindings: {
+      fileID: ["application/vnd.tencent-docs.smartsheet"],
+      sheetID: ["application/vnd.tencent-docs.smartsheet.sheet"],
+    },
   }),
   defineAction({
     service: "tencent_docs",

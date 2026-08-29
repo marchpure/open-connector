@@ -183,6 +183,7 @@ export const baiduNetdiskActions: ProviderActionDefinition[] = [
       items: s.array("The files and folders in this page.", fileSchema),
       page: s.integer("The one-based page that was returned."),
     }),
+    resourceBindingsOptional: { path: ["application/vnd.baidu-netdisk.folder"] },
   }),
   defineProviderAction("baidu_netdisk", {
     name: "search_files",
@@ -213,6 +214,7 @@ export const baiduNetdiskActions: ProviderActionDefinition[] = [
       items: s.array("The normalized matching files and folders.", fileSchema),
       page: s.integer("The one-based page that was returned."),
     }),
+    resourceBindingsOptional: { path: ["application/vnd.baidu-netdisk.folder"] },
   }),
   defineProviderAction("baidu_netdisk", {
     name: "semantic_search_files",
@@ -234,6 +236,18 @@ export const baiduNetdiskActions: ProviderActionDefinition[] = [
       items: s.array("The normalized semantic matches.", semanticFileSchema),
       truncated: s.boolean("Whether Baidu reports that more matches may be available."),
     }),
+    resourceBindingsOptional: { path: ["application/vnd.baidu-netdisk.folder"] },
+  }),
+  defineProviderAction("baidu_netdisk", {
+    name: "get_file_metadata",
+    description: "Get current metadata for one discovered Baidu Netdisk file or folder.",
+    requiredScopes: [baiduNetdiskConnectorScopes.rootFilesRead],
+    providerPermissions: [baiduNetdiskProviderScopes.netdisk],
+    inputSchema: s.requiredObject("Input for reading Baidu Netdisk file metadata.", {
+      fsId: shareFileIdSchema,
+    }),
+    outputSchema: fileSchema,
+    resourceBindings: { fsId: [] },
   }),
   defineProviderAction("baidu_netdisk", {
     name: "download_file",
@@ -248,6 +262,7 @@ export const baiduNetdiskActions: ProviderActionDefinition[] = [
       }),
     }),
     outputSchema: downloadedFileSchema,
+    resourceBindings: { fsId: ["application/vnd.baidu-netdisk.file"] },
   }),
   defineProviderAction("baidu_netdisk", {
     name: "upload_file_from_url",

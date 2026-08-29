@@ -166,6 +166,55 @@ function readEnablement(value: string | undefined): EnablementEntry[] {
         owner: "knowledge-platform",
         evidenceRef: "docs/connection-expansion/p1-incremental-data-platforms-handoff.json#/providers/elasticsearch",
       },
+      {
+        service: "tencent_docs",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/p2-incremental-cn-office-storage-handoff.json#/connections/0",
+      },
+      {
+        service: "wps_mcp",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/p2-incremental-cn-office-storage-handoff.json#/connections/1",
+      },
+      {
+        service: "baidu_netdisk",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/p2-incremental-cn-office-storage-handoff.json#/connections/2",
+      },
+      {
+        service: "tencent_cos",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/p2-incremental-cn-office-storage-handoff.json#/connections/3",
+      },
+      {
+        service: "huawei_obs",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/p2-incremental-cn-office-storage-handoff.json#/connections/4",
+      },
+      {
+        service: "minio",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/p2-incremental-cn-office-storage-handoff.json#/connections/5",
+      },
+      {
+        service: "qiniu_kodo",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "knowledge-platform",
+        evidenceRef: "docs/connection-expansion/p2-incremental-cn-office-storage-handoff.json#/connections/6",
+      },
     ];
   }
   const parsed = JSON.parse(value) as unknown;

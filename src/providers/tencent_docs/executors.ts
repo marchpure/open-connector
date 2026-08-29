@@ -6,14 +6,18 @@ import type {
   ProviderExecutors,
   ProviderProxyExecutor,
 } from "../../core/types.ts";
+import type { ProviderResourceCandidate } from "../provider-loader.ts";
 
 import { optionalRecord, optionalString } from "../../core/cast.ts";
 import {
+  boundedProviderResourceSchema,
+  boundedProviderActionResult,
   createProviderFetch,
   createProviderProxyUrl,
   normalizeProviderProxyHeaders,
   ProviderRequestError,
   providerUserAgent,
+  readProviderJsonBody,
   readProviderProxyErrorMessage,
   readProviderProxyResponse,
   requireOAuthCredential,
@@ -52,13 +56,15 @@ export const executors: ProviderExecutors = Object.fromEntries(
 
         return {
           ok: true,
-          output: await handler(input as Record<string, unknown>, {
-            accessToken: credential.accessToken,
-            clientId: clientId ?? "",
-            openID: openID ?? "",
-            fetcher: tencentDocsFetch,
-            signal: context.signal,
-          }),
+          output: boundedProviderActionResult(
+            await handler(input as Record<string, unknown>, {
+              accessToken: credential.accessToken,
+              clientId: clientId ?? "",
+              openID: openID ?? "",
+              fetcher: tencentDocsFetch,
+              signal: context.signal,
+            }),
+          ),
         };
       } catch (error) {
         return toProviderExecutionError(error, "tencent_docs request failed");
@@ -106,28 +112,40 @@ export const proxy: ProviderProxyExecutor = async (input, context) => {
 
     const response = await tencentDocsFetch(url, init);
     if (!response.ok) {
-      const text = await readProviderProxyErrorMessage(response, "");
+      await readProviderProxyErrorMessage(response, "", context.signal);
       throw new ProviderRequestError(
-        response.status,
-        text || `tencent_docs request failed with HTTP ${response.status}`,
+        response.status >= 500 ? 502 : response.status,
+        response.status === 401 || response.status === 403
+          ? "tencent_docs authorization failed"
+          : "tencent_docs request failed",
       );
     }
-    return { ok: true, response: await readProviderProxyResponse(response) };
+    return { ok: true, response: await readProviderProxyResponse(response, { signal: context.signal }) };
   } catch (error) {
     return toProviderProxyError(error, "tencent_docs request failed");
   }
 };
 
 export const credentialValidators: CredentialValidators = {
-  async oauth2(input, { fetcher }): Promise<CredentialValidationResult> {
+  async oauth2(input, { fetcher, signal }): Promise<CredentialValidationResult> {
     const url = new URL("https://docs.qq.com/oauth/v2/userinfo");
     url.searchParams.set("access_token", input.accessToken);
-    const response = await fetcher(url.toString());
-    const envelope = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    const response = await fetcher(url.toString(), { signal });
+    const envelope = (await readProviderJsonBody(response, {
+      emptyBody: {},
+      invalidJsonMessage: "tencent_docs userinfo returned invalid JSON",
+      maxBytes: 4 * 1024 * 1024,
+      signal,
+    })) as Record<string, unknown>;
     if (!response.ok || envelope.ret !== 0) {
+      const providerCode =
+        typeof envelope.ret === "number" && Number.isSafeInteger(envelope.ret) ? envelope.ret : undefined;
       throw new ProviderRequestError(
-        response.status || 502,
-        optionalString(envelope.msg) ?? "Tencent Docs userinfo failed.",
+        response.status === 401 || response.status === 403 ? response.status : response.status >= 500 ? 502 : 400,
+        response.status === 401 || response.status === 403
+          ? "Tencent Docs userinfo authorization failed."
+          : "Tencent Docs userinfo failed.",
+        providerCode === undefined ? undefined : { providerCode },
       );
     }
 
@@ -152,3 +170,132 @@ export const credentialValidators: CredentialValidators = {
     };
   },
 };
+
+export async function discoverResources(
+  context: ExecutionContext,
+  fetcher: typeof fetch,
+): Promise<
+  Array<{
+    sourceType: "tencent_docs";
+    resourceId: string;
+    title?: string;
+    mimeType?: string;
+    version?: string;
+    schema?: Record<string, unknown>;
+    owner?: { id: string; displayName?: string };
+    aclSummary?: { visibility: "private" | "shared" };
+    url?: string;
+  }>
+> {
+  const credential = await requireOAuthCredential(context, service);
+  const clientId =
+    optionalString(credential.metadata.clientId) ??
+    optionalString(credential.metadata.client_id) ??
+    optionalString(credential.metadata.oauthClientId);
+  const openID =
+    optionalString(credential.metadata.openID) ??
+    optionalString(credential.metadata.openId) ??
+    optionalString(credential.metadata.user_id);
+  if (!clientId || !openID) {
+    throw new ProviderRequestError(400, "tencent_docs discovery requires clientId and openID OAuth metadata.");
+  }
+  const output = (await tencentDocsActionHandlers.list_folder(
+    { start: 0, limit: 100 },
+    { accessToken: credential.accessToken, clientId, openID, fetcher, signal: context.signal },
+  )) as { items?: unknown[] };
+  return (output.items ?? []).slice(0, 100).flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const resourceId = optionalString(item.ID);
+    if (!resourceId) return [];
+    const type = optionalString(item.type) ?? "file";
+    const ownerId = optionalString(item.ownerID);
+    return [
+      {
+        sourceType: "tencent_docs" as const,
+        resourceId,
+        title: optionalString(item.title),
+        mimeType: tencentDocsMimeType(type),
+        version:
+          optionalString(item.lastModifyTime) ??
+          (typeof item.lastModifyTime === "number" ? String(item.lastModifyTime) : undefined),
+        schema: boundedProviderResourceSchema(item),
+        owner: ownerId ? { id: ownerId, displayName: optionalString(item.ownerName) } : undefined,
+        aclSummary: { visibility: item.isOwner === true ? ("private" as const) : ("shared" as const) },
+        url: safeTencentDocsTraceUrl(item.url),
+      },
+    ];
+  });
+}
+
+export function observeActionResources(actionId: string, output: unknown): ProviderResourceCandidate[] {
+  const record = optionalRecord(output);
+  if (!record) return [];
+  if (actionId === "tencent_docs.list_folder" || actionId === "tencent_docs.search_files") {
+    return normalizeTencentDocsCandidates(record.items);
+  }
+  if (actionId === "tencent_docs.list_smartsheet_sheets") {
+    return (Array.isArray(record.sheets) ? record.sheets : []).slice(0, 100).flatMap((value) => {
+      const sheet = optionalRecord(value);
+      const resourceId = optionalString(sheet?.sheetID);
+      if (!sheet || !resourceId) return [];
+      return [
+        {
+          sourceType: "tencent_docs",
+          resourceId,
+          title: optionalString(sheet.title),
+          mimeType: "application/vnd.tencent-docs.smartsheet.sheet",
+          schema: boundedProviderResourceSchema(sheet),
+        },
+      ];
+    });
+  }
+  return [];
+}
+
+function normalizeTencentDocsCandidates(value: unknown): ProviderResourceCandidate[] {
+  return (Array.isArray(value) ? value : []).slice(0, 100).flatMap((entry) => {
+    const item = optionalRecord(entry);
+    const resourceId = optionalString(item?.ID);
+    if (!item || !resourceId) return [];
+    const type = optionalString(item.type) ?? "file";
+    const ownerId = optionalString(item.ownerID);
+    return [
+      {
+        sourceType: "tencent_docs",
+        resourceId,
+        title: optionalString(item.title),
+        mimeType: tencentDocsMimeType(type),
+        version:
+          optionalString(item.lastModifyTime) ??
+          (typeof item.lastModifyTime === "number" ? String(item.lastModifyTime) : undefined),
+        schema: boundedProviderResourceSchema(item),
+        owner: ownerId ? { id: ownerId, displayName: optionalString(item.ownerName) } : undefined,
+        aclSummary: { visibility: item.isOwner === true ? "private" : "shared" },
+        url: safeTencentDocsTraceUrl(item.url),
+      },
+    ];
+  });
+}
+
+function tencentDocsMimeType(type: string): string {
+  if (type === "doc") return "application/vnd.tencent-docs.doc";
+  if (type === "sheet") return "application/vnd.tencent-docs.sheet";
+  if (type === "smartsheet") return "application/vnd.tencent-docs.smartsheet";
+  if (type === "folder") return "application/vnd.tencent-docs.folder";
+  return `application/vnd.tencent-docs.${type.replace(/[^a-z0-9-]/giu, "") || "file"}`;
+}
+
+function safeTencentDocsTraceUrl(value: unknown): string | undefined {
+  const raw = optionalString(value);
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:" || url.username || url.password || url.hostname !== "docs.qq.com") return undefined;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}

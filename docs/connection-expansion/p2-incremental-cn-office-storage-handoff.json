@@ -1,0 +1,283 @@
+{
+  "schemaVersion": 1,
+  "status": "CONNECTION_INCREMENTAL_P2_FROZEN_WITH_EXTERNAL_BLOCKERS",
+  "baseSha": "3bbd44624933300487a54ee3acba23190b66ee98",
+  "implementationSha": "c69c71ca09ba2c26cfe14f3b5282a27c0c2cf242",
+  "finalSha": "c69c71ca09ba2c26cfe14f3b5282a27c0c2cf242",
+  "finalShaMeaning": "Last verified implementation commit before this handoff-only freeze commit; the terminal freeze output records the pushed branch tip.",
+  "branch": "feat/connection-expansion-p2-cn-office-storage",
+  "remoteBranch": "fork/feat/connection-expansion-p2-cn-office-storage",
+  "pushed": true,
+  "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-p2-cn-office-storage",
+  "scope": ["tencent_docs", "wps_mcp", "baidu_netdisk", "tencent_cos", "huawei_obs", "minio", "qiniu_kodo"],
+  "sharedChanges": [
+    "src/connection-service.ts",
+    "src/control-plane/index.ts",
+    "src/control-plane/server.ts",
+    "src/control-plane/service.ts",
+    "src/control-plane/tenant-store.ts",
+    "src/control-plane/types.ts",
+    "src/oauth/oauth-client-config-service.ts",
+    "src/providers/provider-loader.ts",
+    "src/providers/provider-runtime.ts",
+    "src/providers/aws_s3/executors.ts",
+    "src/providers/s3-compatible-profile.ts",
+    "src/providers/p2-cn-office-storage.test.ts"
+  ],
+  "connections": [
+    {
+      "providerId": "tencent_docs",
+      "implementation": "Hardened the existing OAuth provider; no duplicate provider was created.",
+      "auth": "OAuth 2.0 with state stored by Connection Service; official Tencent Docs scopes remain provider-native.",
+      "scopes": {
+        "supported": [
+          "scope.user.info.base",
+          "scope.drive.creatable",
+          "scope.drive.editable",
+          "scope.drive.file.metadata",
+          "scope.drive.file.metadata.readonly",
+          "scope.drive.readonly",
+          "scope.drive.exportable",
+          "scope.doc",
+          "scope.doc.readonly",
+          "scope.sheet",
+          "scope.sheet.readonly",
+          "scope.sheet.editable",
+          "scope.smartsheet.readonly",
+          "scope.form"
+        ],
+        "requestedByDefault": [
+          "scope.user.info.base",
+          "scope.drive.readonly",
+          "scope.drive.file.metadata",
+          "scope.drive.file.metadata.readonly",
+          "scope.drive.exportable",
+          "scope.doc.readonly",
+          "scope.sheet.readonly",
+          "scope.smartsheet.readonly"
+        ],
+        "agentLeaseRead": [
+          "tencent_docs.user.read",
+          "tencent_docs.drive.read",
+          "tencent_docs.drive.export",
+          "tencent_docs.doc.read",
+          "tencent_docs.sheet.read",
+          "tencent_docs.smartsheet.read"
+        ]
+      },
+      "actions": {
+        "agentLeaseRead": [
+          "get_current_user",
+          "list_folder",
+          "search_files",
+          "get_file_metadata",
+          "get_doc_content",
+          "get_sheet_range",
+          "list_smartsheet_sheets",
+          "get_smartsheet_records",
+          "start_export",
+          "get_export_progress"
+        ],
+        "notDelegable": [
+          "create_file",
+          "rename_file",
+          "convert_file_id",
+          "batch_update_sheet",
+          "batch_update_doc",
+          "update_form_collection_deadline",
+          "generate_form_result"
+        ]
+      },
+      "tier": "beta",
+      "evidence": "Contract tests cover bounded/redacted discovery, ResourceRef identity, optional folder authorization binding, provider-observed nested file and Smart Sheet identities, bounded Smart Sheet record pages, temporary export URL removal, and request cancellation.",
+      "revocation": "Connection revision and lease checks fail closed after revoke/delete; upstream revoke requires a real account.",
+      "externalBlocker": "No Tencent Docs enterprise OAuth app and user account were available for a real authorize/read/revoke lifecycle."
+    },
+    {
+      "providerId": "wps_mcp",
+      "implementation": "Kept the canonical official MCP provider. No unsupported WPS enterprise OAuth/API adapter was added.",
+      "auth": "Official WPS MCP access token stored as an encrypted Connection Service credential.",
+      "scopes": {
+        "provider": ["Bearer token capability is determined by the live official MCP tool set."],
+        "agentLease": ["wps_mcp.files.read"],
+        "connectionOnly": ["wps_mcp.tools.inspect", "wps_mcp.tools.invoke", "wps_mcp.files.write"]
+      },
+      "actions": {
+        "agentLeaseRead": ["search_files", "list_my_files", "list_files", "get_file_info", "read_file"],
+        "notDelegable": ["list_tools", "call_tool", "create_file_with_content", "create_folder"]
+      },
+      "tier": "beta",
+      "evidence": "A mocked protocol-level test covers initialize, notifications/initialized, tools/call, and normalized file discovery.",
+      "limitations": [
+        "Protocol-level fixtures prove the adapter contract, not real-account content-read success.",
+        "Read/info actions accept discovered file_id only; arbitrary URLs and temporary media URLs are disabled.",
+        "Results are redacted and size bounded at the provider boundary."
+      ],
+      "revocation": "Connection deletion, ACL removal, revision changes, and lease revocation fail closed locally; upstream token revocation requires a real WPS account.",
+      "externalBlocker": "No real WPS account token was available for list/search/info/read and token-revocation evidence."
+    },
+    {
+      "providerId": "baidu_netdisk",
+      "implementation": "Hardened the existing OAuth and official MCP-backed runtime.",
+      "auth": "OAuth 2.0 basic/netdisk scopes with refresh handled by the shared OAuth runtime.",
+      "scopes": {
+        "provider": ["basic", "netdisk"],
+        "lease": ["baidu_netdisk.account.read", "baidu_netdisk.files.root.read"]
+      },
+      "actions": {
+        "agentLeaseRead": [
+          "get_current_account",
+          "get_quota",
+          "list_files",
+          "search_files",
+          "semantic_search_files",
+          "get_file_metadata",
+          "download_file"
+        ],
+        "notDelegable": [
+          "upload_file_from_url",
+          "create_text_file",
+          "create_folder",
+          "create_share_link",
+          "copy",
+          "move",
+          "rename"
+        ]
+      },
+      "tier": "beta",
+      "evidence": "Tests cover MCP cancellation, semantic-folder authorization binding, provider-observed discovery-to-read authorization, fsId-bound get_file_metadata, bounded download, unsafe MIME rejection, and ResourceRef normalization.",
+      "revocation": "Connection revision and lease checks fail closed after revoke/delete; refresh persists encrypted replacement tokens and invalidates leases from the prior revision.",
+      "externalBlocker": "No Baidu Netdisk application and user authorization were available for a real refresh/quota/download/revoke lifecycle."
+    },
+    {
+      "providerId": "tencent_cos",
+      "implementation": "New canonical provider using Tencent COS SHA-1 authorization semantics over the shared guarded, bounded transport; region, official endpoint, bucket, prefix, temporary token, ETag, and version remain explicit.",
+      "auth": "Provider-issued access key ID and secret key, with optional temporary security token, stored as an encrypted custom credential.",
+      "scopes": ["Configured bucket and optional object-key prefix allowlist; no write scope is exposed."],
+      "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
+      "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
+      "tier": "beta",
+      "evidence": "Contract tests cover an exact COS SDK q-sign vector including temporary-token signing, configured-bucket discovery, required bucket binding, prefix enforcement, official endpoint restriction, HEAD-before-download automatic version/ETag pinning and race rejection, bounded download, MIME checks, redacted provider error codes, timeouts, and generated registry reachability.",
+      "revocation": "Connection deletion and credential replacement advance the revision, invalidating existing leases and discovered resources on the next invocation; cloud credential revocation requires a real account.",
+      "externalBlocker": "No Tencent Cloud account/COS credential was available for real service, credential rotation, and revocation evidence."
+    },
+    {
+      "providerId": "huawei_obs",
+      "implementation": "New canonical provider using Huawei OBS authorization semantics over the shared guarded, bounded transport; Huawei region, official endpoint, bucket, prefix, temporary token, ETag, and version remain explicit.",
+      "auth": "Provider-issued access key ID and secret key, with optional security token, stored as an encrypted custom credential.",
+      "scopes": ["Configured bucket and optional object-key prefix allowlist; no write scope is exposed."],
+      "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
+      "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
+      "tier": "beta",
+      "evidence": "Contract tests cover a deterministic OBS canonical-signature vector including the temporary token, OBS endpoint and ResourceRef MIME, required bucket binding, allowlists, HEAD-before-download automatic version/ETag pinning and race rejection, bounded reads, safe vendor-code preservation, redacted error bodies, and request timeouts.",
+      "revocation": "Connection deletion and credential replacement advance the revision, invalidating existing leases and discovered resources on the next invocation; cloud credential revocation requires a real account.",
+      "externalBlocker": "No Huawei Cloud account/OBS credential was available for real service, credential rotation, and revocation evidence."
+    },
+    {
+      "providerId": "minio",
+      "implementation": "New self-hosted canonical profile reusing the AWS S3 security runtime with forced path-style addressing and a connection-scoped custom X.509 CA transport.",
+      "auth": "S3-compatible access key ID and secret key, with optional session token and custom CA, stored as an encrypted custom credential.",
+      "scopes": ["Configured endpoint, bucket, and optional object-key prefix allowlist; no write scope is exposed."],
+      "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
+      "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
+      "tier": "beta",
+      "evidence": "Contract tests prove path-style request construction, configured bucket/prefix discovery, required bucket binding, endpoint pinning, stat-before-download automatic version/ETag pinning and race rejection, invalid-CA rejection, bounded CA-agent caching, shared bounded-read controls, and a 30-second validation timeout across bucket fallback.",
+      "limitations": [
+        "Private endpoints require OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK and remain subject to metadata, loopback, link-local, redirect, and DNS guards.",
+        "A custom PEM CA is supported on Node deployments and validated before use; Cloudflare cannot reach private MinIO networks.",
+        "MinIO evidence does not promote AWS S3 or other vendors to verified."
+      ],
+      "revocation": "Connection deletion and credential replacement advance the revision, invalidating existing leases and discovered resources on the next invocation; server-side key rotation requires a controlled MinIO deployment.",
+      "externalBlocker": "No controlled TLS/private-CA MinIO deployment was available for a full credential rotation and revocation lifecycle."
+    },
+    {
+      "providerId": "qiniu_kodo",
+      "implementation": "New canonical provider using Qiniu V2 authorization against native RSF POST list and RS stat APIs; private object downloads use a five-minute token against the configured bucket domain and never return that token to callers.",
+      "auth": "Qiniu access key ID and secret key plus an HTTPS bucket download domain, stored as an encrypted custom credential.",
+      "scopes": ["Configured bucket and optional object-key prefix allowlist; no write scope is exposed."],
+      "actions": ["list_buckets", "list_objects", "head_object", "download_object"],
+      "disabledForAgentLease": ["put_object", "delete_object", "generate_presigned_url"],
+      "tier": "beta",
+      "evidence": "Contract tests cover an exact official-SDK V2 signature vector, RSF POST semantics, native endpoint construction, required bucket binding, configured-bucket discovery, prefix denial before egress, ETag race rejection, unsafe MIME and oversized-body rejection, redacted errors, and request timeouts.",
+      "revocation": "Connection deletion and credential replacement advance the revision, invalidating existing leases and discovered resources on the next invocation; cloud credential revocation requires a real account.",
+      "externalBlocker": "No Qiniu account/Kodo credential and bucket download domain were available for real service, credential rotation, and revocation evidence."
+    }
+  ],
+  "security": {
+    "credentialOwnership": "All credentials remain encrypted behind credential_ref and are resolved only inside the server runtime.",
+    "authorization": "Discovery is connection-scoped; resource-bound reads exact-match the latest revision's ResourceRef and upstream access is checked again on every invocation. Successful leased Tencent Docs, WPS MCP, and Baidu Netdisk list/search actions append only bounded provider-returned identities after an atomic tenant/service/revision recheck; failed actions, guessed IDs, stale revisions, and cross-tenant observations add nothing. Expired OAuth credentials refresh before validation, discovery, lease issuance, and action execution; the atomic credential update advances the connection revision so pre-refresh leases fail closed.",
+    "leasePolicy": "Office mutations, generic WPS tool calls, storage writes/deletes, and presigned URLs cannot enter Agent leases.",
+    "storage": "Bucket and prefix are allowlisted, endpoint overrides are pinned to the configured origin, reads are streamed/bounded, unsafe MIME is rejected, and version/ETag preconditions are preserved. COS and OBS perform native HEAD-before-download, while MinIO and Qiniu perform stat-before-download, pinning the observed version/ETag and rejecting object replacement races.",
+    "ssrf": "Public storage endpoints use public-only DNS validation. MinIO private networking requires the deployment-level opt-in and cannot reach cloud metadata or other always-blocked addresses."
+  },
+  "integrationNotes": [
+    "Do not merge P1 implicitly.",
+    "Regenerate catalog and both registries after conflict resolution.",
+    "Keep all seven providers beta until the external account lifecycle evidence is attached.",
+    "The existing Feishu, DingTalk, WeCom, AWS S3, Aliyun OSS, and Volcengine TOS implementations are regression baselines."
+  ],
+  "verification": {
+    "generateCatalog": "passed; 1457 providers and 15227 actions",
+    "generateRegistry": "passed; 1457 Node providers and 1449 Cloudflare providers",
+    "fixCheck": "passed; lint, format, registry generation, and src/scripts/examples typecheck",
+    "focusedTests": "passed; complete P2/control-plane run covered 12 files and 137 tests; metadata/version-race run covered 2 files and 41 tests",
+    "fullTests": "passed; 172 files passed, 1 skipped; 1593 tests passed, 4 skipped",
+    "build": "passed; generated catalog and registries, then typechecked src, scripts-all, and examples",
+    "npmAuditOmitDev": "passed; 0 vulnerabilities",
+    "npmAudit": "passed; 0 vulnerabilities",
+    "catalogVerifier": "passed; all seven canonical providers have actions, required bounded reads, storage bucket bindings, disabled writes, beta tiers, explicit external blockers, and generated lazy registry entries",
+    "credentialGatedLifecycle": "blocked as designed; scripts/verify-p2-real-lifecycle.ts reproducibly reports BLOCKED for all seven providers when real credentials and known bounded-read targets are absent; it performs encrypted configure, validate, leased discovery/read, audit, tenant isolation, delete, and post-revoke rejection when gates are supplied",
+    "gitDiffCheck": "passed",
+    "sbom": "passed; CycloneDX 1.5 regenerated with 627 components and undici 7.29.0 as a direct MIT-licensed production component; SHA-256 af562e6a75e544d0b423c37d7a47e37f84242cdb47c0c841519b2d207f3473dc."
+  },
+  "providerMatrix": [
+    {
+      "providerId": "tencent_docs",
+      "contractRuntimeSecurity": "PASS",
+      "realAccountLifecycle": "BLOCKED",
+      "blocker": "Tencent Docs enterprise OAuth app and user account unavailable."
+    },
+    {
+      "providerId": "wps_mcp",
+      "contractRuntimeSecurity": "PASS",
+      "realAccountLifecycle": "BLOCKED",
+      "blocker": "Real WPS account token unavailable."
+    },
+    {
+      "providerId": "baidu_netdisk",
+      "contractRuntimeSecurity": "PASS",
+      "realAccountLifecycle": "BLOCKED",
+      "blocker": "Baidu Netdisk application and user authorization unavailable."
+    },
+    {
+      "providerId": "tencent_cos",
+      "contractRuntimeSecurity": "PASS",
+      "realAccountLifecycle": "BLOCKED",
+      "blocker": "Tencent Cloud account and COS credential unavailable."
+    },
+    {
+      "providerId": "huawei_obs",
+      "contractRuntimeSecurity": "PASS",
+      "realAccountLifecycle": "BLOCKED",
+      "blocker": "Huawei Cloud account and OBS credential unavailable."
+    },
+    {
+      "providerId": "minio",
+      "contractRuntimeSecurity": "PASS",
+      "realAccountLifecycle": "BLOCKED",
+      "blocker": "Controlled TLS/private-CA MinIO deployment unavailable."
+    },
+    {
+      "providerId": "qiniu_kodo",
+      "contractRuntimeSecurity": "PASS",
+      "realAccountLifecycle": "BLOCKED",
+      "blocker": "Qiniu account, Kodo credential, and bucket download domain unavailable."
+    }
+  ],
+  "freezeEvidence": {
+    "smartSheetBoundedRead": "Tencent Docs get_smartsheet_records is bounded and provider-observed Smart Sheet identities are authorized for subsequent reads.",
+    "baiduMetadata": "Baidu get_file_metadata is bound to a provider-observed fsId.",
+    "observedResourceAuthorization": "Tencent Docs, WPS MCP, and Baidu Netdisk add only successful, bounded, provider-returned identities after atomic tenant/service/revision checks; guessed IDs, failures, stale revisions, and cross-tenant observations add nothing.",
+    "storageVersionRaceProtection": "COS/OBS native HEAD and MinIO/Qiniu stat pin version or ETag before download and reject replacement races."
+  }
+}

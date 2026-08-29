@@ -390,6 +390,7 @@ export function normalizeProviderProxyHeaders(headersInput: unknown): Headers {
 
 export interface ReadProviderProxyResponseOptions {
   maxBytes?: number;
+  signal?: AbortSignal;
 }
 
 export async function readProviderProxyResponse(
@@ -401,6 +402,7 @@ export async function readProviderProxyResponse(
     maxBytes: options.maxBytes ?? defaultProviderProxyMaxResponseBytes,
     fieldName: "proxy response",
     createError: (message) => new ProviderRequestError(413, message),
+    signal: options.signal,
   });
   const contentType = response.headers.get("content-type") ?? "";
   const normalizedContentType = contentType.toLowerCase();
@@ -433,11 +435,16 @@ export async function readProviderProxyResponse(
   };
 }
 
-export async function readProviderProxyErrorMessage(response: Response, fallbackMessage: string): Promise<string> {
+export async function readProviderProxyErrorMessage(
+  response: Response,
+  fallbackMessage: string,
+  signal?: AbortSignal,
+): Promise<string> {
   const bytes = await readBoundedResponseBytes(response, {
     maxBytes: defaultProviderProxyMaxResponseBytes,
     fieldName: "proxy error response",
     createError: (message) => new ProviderRequestError(413, message),
+    signal,
   });
   return bytes.byteLength === 0 ? fallbackMessage : new TextDecoder().decode(bytes) || fallbackMessage;
 }
@@ -704,6 +711,7 @@ export interface ReadProviderJsonBodyOptions {
   invalidJsonStatus?: number;
   invalidJsonFallback?: (text: string, error: unknown) => unknown;
   maxBytes?: number;
+  signal?: AbortSignal;
   trimEmptyBody?: boolean;
 }
 
@@ -714,11 +722,13 @@ export async function readProviderTextBody(
   response: Response,
   fieldName: string,
   maxBytes: number = defaultProviderJsonMaxResponseBytes,
+  signal?: AbortSignal,
 ): Promise<string> {
   const bytes = await readBoundedResponseBytes(response, {
     maxBytes,
     fieldName,
     createError: (message) => new ProviderRequestError(413, message),
+    signal,
   });
   return new TextDecoder().decode(bytes);
 }
@@ -727,7 +737,13 @@ export async function readProviderTextBody(
  * Read a bounded provider response body as JSON.
  */
 export async function readProviderJsonBody(response: Response, options: ReadProviderJsonBodyOptions): Promise<unknown> {
-  const text = await readProviderTextBody(response, "provider JSON response", options.maxBytes);
+  const bytes = await readBoundedResponseBytes(response, {
+    maxBytes: options.maxBytes ?? defaultProviderJsonMaxResponseBytes,
+    fieldName: "provider JSON response",
+    createError: (message) => new ProviderRequestError(413, message),
+    signal: options.signal,
+  });
+  const text = new TextDecoder().decode(bytes);
   return parseProviderJsonBodyText(text, options);
 }
 
@@ -773,7 +789,7 @@ function sanitizeResourceSchemaValue(value: unknown, depth: number): Record<stri
   for (const [key, child] of Object.entries(value).slice(0, 32)) {
     if (resourceSchemaSensitiveKey.test(key)) continue;
     if (typeof child === "string") {
-      output[key] = child.length > 1024 ? `${child.slice(0, 1024)}[truncated]` : child;
+      output[key] = sanitizeResourceSchemaString(key, child);
     } else if (typeof child === "number" || typeof child === "boolean" || child === null) {
       output[key] = child;
     } else if (Array.isArray(child)) {
@@ -783,6 +799,20 @@ function sanitizeResourceSchemaValue(value: unknown, depth: number): Record<stri
     }
   }
   return output;
+}
+
+function sanitizeResourceSchemaString(key: string, value: string): string {
+  const bounded = value.length > 1024 ? `${value.slice(0, 1024)}[truncated]` : value;
+  if (!/(?:url|uri|link)$/iu.test(key)) return bounded;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return bounded;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return bounded;
+  }
 }
 
 function sanitizeResourceSchemaChild(value: unknown, depth: number): unknown {

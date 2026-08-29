@@ -161,17 +161,20 @@ export class TenantConnectionStore implements IConnectionStore {
   async updateCredential(input: StoredConnection): Promise<boolean> {
     const result = this.database
       .prepare(
-        `update tenant_connections set credential_ciphertext=?, profile_json=?, revision=?, updated_at=?
-         where id=? and tenant_id=? and workspace_id=?`,
+        `update tenant_connections
+            set credential_ciphertext=?, profile_json=?, revision=revision+1, updated_at=?
+          where id=? and tenant_id=? and workspace_id=? and service=? and connection_name=? and revision=?`,
       )
       .run(
         await this.secretCodec.encode(JSON.stringify(input.credential)),
         JSON.stringify(safeConnectionProfile(input.credential.authType === "no_auth" ? {} : input.credential.profile)),
-        Number(input.revision),
         new Date().toISOString(),
         input.id,
         this.principal.tenantId,
         this.principal.workspaceId,
+        input.service,
+        input.connectionName,
+        Number(input.revision),
       );
     return Number(result.changes) === 1;
   }

@@ -259,7 +259,10 @@ export class ConnectionService {
     if (!stored) {
       throw new ConnectionError("connection_not_found", `${service} connection not found: ${name}.`);
     }
-    const credential = stored.credential;
+    const credential =
+      stored.credential.authType === "oauth2"
+        ? await this.resolveOAuthCredential(stored, stored.credential)
+        : stored.credential;
     if (credential.authType === "api_key") {
       await this.validateApiKeyCredential(service, { apiKey: credential.apiKey, values: credential.values }, signal);
     } else if (credential.authType === "custom_credential") {

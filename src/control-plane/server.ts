@@ -239,6 +239,20 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
           connection.service,
           connection.connectionName,
         );
+        const currentConnection = runtime.connections.visibleRecord(connectionId);
+        if (!currentConnection) {
+          throw new ConnectionError(
+            "connection_not_found",
+            `${connection.service} connection changed while resources were being discovered. Retry discovery.`,
+          );
+        }
+        runtime.leases.verify(leaseToken, principalOf(context), {
+          connectionId,
+          connectionRevision: currentConnection.revision,
+          actionId: `${connection.service}.discover_resources`,
+          invocationId,
+          audience,
+        });
         const candidates = options.providerLoader.discoverResources
           ? await options.providerLoader.discoverResources(
               connection.service,
@@ -246,14 +260,21 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
               context.req.raw.signal,
             )
           : [];
+        const discoveredConnection = runtime.connections.visibleRecord(connectionId);
+        if (!discoveredConnection || discoveredConnection.revision !== currentConnection.revision) {
+          throw new ConnectionError(
+            "connection_not_found",
+            `${connection.service} connection changed while resources were being discovered. Retry discovery.`,
+          );
+        }
         const resources = candidates.map((candidate) =>
           toResourceRef(candidate, {
-            tenantId: connection.tenantId,
-            workspaceId: connection.workspaceId,
+            tenantId: discoveredConnection.tenantId,
+            workspaceId: discoveredConnection.workspaceId,
             connectionId,
           }),
         );
-        runtime.resources.replace(connectionId, connection.revision, resources);
+        runtime.resources.replace(connectionId, discoveredConnection.revision, resources);
         jobs.succeed(job.id, {
           service: provider.service,
           definitionVersion: connection.connectorDefinitionVersion,
@@ -379,17 +400,53 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     const body = await readJsonBody(context);
     const connectionId = context.req.param("connectionId");
     const runtime = tenantRuntime(options, principalOf(context));
-    const connection = runtime.connections.visibleRecord(connectionId);
+    let connection = runtime.connections.visibleRecord(connectionId);
     if (!connection) {
       return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
     }
+    const connectionService = connection.service;
     const requestedActions = requiredStringArray(body.allowedActions);
+    const provider = options.catalog.providers.find((entry) => entry.service === connectionService);
+    const declaredActions = new Set([
+      ...(provider?.actions.map((action) => action.id) ?? []),
+      `${connectionService}.discover_resources`,
+    ]);
+    if (
+      requestedActions.some(
+        (actionId) => !actionId.startsWith(`${connectionService}.`) || !declaredActions.has(actionId),
+      )
+    ) {
+      return jsonError(
+        context,
+        403,
+        "lease_action_forbidden",
+        "A connection lease may include only actions owned by that connection.",
+      );
+    }
+    try {
+      await runtime.connectionService.resolveForExecution(connection.service, connection.connectionName);
+      connection = runtime.connections.visibleRecord(connectionId);
+      if (!connection) {
+        return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
+      }
+    } catch (error) {
+      return connectionError(context, error);
+    }
     if (requestedActions.some(isOwnerControlledStorageAction) && !runtime.connections.ownerRecord(connectionId)) {
       return jsonError(
         context,
         403,
         "connection_forbidden",
         "Storage write, delete, and presign actions require the connection owner.",
+      );
+    }
+    const prohibitedAgentActions = requestedActions.filter(isProhibitedAgentLeaseAction);
+    if (prohibitedAgentActions.length > 0) {
+      return jsonError(
+        context,
+        403,
+        "lease_action_forbidden",
+        `These capabilities cannot be delegated to an Agent lease: ${prohibitedAgentActions.join(", ")}.`,
       );
     }
     if (
@@ -472,6 +529,18 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         invocationId,
         audience,
       });
+      await runtime.connectionService.resolveForExecution(selected.service, selected.connectionName);
+      const current = runtime.connections.visibleRecord(selected.id);
+      if (!current) {
+        throw new LeaseError("lease_scope_denied", "Connection lease does not grant this invocation.");
+      }
+      runtime.leases.verify(leaseToken, principalOf(context), {
+        connectionId: current.id,
+        connectionRevision: current.revision,
+        actionId,
+        invocationId,
+        audience,
+      });
       const result = await runtime.actions.run({
         actionId,
         invocationId,
@@ -500,6 +569,32 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         } as never,
         signal: context.req.raw.signal,
       });
+      if (result?.result.ok && options.providerLoader.observeActionResources) {
+        try {
+          const candidates = await options.providerLoader.observeActionResources(
+            selected.service,
+            actionId,
+            result.result.output,
+          );
+          if (candidates.length > 0) {
+            runtime.resources.appendIfCurrent(
+              selected.id,
+              current.revision,
+              selected.service,
+              candidates.slice(0, 100).map((candidate) =>
+                toResourceRef(candidate, {
+                  tenantId: current.tenantId,
+                  workspaceId: current.workspaceId,
+                  connectionId: current.id,
+                }),
+              ),
+            );
+          }
+        } catch {
+          // Resource observation is authorization enrichment. A parser or
+          // persistence failure must not rewrite an already completed action.
+        }
+      }
       return context.json(
         {
           executionId: result?.executionId,
@@ -848,7 +943,15 @@ function optionalString(value: unknown): string | undefined {
 }
 
 function isOwnerControlledStorageAction(actionId: string): boolean {
-  return /^(?:aws_s3|aliyun_oss)\.(?:put_object|delete_object|generate_presigned_url)$/u.test(actionId);
+  return /^(?:aws_s3|aliyun_oss|volcengine_tos|tencent_cos|huawei_obs|minio|qiniu_kodo)\.(?:put_object|delete_object|generate_presigned_url)$/u.test(
+    actionId,
+  );
+}
+
+function isProhibitedAgentLeaseAction(actionId: string): boolean {
+  return /^(?:(?:tencent_docs)\.(?:create_file|rename_file|convert_file_id|batch_update_sheet|batch_update_doc|update_form_collection_deadline|generate_form_result)|(?:wps_mcp)\.(?:list_tools|call_tool|create_file_with_content|create_folder)|(?:baidu_netdisk)\.(?:upload_file_from_url|create_text_file|create_folder|create_share_link|copy|move|rename)|(?:aws_s3|aliyun_oss|volcengine_tos|tencent_cos|huawei_obs|minio|qiniu_kodo)\.(?:put_object|delete_object|generate_presigned_url))$/u.test(
+    actionId,
+  );
 }
 
 function optionalVisibility(value: unknown): "personal" | "team" | undefined {
