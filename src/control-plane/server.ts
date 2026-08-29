@@ -17,6 +17,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { Hono } from "hono";
 import { ConnectionError } from "../connection-service.ts";
+import { assertDatabaseResourceScope } from "../core/database/runtime.ts";
 import { readJsonBody, jsonError } from "../server/api/http-utils.ts";
 import { renderOAuthCompletionPage, renderOAuthErrorPage } from "../server/api/oauth-completion-page.ts";
 import { TenantAdapterResourceStore } from "./adapter-resource-store.ts";
@@ -27,7 +28,6 @@ import { TenantFileAdapter } from "./file-adapter.ts";
 import { ConnectionJobStore } from "./job-store.ts";
 import { ConnectionLeaseService, LeaseError } from "./lease.ts";
 import { ControlledMcpAdapter, TenantMcpDefinitionStore } from "./mcp-adapter.ts";
-import { OracleDatabaseAdapter } from "./oracle-adapter.ts";
 import { redactSecrets, safeConnectionProfile } from "./redaction.ts";
 import { RestIdempotencyStore, RestOpenApiAdapter } from "./rest-adapter.ts";
 import { RuntimeMcpSseSessions } from "./runtime-mcp-sse.ts";
@@ -685,6 +685,17 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     }
     const connectionService = connection.service;
     const requestedActions = requiredStringArray(body.allowedActions);
+    const allowedResources =
+      body.allowedResources && typeof body.allowedResources === "object" && !Array.isArray(body.allowedResources)
+        ? {
+            schemas: Array.isArray((body.allowedResources as Record<string, unknown>).schemas)
+              ? ((body.allowedResources as Record<string, unknown>).schemas as unknown[]).map(String)
+              : undefined,
+            tables: Array.isArray((body.allowedResources as Record<string, unknown>).tables)
+              ? ((body.allowedResources as Record<string, unknown>).tables as unknown[]).map(String)
+              : undefined,
+          }
+        : undefined;
     const provider = options.catalog.providers.find((entry) => entry.service === connectionService);
     const declaredActions = new Set([
       ...(provider?.actions.map((action) => action.id) ?? []),
@@ -778,6 +789,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         connectionIds: [connectionId],
         connectionRevisions: { [connectionId]: connection.revision },
         allowedActions: requestedActions,
+        allowedResources,
         invocationId: requiredString(body.invocationId),
         audience: requiredString(body.audience),
         ttlSeconds: body.ttlSeconds === undefined ? undefined : Number(body.ttlSeconds),
@@ -846,6 +858,13 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         invocationId,
         audience,
       });
+      if (selected.service === "postgresql" || isDataPlatformService(selected.service)) {
+        try {
+          assertDatabaseResourceScope(selected.service, actionId, body.input, claims.allowedResources);
+        } catch {
+          throw new LeaseError("lease_scope_denied", "Database resource is outside the connection lease scope.");
+        }
+      }
       const result = await runtime.actions.run({
         actionId,
         invocationId,
@@ -1153,50 +1172,33 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
   });
   app.post("/v1/adapters/oracle/query", async (context) => {
     const body = await readJsonBody(context);
-    try {
-      const adapter = oracleAdapter(options, body);
-      return context.json({ result: await adapter.query(requiredString(body.sql), recordOf(body.binds)) });
-    } catch (error) {
-      return jsonError(
-        context,
-        400,
-        "oracle_adapter_error",
-        error instanceof Error ? error.message : "Oracle query failed.",
-      );
-    }
+    const sql = requiredString(body.sql);
+    return invokeOracleCompatibilityAction(app, context, body, "execute_read_query", {
+      query: sql,
+      parameters: legacyOracleParameters(sql, body.binds),
+      maxRows: body.maxRows,
+      timeoutMs: body.timeoutMs,
+    });
   });
   app.post("/v1/adapters/oracle/validate", async (context) => {
     const body = await readJsonBody(context);
-    try {
-      const adapter = oracleAdapter(options, body);
-      return context.json({ result: await adapter.query("select 1 as ok from dual", {}) });
-    } catch (error) {
-      return jsonError(
-        context,
-        400,
-        "oracle_adapter_error",
-        error instanceof Error ? error.message : "Oracle validation failed.",
-      );
-    }
+    return invokeOracleCompatibilityAction(app, context, body, "validate_connection", {});
   });
   app.post("/v1/adapters/oracle/discover", async (context) => {
     const body = await readJsonBody(context);
-    try {
-      const adapter = oracleAdapter(options, body);
-      return context.json({
-        result: await adapter.discover({
-          schema: optionalString(body.schema),
-          table: optionalString(body.table),
-        }),
-      });
-    } catch (error) {
-      return jsonError(
-        context,
-        400,
-        "oracle_adapter_error",
-        error instanceof Error ? error.message : "Oracle discovery failed.",
-      );
-    }
+    const schema = optionalString(body.schema);
+    const table = optionalString(body.table);
+    return invokeOracleCompatibilityAction(
+      app,
+      context,
+      body,
+      table ? "describe_table" : schema ? "list_tables" : "list_schemas",
+      table
+        ? { schema, table }
+        : schema
+          ? { schema, pageSize: body.pageSize }
+          : { pageSize: body.pageSize },
+    );
   });
   return app;
 }
@@ -1213,6 +1215,56 @@ function tenantRuntime(options: ConnectionControlAppOptions, principal: TenantPr
     },
     principal,
   );
+}
+
+async function invokeOracleCompatibilityAction(
+  app: Hono,
+  context: Context,
+  body: Record<string, unknown>,
+  action: string,
+  input: Record<string, unknown>,
+): Promise<Response> {
+  const connectionId = optionalString(body.connectionId);
+  const invocationId = optionalString(body.invocationId);
+  const audience = optionalString(body.audience);
+  const lease = context.req.header("x-connection-lease");
+  if (!connectionId || !invocationId || !audience || !lease) {
+    return jsonError(
+      context,
+      401,
+      "lease_required",
+      "Oracle compatibility actions require connectionId, invocationId, audience, and X-Connection-Lease.",
+    );
+  }
+  const authorization = context.req.header("authorization");
+  const headers = new Headers({
+    "content-type": "application/json",
+    "x-connection-lease": lease,
+  });
+  if (authorization) headers.set("authorization", authorization);
+  const target = new URL(`/v1/runtime/actions/oracle_database.${action}`, context.req.url);
+  const response = await app.request(
+    new Request(target, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ connectionId, invocationId, audience, input }),
+    }),
+  );
+  return response;
+}
+
+function legacyOracleParameters(sql: string, binds: unknown): Array<string | number | boolean | null> {
+  if (Array.isArray(binds)) return binds as Array<string | number | boolean | null>;
+  const record = recordOf(binds);
+  if (Object.keys(record).length === 0) return [];
+  const names = [...sql.matchAll(/:([A-Za-z][A-Za-z0-9_]*)/g)].map((match) => match[1]!);
+  return names.map((name) => {
+    const value = record[name];
+    if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      return value;
+    }
+    throw new Error(`Oracle bind ${name} must be a scalar.`);
+  });
 }
 
 function tenantFileAdapter(options: ConnectionControlAppOptions, principal: TenantPrincipal) {
@@ -1393,37 +1445,6 @@ function parseMcpDefinition(value: unknown) {
     allowPrivateNetwork: definition.allowPrivateNetwork === true,
     timeoutMs: definition.timeoutMs === undefined ? undefined : Number(definition.timeoutMs),
   };
-}
-
-function parseOracleConfig(value: unknown) {
-  const config = recordOf(value);
-  return {
-    host: requiredString(config.host),
-    port: Number(config.port),
-    serviceName: optionalString(config.serviceName),
-    sid: optionalString(config.sid),
-  };
-}
-
-function oracleAdapter(options: ConnectionControlAppOptions, body: Record<string, unknown>) {
-  if (!options.oracleDriverFactory) {
-    throw new Error("Oracle driver is not configured.");
-  }
-  const config = parseOracleConfig(body.config);
-  const credentials = {
-    user: requiredString(body.user),
-    password: requiredString(body.password),
-  };
-  const allowedSchemas = Array.isArray(body.allowedSchemas)
-    ? body.allowedSchemas.map((schema) => requiredString(schema))
-    : undefined;
-  return new OracleDatabaseAdapter(config, options.oracleDriverFactory(config, credentials), {
-    maxRows: 1000,
-    maxBytes: 10 * 1024 * 1024,
-    timeoutMs: 30_000,
-    maxConcurrent: 2,
-    allowedSchemas,
-  });
 }
 
 function recordOf(value: unknown): Record<string, unknown> {

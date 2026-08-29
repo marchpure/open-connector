@@ -3,6 +3,22 @@ import type { CredentialProfile, ResolvedCredential } from "../core/types.ts";
 export type ConnectionVisibility = "personal" | "team";
 export type ConnectionStatus = "draft" | "validating" | "ready" | "degraded" | "error" | "revoked";
 export type CatalogTier = "catalog" | "beta" | "verified";
+export type StructuredDatabaseCapability =
+  | "validate_connection"
+  | "list_databases"
+  | "list_schemas"
+  | "list_tables"
+  | "describe_table"
+  | "preview_table"
+  | "execute_read_query";
+
+export interface ProviderCapability {
+  name: StructuredDatabaseCapability;
+  status: CatalogTier;
+  verified: boolean;
+  evidenceRef?: string;
+  reason?: string;
+}
 
 /**
  * Provider-neutral identity for a resource discovered through a managed
@@ -83,6 +99,7 @@ export interface ConnectionLeaseClaims {
   connectionIds: string[];
   connectionRevisions?: Record<string, number>;
   allowedActions: string[];
+  allowedResources?: { schemas?: string[]; tables?: string[] };
   issuedAt: string;
   expiresAt: string;
   jti: string;

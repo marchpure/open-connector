@@ -8,6 +8,7 @@ import type { CallToolResult } from "@modelcontextprotocol/server";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { summarizeForRunLog } from "../server/actions/run-log-summary.ts";
+import { assertDatabaseResourceScope } from "../core/database/runtime.ts";
 import { ConnectionLeaseService, LeaseError } from "./lease.ts";
 import { redactSecrets } from "./redaction.ts";
 import { createLeasePolicy, createTenantRuntime } from "./service.ts";
@@ -208,6 +209,9 @@ async function executeAction(
   let selected: ConnectionRecord;
   try {
     selected = verifyAction(catalog, runtime, request, actionId).connection;
+    if (selected.service === "postgresql" || isDatabaseService(selected.service)) {
+      assertDatabaseResourceScope(selected.service, actionId, input, request.claims.allowedResources);
+    }
     await runtime.connectionService.resolveForExecution(selected.service, selected.connectionName);
     selected = verifyAction(catalog, runtime, request, actionId).connection;
   } catch (error) {
@@ -259,6 +263,12 @@ async function executeAction(
         error: run.result.error ?? { code: "execution_failed", message: "Action execution failed." },
         ...executionMeta(run),
       };
+}
+
+function isDatabaseService(service: string): boolean {
+  return ["mysql", "oracle_database", "clickhouse", "doris", "starrocks", "oceanbase", "tidb_sql", "hologres", "hive", "trino"].includes(
+    service,
+  );
 }
 
 function verifyAction(

@@ -97,6 +97,15 @@ function readEnablement(value: string | undefined): EnablementEntry[] {
         evidenceRef: "docs/connection-expansion/evidence/mysql-real-engine.json",
       },
       {
+        service: "oracle_database",
+        tier: "beta",
+        connectorDefinitionVersion: "1.0.0",
+        owner: "connection-service",
+        evidenceRef: "docs/connection-expansion/evidence/oracle-database-real-engine.json",
+        verificationReason:
+          "Oracle canonical provider is executable, but the required full real-engine and AutoSkill MCP evidence is not recorded in this rerun.",
+      },
+      {
         service: "sql_server",
         tier: "beta",
         connectorDefinitionVersion: "1.0.0",

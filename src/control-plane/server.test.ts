@@ -1024,12 +1024,8 @@ describe("connection control API", () => {
     database.close();
   });
 
-  it("exposes authenticated Oracle catalog discovery with schema allowlists", async () => {
+  it("requires a lease for Oracle compatibility discovery", async () => {
     const database = new DatabaseSync(":memory:");
-    const query = vi.fn().mockResolvedValue({
-      rows: [{ TABLE_NAME: "ORDERS" }],
-      bytes: 25,
-    });
     const app = createConnectionControlApp({
       catalog: createCatalogStore([provider], { executableActionIds: ["fixture.read"] }),
       providerLoader: {
@@ -1042,7 +1038,6 @@ describe("connection control API", () => {
       authSecret: "auth-secret",
       publicOrigin: "http://localhost:3417",
       enablement: [],
-      oracleDriverFactory: () => ({ query }),
     });
     const auth = createPrincipalToken(principal, "auth-secret");
     const response = await app.request("/v1/adapters/oracle/discover", {
@@ -1057,13 +1052,8 @@ describe("connection control API", () => {
       }),
     });
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ result: { schema: "APP", tables: ["ORDERS"] } });
-    expect(query).toHaveBeenCalledWith(
-      expect.stringContaining("from all_tables where owner = :schema"),
-      { schema: "APP" },
-      { maxRows: 1000, timeoutMs: 30_000 },
-    );
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ error: { code: "lease_required" } });
     database.close();
   });
 
