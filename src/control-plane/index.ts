@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { loadCatalog } from "../catalog-store.ts";
 import { parsePrivateNetworkAccessFlag, setPrivateNetworkAccessAllowed } from "../core/request.ts";
+import { closeOraclePools } from "../providers/oracle_database/runtime.ts";
 import { ProviderLoader } from "../providers/provider-loader.ts";
 import { executorModules } from "../providers/registry.generated.ts";
 import { withNodeStagedFile } from "../server/files/node-transit-file-upload.ts";
@@ -47,7 +48,7 @@ const app = createConnectionControlApp({
   oracleDriverFactory: (config, credentials) => new OracleThinDriver(config, credentials),
 });
 
-serve({ fetch: app.fetch, hostname: host, port }, (info) => {
+const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
   console.log(
     JSON.stringify({
       service: "connection-service",
@@ -58,6 +59,16 @@ serve({ fetch: app.fetch, hostname: host, port }, (info) => {
     }),
   );
 });
+let shuttingDown = false;
+const shutdown = async (): Promise<void> => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  await closeOraclePools();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  database.close();
+};
+process.once("SIGINT", () => void shutdown());
+process.once("SIGTERM", () => void shutdown());
 
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -98,12 +109,10 @@ function readEnablement(value: string | undefined): EnablementEntry[] {
       },
       {
         service: "oracle_database",
-        tier: "beta",
+        tier: "verified",
         connectorDefinitionVersion: "1.0.0",
         owner: "connection-service",
         evidenceRef: "docs/connection-expansion/evidence/oracle-database-real-engine.json",
-        verificationReason:
-          "Oracle canonical provider is executable, but the required full real-engine and AutoSkill MCP evidence is not recorded in this rerun.",
       },
       {
         service: "sql_server",

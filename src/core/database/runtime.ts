@@ -459,9 +459,9 @@ export function assertDatabaseResourceScope(
   const schemas = new Set((scope.schemas ?? []).map(normalizeScopeIdentifier));
   const tables = new Set((scope.tables ?? []).map(normalizeScopeIdentifier));
   const schema = typeof value.schema === "string" ? normalizeScopeIdentifier(value.schema) : undefined;
-  const database =
-    typeof value.database === "string" ? normalizeScopeIdentifier(value.database) : undefined;
-  const selectedSchema = schema ?? (["mysql", "clickhouse", "doris", "starrocks"].includes(service) ? database : undefined);
+  const database = typeof value.database === "string" ? normalizeScopeIdentifier(value.database) : undefined;
+  const selectedSchema =
+    schema ?? (["mysql", "clickhouse", "doris", "starrocks"].includes(service) ? database : undefined);
   const table = typeof value.table === "string" ? normalizeScopeIdentifier(value.table) : undefined;
 
   if (selectedSchema && schemas.size > 0 && !schemas.has(selectedSchema)) {
@@ -506,7 +506,10 @@ export function assertDatabaseResourceScope(
 }
 
 function normalizeScopeIdentifier(value: string): string {
-  return value.trim().replace(/^["`[]|["`]]$/g, "").toLowerCase();
+  return value
+    .trim()
+    .replace(/^["`[]|["`]]$/g, "")
+    .toLowerCase();
 }
 
 function scopeTableMatches(tables: Set<string>, schema: string | undefined, table: string): boolean {

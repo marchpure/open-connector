@@ -47,12 +47,20 @@ describe("database provider contracts", () => {
     if (caCertificate) expect(caCertificate.secret).toBe(true);
   });
 
-  it("declares Oracle service name and SID as mutually exclusive connection fields", () => {
+  it("declares Oracle service name without duplicate database or unsupported SID fields", () => {
     const auth = oracle.auth.find((entry) => entry.type === "custom_credential");
     if (auth?.type !== "custom_credential") throw new Error("Missing Oracle custom credential definition.");
-    expect(auth.fields.map((field) => field.key)).toEqual(
-      expect.arrayContaining(["serviceName", "sid", "allowedSchemas"]),
-    );
+    const fields = auth.fields.map((field) => field.key);
+    expect(fields).toEqual(expect.arrayContaining(["serviceName", "allowedSchemas"]));
+    expect(fields).not.toContain("database");
+    expect(fields).not.toContain("sid");
+    expect(auth.fields.find((field) => field.key === "serviceName")?.required).toBe(true);
+  });
+
+  it("keeps the existing MySQL database field", () => {
+    const auth = mysql.auth.find((entry) => entry.type === "custom_credential");
+    if (auth?.type !== "custom_credential") throw new Error("Missing MySQL custom credential definition.");
+    expect(auth.fields.map((field) => field.key)).toContain("database");
   });
 
   it("keeps SQL Server instance and certificate semantics explicit", () => {

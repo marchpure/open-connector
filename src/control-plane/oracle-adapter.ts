@@ -4,7 +4,6 @@ export interface OracleConnectionConfig {
   host: string;
   port: number;
   serviceName?: string;
-  sid?: string;
   tls?: { walletPath?: string; rejectUnauthorized: boolean };
   ssh?: { host: string; port: number; user: string };
 }
@@ -74,11 +73,8 @@ export class OracleDatabaseAdapter {
     this.config = config;
     this.driver = driver;
     this.limits = limits;
-    if (!config.serviceName && !config.sid) {
-      throw new OracleAdapterError("invalid_config", "Oracle requires service_name or SID.");
-    }
-    if (config.serviceName && config.sid) {
-      throw new OracleAdapterError("invalid_config", "Oracle service_name and SID are mutually exclusive.");
+    if (!config.serviceName) {
+      throw new OracleAdapterError("invalid_config", "Oracle requires a service name.");
     }
   }
 

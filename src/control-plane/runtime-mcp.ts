@@ -7,8 +7,8 @@ import type { CallToolResult } from "@modelcontextprotocol/server";
 
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
-import { summarizeForRunLog } from "../server/actions/run-log-summary.ts";
 import { assertDatabaseResourceScope } from "../core/database/runtime.ts";
+import { summarizeForRunLog } from "../server/actions/run-log-summary.ts";
 import { ConnectionLeaseService, LeaseError } from "./lease.ts";
 import { redactSecrets } from "./redaction.ts";
 import { createLeasePolicy, createTenantRuntime } from "./service.ts";
@@ -266,9 +266,18 @@ async function executeAction(
 }
 
 function isDatabaseService(service: string): boolean {
-  return ["mysql", "oracle_database", "clickhouse", "doris", "starrocks", "oceanbase", "tidb_sql", "hologres", "hive", "trino"].includes(
-    service,
-  );
+  return [
+    "mysql",
+    "oracle_database",
+    "clickhouse",
+    "doris",
+    "starrocks",
+    "oceanbase",
+    "tidb_sql",
+    "hologres",
+    "hive",
+    "trino",
+  ].includes(service);
 }
 
 function verifyAction(

@@ -77,7 +77,6 @@ export class OracleThinDriver implements OracleQueryDriver {
 }
 
 function buildConnectString(config: OracleConnectionConfig): string {
-  const service = config.serviceName ?? config.sid;
-  if (!service) throw new Error("Oracle service_name or SID is required.");
-  return `${config.tls ? "tcps" : "tcp"}://${config.host}:${config.port}/${service}`;
+  if (!config.serviceName) throw new Error("Oracle service name is required.");
+  return `${config.tls ? "tcps" : "tcp"}://${config.host}:${config.port}/${config.serviceName}`;
 }

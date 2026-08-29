@@ -3,7 +3,11 @@
   "service": "oracle_database",
   "engineImage": "gvenzl/oracle-free:23-slim",
   "fixture": "step3b-oracle-integration",
-  "capturedAt": "2026-08-29",
+  "capturedAt": "2026-08-29T12:12:34.438Z",
+  "environment": {
+    "architecture": "arm64",
+    "platform": "darwin"
+  },
   "checks": {
     "wrongPasswordRejected": true,
     "tlsFailureRejected": true,
@@ -26,6 +30,7 @@
     "updateRejected": true,
     "deleteRejected": true,
     "ddlRejected": true,
+    "permissionDenied": true,
     "emptyDiscovery": true,
     "timeoutClassified": true,
     "networkFailureRejected": true,
@@ -41,8 +46,9 @@
     "deleted": true,
     "deletedNotVisible": true
   },
+  "passed": true,
   "notes": [
-    "Credentials, connection addresses, lease tokens, and result values are intentionally omitted.",
-    "The full lifecycle was executed through the canonical Connection Service provider/action path."
+    "Credentials, host connection strings, lease tokens, and result values are intentionally omitted.",
+    "The canonical catalog exposes Oracle serviceName only; SID was not claimed because a real SID descriptor was not verified."
   ]
 }

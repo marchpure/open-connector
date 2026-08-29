@@ -7,6 +7,7 @@ import { OracleThinDriver } from "../../control-plane/oracle-driver.ts";
 import {
   assertDatabaseEgress,
   boundedQueryResult,
+  credentialPoolKey,
   DatabaseRuntimeError,
   normalizeDatabaseError,
   pageResult,
@@ -15,45 +16,56 @@ import {
 } from "../../core/database/runtime.ts";
 
 const defaults = { port: 1521, database: "FREEPDB1" };
+const pools = new Map<string, { credentialKey: string; driver: OracleThinDriver }>();
+let shutdownRegistered = false;
 
 export async function createOracleBackend(values: Record<string, string>): Promise<DatabaseBackend> {
-  const generic = readDatabaseConfig(values, defaults);
   const serviceName = optional(values.serviceName);
-  const sid = optional(values.sid);
-  if ((serviceName && sid) || (!serviceName && !sid)) {
-    throw new DatabaseRuntimeError("database_query_rejected", "Oracle requires exactly one of serviceName or sid.");
+  if (!serviceName) {
+    throw new DatabaseRuntimeError("database_query_rejected", "Oracle requires a serviceName.");
   }
-
+  const generic = readDatabaseConfig({ ...values, database: serviceName }, defaults);
   const config: DatabaseConnectionConfig = {
     ...generic,
-    database: serviceName ?? sid ?? generic.database,
+    database: serviceName,
   };
   await assertDatabaseEgress(config);
-
-  const driver = new OracleThinDriver(
-    {
-      host: config.host,
-      port: config.port,
-      ...(serviceName ? { serviceName } : { sid }),
-      ...(config.tls === "disable" ? {} : { tls: { rejectUnauthorized: config.tls === "verify-full" } }),
-    },
-    { user: config.username, password: config.password },
-  );
+  registerShutdown();
+  const endpointKey = ["oracle_database", config.host, config.port, config.database, config.username].join("\0");
+  const credentialKey = credentialPoolKey("oracle_database", config, serviceName);
+  let entry = pools.get(endpointKey);
+  if (entry?.credentialKey !== credentialKey) {
+    await entry?.driver.close();
+    pools.delete(endpointKey);
+    entry = undefined;
+  }
+  if (!entry) {
+    entry = {
+      credentialKey,
+      driver: new OracleThinDriver(
+        {
+          host: config.host,
+          port: config.port,
+          serviceName,
+          ...(config.tls === "disable" ? {} : { tls: { rejectUnauthorized: config.tls === "verify-full" } }),
+        },
+        { user: config.username, password: config.password },
+      ),
+    };
+    pools.set(endpointKey, entry);
+  }
+  const driver = entry.driver;
   const allowedSchemas = optional(values.allowedSchemas)
     ?.split(",")
     .map((schema) => schema.trim())
     .filter(Boolean);
-  const adapter = new OracleDatabaseAdapter(
-    { host: config.host, port: config.port, ...(serviceName ? { serviceName } : { sid }) },
-    driver,
-    {
-      maxRows: 1001,
-      maxBytes: 10 * 1024 * 1024,
-      timeoutMs: 30_000,
-      maxConcurrent: 4,
-      allowedSchemas,
-    },
-  );
+  const adapter = new OracleDatabaseAdapter({ host: config.host, port: config.port, serviceName }, driver, {
+    maxRows: 1001,
+    maxBytes: 10 * 1024 * 1024,
+    timeoutMs: 30_000,
+    maxConcurrent: 4,
+    allowedSchemas,
+  });
 
   return {
     config,
@@ -72,7 +84,8 @@ export async function createOracleBackend(values: Record<string, string>): Promi
     async listSchemas(database: string | undefined, page: Page) {
       assertCurrentDatabase(config, database);
       const result = await adapter.discover();
-      if (!("schemas" in result)) throw new DatabaseRuntimeError("database_query_failed", "Oracle schema discovery failed.");
+      if (!("schemas" in result))
+        throw new DatabaseRuntimeError("database_query_failed", "Oracle schema discovery failed.");
       return pageResult(
         result.schemas.map((name) => ({ database: config.database, name })),
         page,
@@ -83,7 +96,8 @@ export async function createOracleBackend(values: Record<string, string>): Promi
       const selectedSchema = schema ?? (allowedSchemas?.length === 1 ? allowedSchemas[0] : undefined);
       if (!selectedSchema) throw new DatabaseRuntimeError("database_query_rejected", "Oracle schema is required.");
       const result = await adapter.discover({ schema: selectedSchema });
-      if (!("tables" in result)) throw new DatabaseRuntimeError("database_query_failed", "Oracle table discovery failed.");
+      if (!("tables" in result))
+        throw new DatabaseRuntimeError("database_query_failed", "Oracle table discovery failed.");
       return pageResult(
         result.tables.map((name) => ({
           database: config.database,
@@ -117,7 +131,12 @@ export async function createOracleBackend(values: Record<string, string>): Promi
         { offset: page.offset, limit: page.pageSize + 1 },
         { maxRows: page.pageSize + 1 },
       );
-      return boundedQueryResult(result.rows as Record<string, unknown>[], result.columns ?? [], page.pageSize, 10 * 1024 * 1024);
+      return boundedQueryResult(
+        result.rows as Record<string, unknown>[],
+        result.columns ?? [],
+        page.pageSize,
+        10 * 1024 * 1024,
+      );
     },
     async executeReadQuery(query: string, parameters: DatabaseScalar[], limits) {
       const result = await adapter.query(
@@ -125,7 +144,12 @@ export async function createOracleBackend(values: Record<string, string>): Promi
         Object.fromEntries(parameters.map((value, index) => [`p${index + 1}`, value])),
         { maxRows: limits.maxRows + 1, maxBytes: limits.maxBytes, timeoutMs: limits.timeoutMs },
       );
-      return boundedQueryResult(result.rows as Record<string, unknown>[], result.columns ?? [], limits.maxRows, limits.maxBytes);
+      return boundedQueryResult(
+        result.rows as Record<string, unknown>[],
+        result.columns ?? [],
+        limits.maxRows,
+        limits.maxBytes,
+      );
     },
   };
 }
@@ -156,16 +180,44 @@ export function mapOracleDatabaseError(error: unknown): ExecutionResult {
       },
     };
   }
+  const oracleCode = String((error as { code?: unknown })?.code ?? "");
+  const oracleMessage = String((error as { message?: unknown })?.message ?? "");
+  if (
+    /ORA-00942/i.test(`${oracleCode} ${oracleMessage}`) &&
+    /"SYS"\."(?:DBA_USERS|USER\$|OBJ\$|V_\$SESSION|V_\$PARAMETER)"/i.test(oracleMessage)
+  ) {
+    return {
+      ok: false,
+      error: { code: "database_permission_denied", message: "Database permission denied." },
+    };
+  }
   const mapped = normalizeDatabaseError(error);
   return { ok: false, error: { code: mapped.code, message: mapped.message } };
 }
 
+export async function closeOraclePools(): Promise<void> {
+  const entries = [...pools.values()];
+  pools.clear();
+  await Promise.all(entries.map((entry) => entry.driver.close()));
+}
+
 function assertCurrentDatabase(config: DatabaseConnectionConfig, database: string | undefined): void {
   if (database && database.trim().toLowerCase() !== config.database.toLowerCase()) {
-    throw new DatabaseRuntimeError("database_query_rejected", "Cross-database access requires a separate Oracle connection.");
+    throw new DatabaseRuntimeError(
+      "database_query_rejected",
+      "Cross-database access requires a separate Oracle connection.",
+    );
   }
 }
 
 function optional(value: string | undefined): string | undefined {
   return value?.trim() || undefined;
+}
+
+function registerShutdown(): void {
+  if (shutdownRegistered) return;
+  shutdownRegistered = true;
+  process.once("beforeExit", () => {
+    void closeOraclePools();
+  });
 }

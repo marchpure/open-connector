@@ -199,12 +199,11 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
           endpoints: ["/v1/adapters/oracle/validate", "/v1/adapters/oracle/discover"],
           configSchema: {
             type: "object",
-            required: ["host", "port"],
+            required: ["host", "port", "serviceName"],
             properties: {
               host: { type: "string", title: "Host" },
               port: { type: "integer", title: "Port", default: 1521 },
               serviceName: { type: "string", title: "Service name" },
-              sid: { type: "string", title: "SID" },
               allowedSchemas: { type: "array", items: { type: "string" }, title: "Allowed schemas" },
             },
           },
@@ -1193,11 +1192,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       context,
       body,
       table ? "describe_table" : schema ? "list_tables" : "list_schemas",
-      table
-        ? { schema, table }
-        : schema
-          ? { schema, pageSize: body.pageSize }
-          : { pageSize: body.pageSize },
+      table ? { schema, table } : schema ? { schema, pageSize: body.pageSize } : { pageSize: body.pageSize },
     );
   });
   return app;

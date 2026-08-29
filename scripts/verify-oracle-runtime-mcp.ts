@@ -1,15 +1,16 @@
 import type { ProviderDefinition } from "../src/core/types.ts";
 
+import { serve } from "@hono/node-server";
 import { Client } from "@modelcontextprotocol/client";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { serve } from "@hono/node-server";
 import { spawn } from "node:child_process";
-import { DatabaseSync } from "node:sqlite";
 import { resolve, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { createCatalogStore } from "../src/catalog-store.ts";
-import { createConnectionControlApp } from "../src/control-plane/server.ts";
 import { createPrincipalToken } from "../src/control-plane/auth.ts";
+import { createConnectionControlApp } from "../src/control-plane/server.ts";
 import { setPrivateNetworkAccessAllowed } from "../src/core/request.ts";
+import { closeOraclePools } from "../src/providers/oracle_database/runtime.ts";
 import { ProviderLoader } from "../src/providers/provider-loader.ts";
 import { AesGcmSecretCodec } from "../src/server/secrets/secret-codec.ts";
 
@@ -33,6 +34,7 @@ setPrivateNetworkAccessAllowed(true);
 process.env.CONNECTION_DATABASE_EGRESS_ALLOWLIST = host;
 
 const provider = (await import(`../src/providers/${service}/definition.ts`)) as { provider: ProviderDefinition };
+const controlDatabase = new DatabaseSync(":memory:");
 const catalog = createCatalogStore([provider.provider], {
   executableActionIds: provider.provider.actions.map((action) => action.id),
 });
@@ -41,11 +43,11 @@ const app = createConnectionControlApp({
   providerLoader: new ProviderLoader({
     [service]: () => import(`../src/providers/${service}/executors.ts`),
   }),
-  controlDatabase: new DatabaseSync(":memory:"),
+  controlDatabase,
   secretCodec: new AesGcmSecretCodec("oracle-mcp-e2e-encryption"),
   authSecret,
   publicOrigin: "http://oracle-mcp.test",
-  enablement: [{ service, tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "w2" }],
+  enablement: [{ service, tier: "verified", connectorDefinitionVersion: "1.0.0", owner: "w2" }],
 });
 const auth = `Bearer ${createPrincipalToken(principal, authSecret)}`;
 const runtimeServer = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: runtimePort });
@@ -60,7 +62,6 @@ const connectionResponse = await app.request("/v1/connections", {
     values: {
       host,
       port: String(port),
-      database: "FREEPDB1",
       username: "step3b",
       password,
       tls: "disable",
@@ -109,7 +110,11 @@ try {
       },
     },
   });
-  const structured = result.structuredContent as { ok?: boolean; data?: { rows?: unknown[] }; auditPersisted?: boolean };
+  const structured = result.structuredContent as {
+    ok?: boolean;
+    data?: { rows?: unknown[] };
+    auditPersisted?: boolean;
+  };
   const audit = await app.request(`/v1/audit?invocationId=${invocationId}`, { headers: { authorization: auth } });
   const auditBody = (await audit.json()) as { items?: Array<{ actionId?: string; ok?: boolean; caller?: string }> };
   const autoskillRoot = process.env.AUTOSKILL_ROOT ?? resolve(process.cwd(), "..", "autoskill-creator-baseline");
@@ -139,7 +144,9 @@ try {
     tools: tools.tools.map((tool) => tool.name),
     queryResultRowCount: structured.data?.rows?.length ?? 0,
     auditPersisted: structured.auditPersisted === true,
-    auditLineage: auditBody.items?.some((item) => item.actionId === `${service}.execute_read_query` && item.caller === "mcp") === true,
+    auditLineage:
+      auditBody.items?.some((item) => item.actionId === `${service}.execute_read_query` && item.caller === "mcp") ===
+      true,
     autoskill: autoskillPassed,
     passed,
   };
@@ -147,7 +154,9 @@ try {
   if (!passed) process.exitCode = 1;
 } finally {
   await client.close();
-  runtimeServer.close();
+  await closeRuntimeServer(runtimeServer);
+  await closeOraclePools();
+  controlDatabase.close();
 }
 
 function requiredEnv(name: string): string {
@@ -187,4 +196,16 @@ async function runAutoskill(
 
 function resolvePath(path: string): string {
   return resolve(process.cwd(), path);
+}
+
+async function closeRuntimeServer(server: typeof runtimeServer): Promise<void> {
+  const closable = server as typeof server & {
+    closeAllConnections?: () => void;
+    closeIdleConnections?: () => void;
+  };
+  closable.closeAllConnections?.();
+  closable.closeIdleConnections?.();
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
 }

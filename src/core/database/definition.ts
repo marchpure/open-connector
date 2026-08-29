@@ -8,6 +8,7 @@ export interface DatabaseProviderDefinitionOptions {
   homepageUrl: string;
   defaultPort: number;
   defaultDatabase: string;
+  includeDatabaseField?: boolean;
   extraFields?: CredentialDefinition[];
 }
 
@@ -37,14 +38,18 @@ export function createDatabaseProviderDefinition(options: DatabaseProviderDefini
             secret: false,
             placeholder: String(options.defaultPort),
           },
-          {
-            key: "database",
-            label: "Database",
-            inputType: "text",
-            required: false,
-            secret: false,
-            placeholder: options.defaultDatabase,
-          },
+          ...(options.includeDatabaseField === false
+            ? []
+            : [
+                {
+                  key: "database",
+                  label: "Database",
+                  inputType: "text" as const,
+                  required: false,
+                  secret: false,
+                  placeholder: options.defaultDatabase,
+                },
+              ]),
           {
             key: "username",
             label: "Username",

@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { mapOracleDatabaseError } from "../providers/oracle_database/runtime.ts";
 import { OracleDatabaseAdapter } from "./oracle-adapter.ts";
 
 describe("OracleDatabaseAdapter", () => {
-  it("requires service_name or SID and rejects non-read-only Oracle ASTs", async () => {
+  it("requires a service name and rejects non-read-only Oracle ASTs", async () => {
     expect(
       () =>
         new OracleDatabaseAdapter(
@@ -15,7 +16,7 @@ describe("OracleDatabaseAdapter", () => {
             maxConcurrent: 1,
           },
         ),
-    ).toThrowError(/service_name or SID/);
+    ).toThrowError(/service name/);
     const adapter = new OracleDatabaseAdapter(
       { host: "db", port: 1521, serviceName: "FREEPDB1" },
       {
@@ -41,7 +42,7 @@ describe("OracleDatabaseAdapter", () => {
       },
     );
     const adapter = new OracleDatabaseAdapter(
-      { host: "db", port: 1521, sid: "ORCL" },
+      { host: "db", port: 1521, serviceName: "FREEPDB1" },
       { query },
       {
         maxRows: 10,
@@ -108,5 +109,26 @@ describe("OracleDatabaseAdapter", () => {
 
     expect(query.mock.calls[1]?.[1]).toEqual({ schema: "APP" });
     expect(query.mock.calls[2]?.[1]).toEqual({ schema: "APP", tableName: "ORDERS" });
+  });
+
+  it("redacts protected dictionary access failures as permission denials", () => {
+    expect(
+      mapOracleDatabaseError({
+        code: "ORA-00942",
+        message: 'ORA-00942: table or view "SYS"."DBA_USERS" does not exist',
+      }),
+    ).toEqual({
+      ok: false,
+      error: { code: "database_permission_denied", message: "Database permission denied." },
+    });
+    expect(
+      mapOracleDatabaseError({
+        code: "ORA-00942",
+        message: 'ORA-00942: table or view "APP"."DBA_USERS" does not exist',
+      }),
+    ).toEqual({
+      ok: false,
+      error: { code: "database_query_failed", message: "Database query failed." },
+    });
   });
 });

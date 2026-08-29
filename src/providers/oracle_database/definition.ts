@@ -10,24 +10,16 @@ export const provider: ProviderDefinition = createDatabaseProviderDefinition({
   homepageUrl: "https://www.oracle.com/database/",
   defaultPort: 1521,
   defaultDatabase: "FREEPDB1",
+  includeDatabaseField: false,
   extraFields: [
     {
       key: "serviceName",
       label: "Service name",
       inputType: "text",
-      required: false,
+      required: true,
       secret: false,
       placeholder: "FREEPDB1",
-      description: "Set either service name or SID, but not both.",
-    },
-    {
-      key: "sid",
-      label: "SID",
-      inputType: "text",
-      required: false,
-      secret: false,
-      placeholder: "ORCLCDB",
-      description: "Set either SID or service name, but not both.",
+      description: "Oracle service name used by the listener, for example FREEPDB1.",
     },
     {
       key: "allowedSchemas",

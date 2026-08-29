@@ -74,20 +74,35 @@ describe("database query safety", () => {
 
   it("enforces schema and table scopes from parsed query lineage", () => {
     expect(() =>
-      assertDatabaseResourceScope("oracle_database", "oracle_database.execute_read_query", {
-        query: "select * from app.orders where id = :p1",
-      }, { schemas: ["app"], tables: ["app.orders"] }),
+      assertDatabaseResourceScope(
+        "oracle_database",
+        "oracle_database.execute_read_query",
+        {
+          query: "select * from app.orders where id = :p1",
+        },
+        { schemas: ["app"], tables: ["app.orders"] },
+      ),
     ).not.toThrow();
     expect(() =>
-      assertDatabaseResourceScope("oracle_database", "oracle_database.execute_read_query", {
-        query: "select * from other.orders",
-      }, { schemas: ["app"], tables: ["app.orders"] }),
+      assertDatabaseResourceScope(
+        "oracle_database",
+        "oracle_database.execute_read_query",
+        {
+          query: "select * from other.orders",
+        },
+        { schemas: ["app"], tables: ["app.orders"] },
+      ),
     ).toThrowError(/outside the lease scope/i);
     expect(() =>
-      assertDatabaseResourceScope("mysql", "mysql.preview_table", { database: "app", table: "orders" }, {
-        schemas: ["app"],
-        tables: ["app.orders"],
-      }),
+      assertDatabaseResourceScope(
+        "mysql",
+        "mysql.preview_table",
+        { database: "app", table: "orders" },
+        {
+          schemas: ["app"],
+          tables: ["app.orders"],
+        },
+      ),
     ).not.toThrow();
   });
 });
