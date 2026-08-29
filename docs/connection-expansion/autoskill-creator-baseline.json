@@ -1,0 +1,118 @@
+{
+  "baseline": "AutoSkill Creator V1",
+  "contractVersion": "autoskill-creator-v1",
+  "workspaceSha": "232eabbf949235c645ac00988d2a2413b7d7d58b",
+  "connectionExpansionSha": "2bb18cd6c2851216f70b663645b134fd04d63c24",
+  "oauthSha": "c12d956ce4302c09784294d815c1ac26b9646aeb",
+  "unifiedConnectionSha": "b328912f2c71f3d87b658a9043d81ed9447571bf",
+  "autoskillSha": "8dc9f14c1a0b0169ef865f3d87d4a6ea3e623533",
+  "autoskillBaselineSha": "c53d5d54f68e9c36ea8a43270ecf2a3fe0e90f87",
+  "branches": {
+    "connection": "integration/connection-autoskill-creator-baseline",
+    "autoskill": "integration/autoskill-creator-v1-baseline",
+    "workspaceInput": "integration/knowledge-final-e2e-integration",
+    "connectionExpansionInput": "feat/connection-expansion-incremental-integration",
+    "oauthInput": "integration/knowledge-final-connection-service"
+  },
+  "remotes": {
+    "workspace": {
+      "remote": "marchpure",
+      "url": "https://github.com/marchpure/veadk-python.git",
+      "ref": "refs/heads/integration/knowledge-final-e2e-integration",
+      "sha": "232eabbf949235c645ac00988d2a2413b7d7d58b"
+    },
+    "connectionExpansion": {
+      "remote": "fork",
+      "url": "git@github.com:marchpure/open-connector.git",
+      "ref": "refs/heads/feat/connection-expansion-incremental-integration",
+      "sha": "2bb18cd6c2851216f70b663645b134fd04d63c24"
+    },
+    "oauth": {
+      "remote": "fork",
+      "url": "git@github.com:marchpure/open-connector.git",
+      "ref": "refs/heads/integration/knowledge-final-connection-service",
+      "sha": "c12d956ce4302c09784294d815c1ac26b9646aeb"
+    },
+    "autoskill": {
+      "remote": "origin",
+      "url": "git@code.byted.org:hydra-agent/autoskill.git",
+      "ref": "refs/heads/master",
+      "sha": "8dc9f14c1a0b0169ef865f3d87d4a6ea3e623533"
+    }
+  },
+  "catalog": {
+    "providers": 1470,
+    "uniqueActions": 15297,
+    "evidence": [
+      "npm run generate:catalog",
+      "generated 1470 apps and 15297 actions",
+      "docs/connection-expansion/incremental-integration-evidence-manifest.json"
+    ]
+  },
+  "contract": {
+    "artifact": "docs/connection-expansion/autoskill-creator-v1-contract.json",
+    "browserCallsKnowledgeBffOnly": true,
+    "skillBundleFields": ["connection_ref", "connector_key", "allowed_action_ids"],
+    "runtimeMcpEntryPoint": "/v1/runtime/mcp/sse",
+    "autoskillMultipartField": "invocation_policy",
+    "autoskillPolicyVersion": 1,
+    "requestSummaryPolicyEvaluation": ["satisfied", "matched_calls", "unmet_requirements"],
+    "connectionServiceFinalAuthority": true
+  },
+  "testResults": {
+    "npmRunFixCheck": {
+      "status": "passed",
+      "command": "npm run fix-check",
+      "summary": "lint fix, format fix, registry generation, and typecheck passed"
+    },
+    "npmTest": {
+      "status": "passed",
+      "command": "npm test",
+      "summary": "181 test files passed, 1 skipped; 1645 tests passed, 4 skipped"
+    },
+    "oauthFocused": {
+      "status": "passed",
+      "command": "npm test -- --run src/oauth src/control-plane/lease.test.ts src/control-plane/security.test.ts src/core/guarded-fetch.test.ts src/core/request.test.ts src/server/connect-server.test.ts src/control-plane/mcp-adapter.test.ts",
+      "summary": "12 files and 243 tests passed"
+    },
+    "leaseAuditSsrfSecurity": {
+      "status": "passed",
+      "summary": "Lease, audit, guarded-fetch/SSRF, request security, and MCP safety tests included in focused suite"
+    },
+    "autoskillPolicyFocused": {
+      "status": "passed",
+      "command": "PYTHONPATH=backend pytest -q backend/test/unit_test/test_invocation_policy.py backend/test/unit_test/test_context.py",
+      "summary": "76 tests passed"
+    },
+    "autoskillExistingSuite": {
+      "status": "not_run",
+      "reason": "Pinned repository has unrelated missing bytedredis dependency in server-import tests"
+    },
+    "localRemoteShaConsistency": {
+      "status": "passed",
+      "summary": "All pinned SHAs matched local objects and remote refs"
+    },
+    "newBaselineWorktree": {
+      "status": "passed",
+      "summary": "Connection and AutoSkill integration worktrees clean"
+    }
+  },
+  "feishuRealOAuthValidation": {
+    "status": "deferred",
+    "blocking": false,
+    "reason": "Real account authorization is intentionally outside this freeze"
+  },
+  "feishuDocumentReadValidation": {
+    "status": "deferred",
+    "blocking": false,
+    "reason": "Real Feishu document discovery/read is intentionally outside this freeze"
+  },
+  "feishuValidation": {
+    "blocking": false
+  },
+  "handoff": "/Users/bytedance/.codex/worktrees/connection-autoskill-creator-baseline",
+  "worktrees": {
+    "connection": "/Users/bytedance/.codex/worktrees/connection-autoskill-creator-baseline",
+    "autoskill": "/Users/bytedance/.codex/worktrees/autoskill-creator-baseline"
+  }
+}
