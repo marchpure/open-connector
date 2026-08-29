@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "status": "PARTIAL",
+  "capturedAt": "2026-08-29T20:34:00+08:00",
+  "autoskillSourceSha": "8dc9f14c1a0b0169ef865f3d87d4a6ea3e623533",
+  "baseUrl": "http://[::1]:38102/openapi/autoskill/v1",
+  "listenAddress": "[::]:38102",
+  "ipv6Health": true,
+  "ipv4Health": false,
+  "model": {
+    "modelId": "W0-Verified-Model",
+    "modelName": "doubao-seed-2-0-pro-260215",
+    "credential": "environment reference only; value not captured",
+    "promptCacheDisabledByTemporaryRuntimeShim": true
+  },
+  "case": {
+    "name": "e2e-add-1-1",
+    "requestStatus": "succeeded",
+    "modelCalls": 9,
+    "skillCreated": true,
+    "skillValidated": true,
+    "skillRead": true,
+    "skillUsed": true,
+    "artifactVerified": true,
+    "sseEventTypes": [
+      "Turn",
+      "Planning",
+      "Action",
+      "Observation",
+      "final_answer",
+      "state_update",
+      "request_summary",
+      "done"
+    ]
+  },
+  "runner": {
+    "path": "backend/test/e2e/run_backend_skill_e2e.py",
+    "reportedPassed": 0,
+    "reportedFailed": 1,
+    "parserDefect": "The runner stores a complete SSE transcript, then attempts to decode it as one JSON document and reports 'Expecting value: line 1 column 1'. The request_summary in that transcript reports status=succeeded and created/used counts of one."
+  },
+  "acceptanceGap": "This proves a real AutoSkill HTTP/SSE Agent run and skill create/validate/read/use lifecycle. It does not prove the required PostgreSQL-context update, immutable revision, publish, and new-Agent/new-session chain, so W0 cannot be frozen.",
+  "rawEvidence": "/tmp/kp-rerun-20260829/w0/autoskill/e2e-cache-disabled-1788006631/add-1-1/invoke_response.json"
+}
