@@ -2,7 +2,10 @@ import type { ProviderDefinition } from "../src/core/types.ts";
 
 import { Client } from "@modelcontextprotocol/client";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { serve } from "@hono/node-server";
+import { spawn } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
+import { resolve, join } from "node:path";
 import { createCatalogStore } from "../src/catalog-store.ts";
 import { createConnectionControlApp } from "../src/control-plane/server.ts";
 import { createPrincipalToken } from "../src/control-plane/auth.ts";
@@ -24,6 +27,7 @@ const principal = {
   audience: "oracle-mcp-e2e",
 };
 const authSecret = "oracle-mcp-e2e-auth";
+const runtimePort = 38120;
 
 setPrivateNetworkAccessAllowed(true);
 process.env.CONNECTION_DATABASE_EGRESS_ALLOWLIST = host;
@@ -44,6 +48,7 @@ const app = createConnectionControlApp({
   enablement: [{ service, tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "w2" }],
 });
 const auth = `Bearer ${createPrincipalToken(principal, authSecret)}`;
+const runtimeServer = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: runtimePort });
 
 const connectionResponse = await app.request("/v1/connections", {
   method: "POST",
@@ -107,11 +112,24 @@ try {
   const structured = result.structuredContent as { ok?: boolean; data?: { rows?: unknown[] }; auditPersisted?: boolean };
   const audit = await app.request(`/v1/audit?invocationId=${invocationId}`, { headers: { authorization: auth } });
   const auditBody = (await audit.json()) as { items?: Array<{ actionId?: string; ok?: boolean; caller?: string }> };
+  const autoskillRoot = process.env.AUTOSKILL_ROOT ?? resolve(process.cwd(), "..", "autoskill-creator-baseline");
+  const autoskill = await runAutoskill(
+    join(autoskillRoot, "backend", ".venv", "bin", "python"),
+    join(autoskillRoot, "backend"),
+    {
+      ...process.env,
+      PYTHONPATH: join(autoskillRoot, "backend"),
+      ORACLE_MCP_RUNTIME_URL: `http://127.0.0.1:${runtimePort}/v1/runtime/mcp/sse?connectionId=${encodeURIComponent(connectionId)}&invocationId=${encodeURIComponent(invocationId)}&audience=${encodeURIComponent(principal.audience)}`,
+      ORACLE_MCP_LEASE: lease,
+    },
+  );
+  const autoskillPassed = autoskill.status === 0 && autoskill.stdout.includes('"status": "passed"');
   const passed =
     tools.tools.some((tool) => tool.name === "execute_action") &&
     structured.ok === true &&
     structured.data?.rows?.length === 1 &&
     structured.auditPersisted === true &&
+    autoskillPassed &&
     auditBody.items?.some(
       (item) => item.actionId === `${service}.execute_read_query` && item.ok === true && item.caller === "mcp",
     );
@@ -122,12 +140,14 @@ try {
     queryResultRowCount: structured.data?.rows?.length ?? 0,
     auditPersisted: structured.auditPersisted === true,
     auditLineage: auditBody.items?.some((item) => item.actionId === `${service}.execute_read_query` && item.caller === "mcp") === true,
+    autoskill: autoskillPassed,
     passed,
   };
   console.log(JSON.stringify(evidence));
   if (!passed) process.exitCode = 1;
 } finally {
   await client.close();
+  runtimeServer.close();
 }
 
 function requiredEnv(name: string): string {
@@ -139,4 +159,32 @@ function requiredEnv(name: string): string {
 function requiredString(value: unknown, field: string): string {
   if (typeof value !== "string" || !value) throw new Error(`${field} is missing.`);
   return value;
+}
+
+async function runAutoskill(
+  executable: string,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return await new Promise((resolve) => {
+    const child = spawn(executable, [resolvePath("scripts/verify-oracle-runtime-mcp-autoskill.py")], {
+      cwd,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+    child.on("error", () => resolve({ status: null, stdout, stderr }));
+  });
+}
+
+function resolvePath(path: string): string {
+  return resolve(process.cwd(), path);
 }
