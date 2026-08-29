@@ -22,6 +22,6 @@
   "securityPolicy": "Agent receives only connection refs, leases, and redacted bounded schemas/results; tokens, cookies, AK/SK, signed URLs, and plaintext credentials remain server-side.",
   "externalBlockers": "See evidence manifest; blockers are external accounts, credentials, tenants, entitlements, private-network/TLS targets, or bounded-read targets, not known uncompleted implementation work.",
   "rollback": "Redeploy base SHA 3bbd44624933300487a54ee3acba23190b66ee98 or remove this candidate deployment; preserve backups and do not reuse expansion credentials.",
-  "finalSha": "e56c86ee535366e821e9e4e805d23b37ff3fc5d0",
-  "finalShaMeaning": "Immutable verified integration commit containing the merged code, regenerated artifacts, and evidence manifests; the terminal metadata commit records this SHA."
+  "finalSha": "12dbe29d22433e797cf0836348587ef788f1729f",
+  "finalShaMeaning": "Exact pushed branch tip containing the immutable verified integration commit and terminal handoff metadata."
 }

@@ -150,6 +150,21 @@
       "missingLicenseMetadataReason": "Upstream package metadata did not declare a license; no license was inferred."
     }
   },
+  "runtimeSmoke": {
+    "command": "CONNECTION_SERVICE_AUTH_SECRET=... CONNECTION_SERVICE_ENCRYPTION_KEY=... CONNECTION_SERVICE_DATA_DIR=/tmp/connection-expansion-integration-runtime CONNECTION_SERVICE_PORT=3487 npm run start:connection-service",
+    "startup": "passed; single Connection Service reported 1470 catalog providers and 15297 catalog actions",
+    "health": "passed; GET /health returned ok=true",
+    "catalogAuth": "passed; unauthenticated GET /v1/catalog returned 401",
+    "connectionsAuth": "passed; unauthenticated GET /v1/connections returned 401",
+    "defaultEnablement": [
+      "feishu",
+      "dingtalk",
+      "wecom",
+      "aws_s3",
+      "aliyun_oss",
+      "volcengine_tos"
+    ]
+  },
   "externalBlockers": [
     "P1: OceanBase MySQL/Oracle services, Hologres endpoint, MaxCompute account/data-plane, and Hive Kerberos KDC/service principal unavailable.",
     "P2: Required Feishu/WeCom/DingTalk and cloud storage accounts, credentials, tenants, and upstream lifecycle matrices unavailable.",
