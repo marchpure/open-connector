@@ -292,4 +292,44 @@ describe("executeWebAction", () => {
     });
     expect(run.result).toMatchObject({ ok: false, error: { code: "idempotency_required" } });
   });
+
+  it("bounds concurrent Web Action executions per action", async () => {
+    const database = new DatabaseSync(":memory:");
+    const codec = new AesGcmSecretCodec("web-action-concurrency-key");
+    const store = new TenantWebActionStore(database, principal, codec);
+    const action = await store.confirm({
+      candidate: {
+        id: "concurrency-candidate",
+        origin: "https://fixture.example",
+        method: "GET",
+        path: "/api/slow",
+        readOnly: true,
+      },
+      operationId: "slowFixture",
+      authentication: { type: "none" },
+      timeoutMs: 100,
+    });
+    const fetcher = async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+      new Promise((_, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    const runs = await Promise.all(
+      Array.from({ length: 5 }, (_, index) =>
+        executeWebAction({
+          action,
+          webActions: store,
+          runs: new TenantRunLogStore(database, principal),
+          database,
+          scope: { tenantId: principal.tenantId, workspaceId: principal.workspaceId },
+          secretCodec: codec,
+          invocationId: `concurrency-${index}`,
+          input: {},
+          signal: new AbortController().signal,
+          fetcher,
+        }),
+      ),
+    );
+    expect(runs.some((run) => run.result.ok === false && run.result.error?.code === "concurrency_limit")).toBe(true);
+    database.close();
+  });
 });

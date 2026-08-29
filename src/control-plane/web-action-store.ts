@@ -1,8 +1,8 @@
 import type { ActionDefinition, CredentialProfile, ResolvedCredential } from "../core/types.ts";
 import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
+import type { WebEgressPolicy } from "./service.ts";
 import type { TenantPrincipal } from "./types.ts";
 import type { WebCandidate } from "./web-discovery.ts";
-import type { WebEgressPolicy } from "./service.ts";
 import type { DatabaseSync } from "node:sqlite";
 
 import { randomUUID } from "node:crypto";
@@ -88,6 +88,7 @@ export class WebActionError extends Error {
     | "invalid_web_action"
     | "web_action_not_found"
     | "web_action_disabled"
+    | "concurrency_limit"
     | "side_effect_confirmation_required"
     | "idempotency_required"
     | "web_credential_invalid";

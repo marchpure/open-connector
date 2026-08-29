@@ -1,3 +1,4 @@
+import type { ResolvedCredential } from "../core/types.ts";
 import type { EnablementEntry } from "./catalog.ts";
 
 import { serve } from "@hono/node-server";
@@ -14,7 +15,6 @@ import { createSecretCodec } from "../server/secrets/secret-codec.ts";
 import { OracleThinDriver } from "./oracle-driver.ts";
 import { createConnectionControlApp } from "./server.ts";
 import { runWebDiscoveryCapture } from "./web-discovery-worker.ts";
-import type { ResolvedCredential } from "../core/types.ts";
 
 const port = positiveInteger(process.env.CONNECTION_SERVICE_PORT, 3400);
 const host = process.env.CONNECTION_SERVICE_HOST ?? "127.0.0.1";
@@ -99,6 +99,7 @@ async function captureWithCredential(input: {
     approvedOrigin: input.input.approvedOrigin,
     executablePath: process.env.WEB_DISCOVERY_CHROME_PATH,
     storageStatePath: process.env.WEB_DISCOVERY_STORAGE_STATE_PATH,
+    ignoreHTTPSErrors: process.env.WEB_DISCOVERY_IGNORE_HTTPS_ERRORS === "true",
     durationMs: positiveInteger(process.env.WEB_DISCOVERY_DURATION_MS, 1_000),
     submitObservation: input.input.submitObservation,
     interactAfterNavigate:

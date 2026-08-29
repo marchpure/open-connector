@@ -8,6 +8,7 @@ export interface WebDiscoveryCaptureOptions {
   approvedOrigin: string;
   executablePath?: string;
   storageStatePath?: string;
+  ignoreHTTPSErrors?: boolean;
   durationMs?: number;
   submitObservation(observation: WebObservation): Promise<void>;
   interact?: (page: Page) => Promise<void>;
@@ -35,7 +36,7 @@ export async function runWebDiscoveryCapture(
   try {
     context = await browser.newContext({
       serviceWorkers: "block",
-      ignoreHTTPSErrors: true,
+      ...(options.ignoreHTTPSErrors === true ? { ignoreHTTPSErrors: true } : {}),
       ...(options.storageStatePath ? { storageState: options.storageStatePath } : {}),
     });
     await context.route("**/*", async (route) => {

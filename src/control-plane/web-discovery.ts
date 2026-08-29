@@ -1,11 +1,11 @@
-import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
 import type { ResolvedCredential } from "../core/types.ts";
+import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
 import type { RestDefinition, RestOperation } from "./rest-adapter.ts";
+import type { WebEgressPolicy } from "./service.ts";
 import type { DatabaseSync } from "node:sqlite";
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { assertPublicHttpUrl } from "../core/request.ts";
-import type { WebEgressPolicy } from "./service.ts";
 
 export interface WebObservation {
   url: string;
@@ -147,7 +147,9 @@ export class TenantWebDiscoveryStore {
     }
     if (
       Object.keys(observation.requestHeaders).some(isSensitiveHeader) ||
-      hasSensitiveKeys(observation.requestSample)
+      hasSensitiveKeys(observation.requestSample) ||
+      hasSensitiveKeys(observation.requestQuerySample) ||
+      hasSensitiveKeys(observation.responseSample)
     ) {
       throw new WebDiscoveryError("sensitive_observation", "Worker observations must not contain credentials.");
     }

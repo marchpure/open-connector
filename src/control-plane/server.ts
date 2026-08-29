@@ -1,6 +1,7 @@
 import type { CatalogStore } from "../catalog-store.ts";
 import type { TransitFileWriter } from "../core/types.ts";
 import type { ActionDefinition } from "../core/types.ts";
+import type { ResolvedCredential } from "../core/types.ts";
 import type { IProviderLoader, ProviderResourceCandidate } from "../providers/provider-loader.ts";
 import type { ITransitFileService } from "../server/files/transit-file-store.ts";
 import type { StagedTransitFile } from "../server/files/transit-file-store.ts";
@@ -10,10 +11,9 @@ import type { AdapterResourceKind } from "./adapter-resource-store.ts";
 import type { EnablementEntry } from "./catalog.ts";
 import type { OracleConnectionConfig, OracleQueryDriver } from "./oracle-adapter.ts";
 import type { OracleDriverOptions } from "./oracle-driver.ts";
-import type { ResourceRef, TenantPrincipal } from "./types.ts";
 import type { WebEgressPolicy } from "./service.ts";
+import type { ResourceRef, TenantPrincipal } from "./types.ts";
 import type { WebObservation } from "./web-discovery.ts";
-import type { ResolvedCredential } from "../core/types.ts";
 import type { Context } from "hono";
 import type { DatabaseSync } from "node:sqlite";
 
@@ -434,9 +434,12 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
     }
     leases.revokeForConnection(connectionId, principal);
-    new TenantWebActionStore(options.controlDatabase, principal, options.secretCodec, options.webEgress).revokeConnection(
-      connectionId,
-    );
+    new TenantWebActionStore(
+      options.controlDatabase,
+      principal,
+      options.secretCodec,
+      options.webEgress,
+    ).revokeConnection(connectionId);
     return new Response(null, { status: 204 });
   });
   app.put("/v1/connections/:connectionId/acl", async (context) => {
@@ -1189,9 +1192,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         connectionName: optionalString(body.connectionName),
         authentication,
         credential:
-          body.credential === undefined
-            ? sessionCredential
-            : webCredentialFromInput(authentication, body.credential),
+          body.credential === undefined ? sessionCredential : webCredentialFromInput(authentication, body.credential),
         parameterSources: recordOf(body.parameterSources) as Record<string, "path" | "query" | "body">,
         pagination:
           body.pagination && typeof body.pagination === "object"
@@ -1388,10 +1389,10 @@ async function auditRuntimeMcpRequest(
   leaseContext: import("./runtime-mcp.ts").LeaseRuntimeMcpContext,
   options: ConnectionControlAppOptions,
 ): Promise<void> {
-  const body = (await request.clone().json().catch(() => undefined)) as
-    | { method?: unknown }
-    | Array<{ method?: unknown }>
-    | undefined;
+  const body = (await request
+    .clone()
+    .json()
+    .catch(() => undefined)) as { method?: unknown } | Array<{ method?: unknown }> | undefined;
   const messages = Array.isArray(body) ? body : body ? [body] : [];
   if (!messages.some((message) => message.method === "tools/list")) return;
   new TenantWebActionStore(
@@ -1681,9 +1682,9 @@ function renderWebDiscoveryPage(): string {
 <section id="context" hidden><h2>Lease context</h2><pre id="contract"></pre><label>Invocation ID<input id="invocation" value="browser-web-discovery"></label><label>Audience<input id="audience" value="web-discovery-browser"></label><label>Authentication<select id="auth-type"><option value="none">None</option><option value="cookie">Cookie</option><option value="bearer">Bearer</option><option value="api_key">API key</option></select></label><label id="credential-field" hidden>Credential override<input id="credential" type="password" autocomplete="off"></label><label>Max pages<input id="max-pages" type="number" min="1" max="100" value="10"></label><label>Rate limit (requests/minute)<input id="rate-limit" type="number" min="1" value="60"></label><label>Timeout (milliseconds)<input id="timeout-ms" type="number" min="100" max="30000" value="30000"></label><label id="write-field" hidden><input id="write-confirm" type="checkbox"> Confirm side-effect and enable this write action</label><button id="add-context" type="button" class="secondary">Add confirmed action to context</button> <button id="call" type="button" disabled>Call action</button> <button id="call-error" type="button" disabled>Call rejected input</button><pre id="result"></pre></section>
 </main><script>
 const state={session:null,candidate:null,action:null,lease:null};const $=id=>document.getElementById(id);const showError=m=>{$("error").textContent=m||""};const showStatus=m=>{$("status").textContent=m||""};
-async function api(path,init={}){const headers=new Headers(init.headers||{});headers.set("authorization","Bearer "+$("auth").value.trim());headers.set("content-type","application/json");const response=await fetch(path,{...init,headers});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.message||body.errorMessage||"Request failed ("+response.status+")");return body}
-function parameterSources(item){return {path:(item.path.match(/\{[^}]+\}/g)||[]).map(name=>name.slice(1,-1)),query:Object.keys(item.querySchema?.properties||{}),body:Object.keys(item.requestSchema?.properties||{})}}
-function renderCandidates(items){$("candidates").innerHTML=items.map((item,index)=>'<div class="candidate"><strong>'+item.method+" "+item.path+'</strong><pre>'+JSON.stringify({method:item.method,path:item.path,parameterSources:parameterSources(item),request:item.requestSchema,query:item.querySchema,response:item.responseSchema,readOnly:item.readOnly,sideEffect:item.readOnly?"none":"requires second confirmation",pagination:item.readOnly?"bounded pagination":"disabled by default",authentication:"explicit profile required",rateLimit:"bounded per minute",timeout:"bounded milliseconds",idempotency:item.readOnly?"not required":"Idempotency-Key required"},null,2)+'</pre><button type="button" data-candidate="'+index+'">Review this candidate</button></div>').join("");document.querySelectorAll("[data-candidate]").forEach(button=>button.addEventListener("click",()=>{state.candidate=items[Number(button.dataset.candidate)];$("context").hidden=false;$("contract").textContent=JSON.stringify({method:state.candidate.method,path:state.candidate.path,parameterSources:parameterSources(state.candidate),requestSchema:state.candidate.requestSchema,querySchema:state.candidate.querySchema,responseSchema:state.candidate.responseSchema,readOnly:state.candidate.readOnly,sideEffect:state.candidate.readOnly?"none":"second confirmation required",pagination:{supported:state.candidate.method==="GET",maxPages:Number($("max-pages").value)},rateLimit:{maxRequestsPerMinute:Number($("rate-limit").value)},timeoutMs:Number($("timeout-ms").value),idempotency:state.candidate.readOnly?"not required":"Idempotency-Key required"},null,2);$("write-field").hidden=state.candidate.readOnly;$("write-confirm").checked=false;$("call").disabled=true;$("call-error").disabled=true;showStatus("Candidate selected. Review the contract before confirming.")}))}
+async function api(path,init={}){const headers=new Headers(init.headers||{});headers.set("authorization","Bearer "+$("auth").value.trim());headers.set("content-type","application/json");const response=await fetch(path,{...init,headers});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error?.message||body.message||body.errorMessage||"Request failed ("+response.status+")");return body}
+function parameterSources(item){return {path:(item.path.match(/{[^}]+}/g)||[]).map(name=>name.slice(1,-1)),query:Object.keys(item.querySchema?.properties||{}),body:Object.keys(item.requestSchema?.properties||{})}}
+function renderCandidates(items){const container=$("candidates");container.replaceChildren();items.forEach((item,index)=>{const candidate=document.createElement("div");candidate.className="candidate";const title=document.createElement("strong");title.textContent=item.method+" "+item.path;const contract=document.createElement("pre");contract.textContent=JSON.stringify({method:item.method,path:item.path,parameterSources:parameterSources(item),request:item.requestSchema,query:item.querySchema,response:item.responseSchema,readOnly:item.readOnly,sideEffect:item.readOnly?"none":"requires second confirmation",pagination:item.readOnly?"bounded pagination":"disabled by default",authentication:"explicit profile required",rateLimit:"bounded per minute",timeout:"bounded milliseconds",idempotency:item.readOnly?"not required":"Idempotency-Key required"},null,2);const button=document.createElement("button");button.type="button";button.textContent="Review this candidate";button.dataset.candidate=String(index);button.addEventListener("click",()=>{state.candidate=item;$("context").hidden=false;$("contract").textContent=JSON.stringify({method:item.method,path:item.path,parameterSources:parameterSources(item),requestSchema:item.requestSchema,querySchema:item.querySchema,responseSchema:item.responseSchema,readOnly:item.readOnly,sideEffect:item.readOnly?"none":"second confirmation required",pagination:{supported:item.method==="GET",maxPages:Number($("max-pages").value)},rateLimit:{maxRequestsPerMinute:Number($("rate-limit").value)},timeoutMs:Number($("timeout-ms").value),idempotency:item.readOnly?"not required":"Idempotency-Key required"},null,2);$("write-field").hidden=item.readOnly;$("write-confirm").checked=false;$("call").disabled=true;$("call-error").disabled=true;showStatus("Candidate selected. Review the contract before confirming.")});candidate.append(title,contract,button);container.append(candidate)})}
 $("auth-type").addEventListener("change",()=>{$("credential-field").hidden=$("auth-type").value==="none"});
 $("discover").addEventListener("click",async()=>{showError("");showStatus("Starting isolated discovery...");$("discover").disabled=true;try{const url=new URL($("url").value.trim());const started=await api("/v1/web-discovery/sessions",{method:"POST",body:JSON.stringify({origin:url.origin})});state.session=started.session;await api("/v1/web-discovery/capture",{method:"POST",body:JSON.stringify({sessionId:state.session.id,pageUrl:url.href,approvedOrigin:url.origin})});const candidates=await api("/v1/web-discovery/sessions/"+encodeURIComponent(state.session.id)+"/candidates");renderCandidates(candidates.items);showStatus("Discovery complete. Select a candidate to confirm it.")}catch(error){showError(error.message);showStatus("")}finally{$("discover").disabled=false}});
 $("add-context").addEventListener("click",async()=>{showError("");showStatus("Confirming action and creating lease...");try{const authType=$("auth-type").value;const writeConfirmed=state.candidate.readOnly||$("write-confirm").checked;if(!writeConfirmed)throw new Error("Write actions require a second confirmation.");const confirmation={candidateId:state.candidate.id,origin:state.candidate.origin,operationId:"browser_"+state.candidate.method.toLowerCase()+"_action",readOnly:state.candidate.readOnly,authentication:{type:authType},parameterSources:parameterSources(state.candidate),pagination:{supported:state.candidate.method==="GET",maxPages:Number($("max-pages").value)},rateLimit:{maxRequestsPerMinute:Number($("rate-limit").value)},timeoutMs:Number($("timeout-ms").value),sideEffectConfirmed:writeConfirmed,enabled:state.candidate.readOnly||writeConfirmed};const credential=$("credential").value.trim();if(authType!=="none"&&credential)confirmation.credential={secret:credential};const confirmed=await api("/v1/web-discovery/sessions/"+encodeURIComponent(state.session.id)+"/confirm",{method:"POST",body:JSON.stringify(confirmation)});state.action=confirmed.action;const leased=await api("/v1/connections/"+encodeURIComponent(state.action.connectionId)+"/lease",{method:"POST",body:JSON.stringify({allowedActions:[state.action.id],invocationId:$("invocation").value.trim(),audience:$("audience").value.trim()})});state.lease=leased.token;$("call").disabled=false;$("call-error").disabled=false;showStatus("Action added to the lease context. It is ready for a runtime MCP call.")}catch(error){showError(error.message);showStatus("")}});

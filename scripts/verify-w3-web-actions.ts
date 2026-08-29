@@ -1,11 +1,12 @@
+import type { ChildProcess } from "node:child_process";
+import type { IncomingMessage, ServerResponse } from "node:http";
+
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright-core";
@@ -78,8 +79,7 @@ try {
   const detailAction = await confirm(session.session.id, detailCandidate, "getItem", "detail", true);
   const writeDenied = await confirmStatus(session.session.id, writeCandidate, "approveItem", "write", false);
   assert(
-    writeDenied.status === 400 &&
-      (writeDenied.body.error?.message ?? "").includes("confirmation"),
+    writeDenied.status === 400 && (writeDenied.body.error?.message ?? "").includes("confirmation"),
     "write confirmation was not required",
   );
   const writeAction = await confirm(session.session.id, writeCandidate, "approveItem", "write", true, true);
@@ -91,8 +91,30 @@ try {
 
   const mcp = await runNodeMcp(listAction, listLease);
   await writeJson("node-mcp.json", mcp);
+  assert(
+    Array.isArray(mcp.tools) && mcp.tools.includes("list_allowed_actions"),
+    "Node MCP tools/list omitted list_allowed_actions",
+  );
+  assert(
+    Array.isArray(mcp.tools) && mcp.tools.includes("get_action_guide"),
+    "Node MCP tools/list omitted get_action_guide",
+  );
+  assert(
+    Array.isArray((mcp.listAllowedActions as { data?: { actions?: unknown[] } } | undefined)?.data?.actions),
+    "Node MCP list_allowed_actions did not return actions",
+  );
+  assert(
+    (mcp.actionGuide as { data?: { id?: string } } | undefined)?.data?.id === listAction.id,
+    "Node MCP get_action_guide did not return the selected action",
+  );
   const autoskill = await runAutoSkill(listAction, listLease);
   await writeJson("autoskill.json", autoskill);
+  assert(
+    Array.isArray(autoskill.tools) &&
+      autoskill.tools.includes("mcp__w3-fixture__list_allowed_actions") &&
+      autoskill.tools.includes("mcp__w3-fixture__get_action_guide"),
+    "AutoSkill tools/list omitted the lease discovery tools",
+  );
 
   const results = {
     pagination: await callAction(listAction, listLease, { query: { page: "1" }, pagination: { maxPages: 2 } }),
@@ -117,8 +139,16 @@ try {
       idempotencyKey: "w3-approve-1",
       body: { approved: true },
     }),
-    fourOhFour: await callAction(await confirmNegative("negative404", "/api/negative/404"), await issueNegativeLease("negative404"), {}),
-    fiveHundred: await callAction(await confirmNegative("negative500", "/api/negative/500"), await issueNegativeLease("negative500"), {}),
+    fourOhFour: await callAction(
+      await confirmNegative("negative404", "/api/negative/404"),
+      await issueNegativeLease("negative404"),
+      {},
+    ),
+    fiveHundred: await callAction(
+      await confirmNegative("negative500", "/api/negative/500"),
+      await issueNegativeLease("negative500"),
+      {},
+    ),
   };
   await writeJson("runtime-results.json", results);
   assert(results.pagination.ok && results.pagination.data.pages === 2, "real pagination failed");
@@ -137,18 +167,33 @@ try {
   assert(!results.fourOhFour.ok && !results.fiveHundred.ok, "HTTP error fixture was treated as success");
   const negatives = await runNegativeChecks(listAction, listLease, candidates.items);
   await writeJson("security-negatives.json", negatives);
+  assert(
+    (negatives.concurrency as { passed?: boolean }).passed === true,
+    "Web Action concurrency limit was not enforced",
+  );
 
   const restarted = await restartService(service, serviceOutput, dataDir);
   service = restarted;
   const recovered = await get<{ items: Array<{ id: string; service: string; status: string }> }>("/v1/connections");
   const recoveredAction = await getAction(listAction.id);
   assert(recoveredAction.id === listAction.id, "Action did not recover after restart");
-  const recoveredCall = await callAction(recoveredAction, listLease, { query: { page: "1" }, pagination: { maxPages: 1 } });
+  const recoveredCall = await callAction(recoveredAction, listLease, {
+    query: { page: "1" },
+    pagination: { maxPages: 1 },
+  });
   assert(recoveredCall.ok, "recovered credential/action could not execute");
-  await writeJson("restart-recovery.json", { connections: recovered.items, action: recoveredAction, call: recoveredCall });
+  await writeJson("restart-recovery.json", {
+    connections: recovered.items,
+    action: recoveredAction,
+    call: recoveredCall,
+  });
 
   const revoked = await post<{ revoked: boolean }>(`/v1/leases/${writeLease.jti}/revoke`, {});
-  const revokedCall = await callAction(writeAction, writeLease, { confirmed: true, idempotencyKey: "w3-revoked", body: {} });
+  const revokedCall = await callAction(writeAction, writeLease, {
+    confirmed: true,
+    idempotencyKey: "w3-revoked",
+    body: {},
+  });
   assert(revoked.revoked && !revokedCall.ok, "revoked lease still executed");
   const expiredLease = await issueLease(listAction.id, listAction.connectionId, `${invocationId}-expired`, 1);
   await delay(1_200);
@@ -174,16 +219,16 @@ try {
   );
   assert(!JSON.stringify(audit).includes("fixture_session-value"), "credential leaked into audit evidence");
 
-  console.log(
-    JSON.stringify({
-      status: "passed",
-      fixtureUrl: `${fixtureOrigin}/`,
-      actionIds: [listAction.id, detailAction.id, writeAction.id],
-      autoskill: autoskill.status,
-      restartRecovered: recoveredAction.id === listAction.id,
-      evidenceDir,
-    }),
-  );
+  const summary = {
+    status: "passed",
+    fixtureUrl: `${fixtureOrigin}/`,
+    actionIds: [listAction.id, detailAction.id, writeAction.id],
+    autoskill: autoskill.status,
+    restartRecovered: recoveredAction.id === listAction.id,
+    evidenceDir,
+  };
+  await writeJson("runner-summary.json", summary);
+  console.log(JSON.stringify(summary));
 } finally {
   service?.kill("SIGTERM");
   await waitForExit(service);
@@ -205,7 +250,10 @@ type Action = { id: string; connectionId: string; name: string; method: string; 
 type Lease = { token: string; jti: string; invocationId: string };
 
 async function browserDiscovery(): Promise<Record<string, unknown>> {
-  const browser = await chromium.launch({ executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true });
+  const browser = await chromium.launch({
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   const requests: string[] = [];
@@ -219,7 +267,12 @@ async function browserDiscovery(): Promise<Record<string, unknown>> {
     await page.getByRole("button", { name: "Load items" }).click();
     await page.getByRole("button", { name: "Load detail" }).click();
     await page.getByRole("button", { name: "Approve item" }).click();
-    return { url: page.url(), title: await page.title(), dashboard: await page.getByTestId("dashboard").innerText(), requests };
+    return {
+      url: page.url(),
+      title: await page.title(),
+      dashboard: await page.getByTestId("dashboard").innerText(),
+      requests,
+    };
   } finally {
     await context.close();
     await browser.close();
@@ -245,11 +298,7 @@ async function browserControlPlaneJourney(): Promise<Record<string, unknown>> {
     await page.getByRole("button", { name: "Add confirmed action to context" }).click();
     await page.getByRole("button", { name: "Call action" }).click();
     await page.waitForFunction(
-      () =>
-        Boolean(
-          document.querySelector("#result")?.textContent ||
-            document.querySelector("#error")?.textContent,
-        ),
+      () => Boolean(document.querySelector("#result")?.textContent || document.querySelector("#error")?.textContent),
       undefined,
       { timeout: 15_000 },
     );
@@ -294,8 +343,15 @@ async function runNodeMcp(action: Action, lease: Lease): Promise<Record<string, 
   try {
     await client.connect(transport);
     const tools = await client.listTools();
+    const allowed = await client.callTool({ name: "list_allowed_actions", arguments: {} });
+    const guide = await client.callTool({ name: "get_action_guide", arguments: { actionId: action.id } });
     const result = await client.callTool({ name: "execute_action", arguments: { actionId: action.id, input: {} } });
-    return { tools: tools.tools.map((tool) => tool.name), result };
+    return {
+      tools: tools.tools.map((tool) => tool.name),
+      listAllowedActions: allowed.structuredContent,
+      actionGuide: guide.structuredContent,
+      result,
+    };
   } finally {
     await client.close();
   }
@@ -320,8 +376,10 @@ manager = McpManager(agent_folder=os.environ["W3_CONFIG_DIR"], config_path=os.en
 manager.start()
 try:
     tools = sorted(tool["name"] for tool in manager.get_tool_definitions())
+    allowed = manager.call_tool("mcp__w3-fixture__list_allowed_actions", {})
+    guide = manager.call_tool("mcp__w3-fixture__get_action_guide", {"actionId": os.environ["W3_ACTION_ID"]})
     result = manager.call_tool("mcp__w3-fixture__execute_action", {"actionId": os.environ["W3_ACTION_ID"], "input": {}})
-    print(json.dumps({"status": "passed", "tools": tools, "result": result, "client": "AutoSkill McpManager"}))
+    print(json.dumps({"status": "passed", "tools": tools, "listAllowedActions": allowed, "actionGuide": guide, "result": result, "client": "AutoSkill McpManager"}))
 finally:
     manager.stop()
 `;
@@ -444,9 +502,9 @@ async function callAction(action: Action, lease: Lease, input: Record<string, un
 
 async function getAction(id: string): Promise<Action> {
   const db = new DatabaseSync(join(dataDir, "control.sqlite"));
-  const encrypted = db
-    .prepare("select definition_ciphertext from web_actions where id=?")
-    .get(id) as { definition_ciphertext: string };
+  const encrypted = db.prepare("select definition_ciphertext from web_actions where id=?").get(id) as {
+    definition_ciphertext: string;
+  };
   if (!encrypted) throw new Error("Persisted action not found after restart.");
   return JSON.parse(await createSecretCodec(encryptionKey).decode(encrypted.definition_ciphertext)) as Action;
 }
@@ -483,17 +541,7 @@ async function confirmNegative(
   const observed = (await response.json()) as { candidate: Candidate; error?: { message?: string } };
   if (!response.ok) throw new Error(`negative observation failed (${response.status}): ${JSON.stringify(observed)}`);
   const candidate = (observed as { candidate: Candidate }).candidate;
-  return confirm(
-    session.session.id,
-    candidate,
-    name,
-    name,
-    true,
-    false,
-    "none",
-    options.timeoutMs,
-    options.rateLimit,
-  );
+  return confirm(session.session.id, candidate, name, name, true, false, "none", options.timeoutMs, options.rateLimit);
 }
 
 async function runNegativeChecks(
@@ -506,7 +554,12 @@ async function runNegativeChecks(
   const htmlLease = await issueLease(htmlAction.id, htmlAction.connectionId, `${invocationId}-html`, 300);
   const htmlResponse = await callAction(htmlAction, htmlLease, {});
   const redirectAction = await confirmNegative("negativeRedirect", "/api/negative/cross-redirect");
-  const redirectLease = await issueLease(redirectAction.id, redirectAction.connectionId, `${invocationId}-redirect`, 300);
+  const redirectLease = await issueLease(
+    redirectAction.id,
+    redirectAction.connectionId,
+    `${invocationId}-redirect`,
+    300,
+  );
   const redirect = await callAction(redirectAction, redirectLease, {});
   const timeoutAction = await confirmNegative("negativeTimeout", "/api/negative/timeout", { timeoutMs: 100 });
   const timeoutLease = await issueLease(timeoutAction.id, timeoutAction.connectionId, `${invocationId}-timeout`, 300);
@@ -515,16 +568,16 @@ async function runNegativeChecks(
   const rateLease = await issueLease(rateAction.id, rateAction.connectionId, `${invocationId}-rate`, 300);
   const rateFirst = await callAction(rateAction, rateLease, { query: { page: "1" } });
   const rateSecond = await callAction(rateAction, rateLease, { query: { page: "1" } });
+  const concurrency = await runConcurrencyCheck(timeoutAction, timeoutLease);
   const ssrfResponse = await fetch(`${serviceOrigin}/v1/web-discovery/sessions`, {
     method: "POST",
     headers: { authorization: auth, "content-type": "application/json" },
     body: JSON.stringify({ origin: "https://127.0.0.1:38132" }),
   });
   const ssrf = { status: ssrfResponse.status, body: await ssrfResponse.json() };
-  const nonJsonSession = await post<{ session: { id: string; workerToken: string } }>(
-    "/v1/web-discovery/sessions",
-    { origin: fixtureOrigin },
-  );
+  const nonJsonSession = await post<{ session: { id: string; workerToken: string } }>("/v1/web-discovery/sessions", {
+    origin: fixtureOrigin,
+  });
   const nonJsonResponse = await fetch(
     `${serviceOrigin}/v1/web-discovery/sessions/${nonJsonSession.session.id}/observations`,
     {
@@ -550,11 +603,20 @@ async function runNegativeChecks(
     redirect: { rejected: !redirect.ok, result: redirect },
     timeout: { rejected: !timeout.ok, result: timeout },
     rateLimit: { firstOk: rateFirst.ok, secondRejected: !rateSecond.ok, second: rateSecond },
+    concurrency,
     contentType: { rejected: !htmlResponse.ok },
     ssrf: { rejected: ssrf.status === 400, result: ssrf },
     nonJsonDiscovery: { rejected: nonJsonResponse.status === 400, status: nonJsonResponse.status },
     candidateCount: candidates.length,
   };
+}
+
+async function runConcurrencyCheck(action: Action, lease: Lease): Promise<Record<string, unknown>> {
+  const results = await Promise.all(
+    Array.from({ length: 5 }, () => callAction(action, lease, { query: { page: "1" } })),
+  );
+  const rejected = results.filter((result) => result?.error?.code === "concurrency_limit");
+  return { total: results.length, rejected: rejected.length, passed: rejected.length >= 1 };
 }
 
 async function startFixture(logPath: string): Promise<{ close(): Promise<void> }> {
@@ -568,13 +630,23 @@ async function startFixture(logPath: string): Promise<{ close(): Promise<void> }
 async function fixtureRoute(request: IncomingMessage, response: ServerResponse, logPath: string): Promise<void> {
   const url = new URL(request.url ?? "/", fixtureOrigin);
   const cookie = String(request.headers.cookie ?? "");
-  const log = { method: request.method, path: url.pathname, query: Object.fromEntries(url.searchParams), cookie: cookie ? "[REDACTED]" : undefined, at: new Date().toISOString() };
+  const log = {
+    method: request.method,
+    path: url.pathname,
+    query: Object.fromEntries(url.searchParams),
+    cookie: cookie ? "[REDACTED]" : undefined,
+    at: new Date().toISOString(),
+  };
   await appendFile(logPath, JSON.stringify(log) + "\n");
   if (url.pathname === "/" && request.method === "GET") return sendHtml(response, fixtureHtml());
   if (url.pathname === "/login" && request.method === "POST") {
     const body = JSON.parse(await readBody(request));
-    if (body.username !== "fixture-user" || body.password !== "fixture-password") return sendJson(response, 401, { error: "invalid credentials" });
-    response.setHeader("set-cookie", "fixture_session=fixture-session-value; Secure; HttpOnly; SameSite=Strict; Path=/");
+    if (body.username !== "fixture-user" || body.password !== "fixture-password")
+      return sendJson(response, 401, { error: "invalid credentials" });
+    response.setHeader(
+      "set-cookie",
+      "fixture_session=fixture-session-value; Secure; HttpOnly; SameSite=Strict; Path=/",
+    );
     return sendJson(response, 200, { ok: true });
   }
   if (url.pathname === "/api/rate" && request.method === "GET") {
@@ -597,9 +669,13 @@ async function fixtureRoute(request: IncomingMessage, response: ServerResponse, 
   if (url.pathname === "/api/items" && request.method === "GET") {
     const page = url.searchParams.get("page") ?? "1";
     response.setHeader("link", page === "1" ? `<${fixtureOrigin}/api/items?page=2>; rel="next"` : "");
-    return sendJson(response, 200, { page: Number(page), items: page === "1" ? [{ id: "42", title: "Fixture item" }] : [{ id: "43", title: "Second page" }] });
+    return sendJson(response, 200, {
+      page: Number(page),
+      items: page === "1" ? [{ id: "42", title: "Fixture item" }] : [{ id: "43", title: "Second page" }],
+    });
   }
-  if (url.pathname === "/api/items/42" && request.method === "GET") return sendJson(response, 200, { id: "42", title: "Fixture item", owner: "fixture-user" });
+  if (url.pathname === "/api/items/42" && request.method === "GET")
+    return sendJson(response, 200, { id: "42", title: "Fixture item", owner: "fixture-user" });
   if (url.pathname === "/api/items/42/approve" && request.method === "POST") {
     fixtureApprovalCount += 1;
     return sendJson(response, 200, { ok: true, approvedCount: fixtureApprovalCount });
@@ -642,6 +718,7 @@ function startService(dir: string, output: NodeJS.WritableStream): ChildProcess 
       CONNECTION_SERVICE_WEB_LOCALHOST_PORTS: String(fixturePort),
       WEB_DISCOVERY_CHROME_PATH: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       WEB_DISCOVERY_INTERACTION: "w3-fixture",
+      WEB_DISCOVERY_IGNORE_HTTPS_ERRORS: "true",
       NODE_EXTRA_CA_CERTS: join(certDir, "fixture-cert.pem"),
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -727,7 +804,27 @@ function listen(server: ReturnType<typeof createHttpsServer>, port: number): Pro
   });
 }
 function createCertificate(directory: string): void {
-  execFileSync("/opt/homebrew/bin/openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(directory, "fixture-key.pem"), "-out", join(directory, "fixture-cert.pem"), "-days", "1", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1"], { stdio: "ignore" });
+  execFileSync(
+    "/opt/homebrew/bin/openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-keyout",
+      join(directory, "fixture-key.pem"),
+      "-out",
+      join(directory, "fixture-cert.pem"),
+      "-days",
+      "1",
+      "-subj",
+      "/CN=127.0.0.1",
+      "-addext",
+      "subjectAltName=IP:127.0.0.1",
+    ],
+    { stdio: "ignore" },
+  );
 }
 async function writeJson(name: string, value: unknown): Promise<void> {
   await writeFile(join(evidenceDir, name), JSON.stringify(value, null, 2));
@@ -758,7 +855,8 @@ function readAuditEvidence(): {
   }
 }
 async function collectChild(child: ChildProcess): Promise<{ stdout: string; stderr: string }> {
-  let stdout = "", stderr = "";
+  let stdout = "",
+    stderr = "";
   child.stdout?.on("data", (chunk) => (stdout += String(chunk)));
   child.stderr?.on("data", (chunk) => (stderr += String(chunk)));
   await waitForExit(child);

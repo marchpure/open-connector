@@ -1,5 +1,6 @@
 import type { ResolvedCredential } from "../core/types.ts";
 import type { ActionRunResult } from "../server/actions/action-runner.ts";
+import type { WebEgressPolicy } from "./service.ts";
 import type { TenantRunLogStore } from "./tenant-store.ts";
 import type { WebActionDefinition } from "./web-action-store.ts";
 
@@ -7,10 +8,11 @@ import { createGuardedFetch } from "../core/guarded-fetch.ts";
 import { redactSecrets } from "./redaction.ts";
 import { RestAdapterError, RestIdempotencyStore, RestOpenApiAdapter } from "./rest-adapter.ts";
 import { TenantWebActionStore, WebActionError } from "./web-action-store.ts";
-import type { WebEgressPolicy } from "./service.ts";
 
 const maxOutputBytes = 64 * 1024;
 const requestTimes = new Map<string, number[]>();
+const activeRequests = new Map<string, number>();
+const maxConcurrentWebActions = 4;
 
 export async function executeWebAction(input: {
   action: WebActionDefinition;
@@ -28,6 +30,8 @@ export async function executeWebAction(input: {
   const executionId = crypto.randomUUID();
   const startedAt = new Date().toISOString();
   let result: { ok: true; output: unknown } | { ok: false; error: { code: string; message: string } };
+  const concurrencyKey = `${input.scope.tenantId}:${input.scope.workspaceId}:${input.action.id}`;
+  let concurrencyAcquired = false;
   try {
     if (!input.action.enabled) throw new WebActionError("web_action_disabled", "This Web Action is disabled.");
     if (!input.action.readOnly && input.input.confirmed !== true) {
@@ -39,6 +43,8 @@ export async function executeWebAction(input: {
     input.signal.throwIfAborted();
     assertSafeActionInput(input.input);
     enforceRateLimit(input.action, input.scope);
+    acquireConcurrency(concurrencyKey);
+    concurrencyAcquired = true;
     const credential = await input.webActions.credential(input.action);
     const adapter = new RestOpenApiAdapter(
       {
@@ -87,6 +93,7 @@ export async function executeWebAction(input: {
       },
     };
   }
+  if (concurrencyAcquired) releaseConcurrency(concurrencyKey);
   const completedAt = new Date().toISOString();
   const audit = {
     id: executionId,
@@ -176,6 +183,20 @@ function enforceRateLimit(action: WebActionDefinition, scope: { tenantId: string
   }
   recent.push(now);
   requestTimes.set(key, recent);
+}
+
+function acquireConcurrency(key: string): void {
+  const active = activeRequests.get(key) ?? 0;
+  if (active >= maxConcurrentWebActions) {
+    throw new WebActionError("concurrency_limit", "Web Action concurrent request limit exceeded.");
+  }
+  activeRequests.set(key, active + 1);
+}
+
+function releaseConcurrency(key: string): void {
+  const active = (activeRequests.get(key) ?? 1) - 1;
+  if (active <= 0) activeRequests.delete(key);
+  else activeRequests.set(key, active);
 }
 
 function assertSafeActionInput(value: unknown): void {
