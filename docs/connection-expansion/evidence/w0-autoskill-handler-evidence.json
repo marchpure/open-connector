@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "status": "PARTIAL",
+  "autoskillSha": "8dc9f14c1a0b0169ef865f3d87d4a6ea3e623533",
+  "dependencyEnvironment": "arm64-compatible public requirements installed in /tmp/kp-rerun-20260829/w0/autoskill/uv-venv",
+  "tests": {
+    "command": "python -m pytest -q backend/test/integration/test_skill_creator_updater.py",
+    "passed": 8,
+    "failed": 0
+  },
+  "validatedPostCreateUpdate": false,
+  "reason": "The direct handler integration tests cover create/update persistence but do not establish the Agent per-invoke validation ledger. The production HTTP/SSE runner remains unavailable because private dependencies (bytedtcc/bytedredis/bytedance.bytedai/bytedance.fornax/bytedtos) are not present on the configured package index and the reference checkout bundles incompatible native extensions.",
+  "requiredToComplete": ["compatible AutoSkill runtime with private dependencies", "real HTTP/SSE invoke", "create_skill -> validate_skill -> run -> update_skill -> validate_skill -> publish -> new session call"]
+}
