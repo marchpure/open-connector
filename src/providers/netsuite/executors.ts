@@ -4,9 +4,19 @@ import type {
   ProviderExecutors,
   ProviderProxyExecutor,
 } from "../../core/types.ts";
+import type { ProviderResourceCandidate } from "../provider-loader.ts";
 import type { NetsuiteContext } from "./runtime.ts";
 
+import { optionalString } from "../../core/cast.ts";
 import {
+  discoverErpCapabilities,
+  erpMaxPages,
+  erpMaxResponseBytes,
+  erpRequestTimeoutMs,
+  withErpConcurrency,
+} from "../../core/erp/runtime.ts";
+import {
+  createProviderTimeout,
   createProviderProxyUrl,
   defineProviderExecutors,
   normalizeProviderProxyHeaders,
@@ -18,6 +28,7 @@ import {
   requireCustomCredential,
   toProviderProxyError,
 } from "../provider-runtime.ts";
+import { netsuiteEntities } from "./erp.ts";
 import {
   buildOAuthAuthorizationHeader,
   netsuiteActionHandlers,
@@ -39,7 +50,17 @@ export const executors: ProviderExecutors = defineProviderExecutors<NetsuiteCont
 
 export const proxy: ProviderProxyExecutor = async (input, context) => {
   try {
+    if (input.method !== "GET") {
+      throw new ProviderRequestError(403, "NetSuite proxy is read-only");
+    }
+    if (!isAllowedNetsuiteReadEndpoint(input.endpoint)) {
+      throw new ProviderRequestError(403, "NetSuite proxy endpoint is outside the read-only allowlist");
+    }
+    assertNetsuiteProxyQuery(input.query);
     const credential = await requireCustomCredential(context, service);
+    if (optionalString(credential.values.companyId)) {
+      throw new ProviderRequestError(403, "NetSuite proxy is disabled for company-scoped connections");
+    }
     const netsuiteContext = resolveNetsuiteCredentialContext(
       credential.values,
       credential.metadata,
@@ -71,13 +92,28 @@ export const proxy: ProviderProxyExecutor = async (input, context) => {
       }),
     );
 
-    const response = await providerFetch(url, init);
-    if (!response.ok) {
-      const text = await readProviderProxyErrorMessage(response, "");
-      throw new ProviderRequestError(response.status, text || `NetSuite request failed with HTTP ${response.status}`);
-    }
-
-    return { ok: true, response: await readProviderProxyResponse(response) };
+    return await withErpConcurrency(async () => {
+      const timeout = createProviderTimeout(context.signal, erpRequestTimeoutMs);
+      try {
+        const response = await providerFetch(url, { ...init, signal: timeout.signal, redirect: "manual" });
+        if (response.status >= 300 && response.status < 400) {
+          throw new ProviderRequestError(502, "NetSuite redirects are disabled");
+        }
+        if (!response.ok) {
+          await readProviderProxyErrorMessage(response, "");
+          throw new ProviderRequestError(response.status, `NetSuite request failed with HTTP ${response.status}`);
+        }
+        return {
+          ok: true,
+          response: await readProviderProxyResponse(response, { maxBytes: erpMaxResponseBytes }),
+        };
+      } catch (error) {
+        if (error instanceof ProviderRequestError) throw error;
+        throw new ProviderRequestError(timeout.didTimeout() ? 504 : 502, "NetSuite proxy request failed");
+      } finally {
+        timeout.cleanup();
+      }
+    });
   } catch (error) {
     return toProviderProxyError(error, "netsuite request failed");
   }
@@ -88,3 +124,48 @@ export const credentialValidators: CredentialValidators = {
     return validateNetsuiteCredential(input.values, fetcher, signal);
   },
 };
+
+export async function discoverResources(
+  context: ExecutionContext,
+  fetcher: typeof fetch,
+): Promise<ProviderResourceCandidate[]> {
+  const credential = await requireCustomCredential(context, service);
+  const netsuiteContext = resolveNetsuiteCredentialContext(
+    credential.values,
+    credential.metadata,
+    fetcher,
+    context.signal,
+  );
+  const result = await netsuiteActionHandlers.discover_capabilities({}, netsuiteContext);
+  const available = (result as { capabilities: Array<{ domain: string }> }).capabilities;
+  const domains = new Set(available.map((capability) => capability.domain));
+  return discoverErpCapabilities(netsuiteEntities)
+    .filter((capability) => domains.has(capability.domain))
+    .map((capability) => ({
+      sourceType: "netsuite",
+      resourceId: capability.domain,
+      title: `NetSuite: ${capability.domain}`,
+      mimeType: `application/vnd.oomol.erp.${capability.domain}`,
+      schema: { ...capability },
+    }));
+}
+
+function isAllowedNetsuiteReadEndpoint(endpoint: string): boolean {
+  if (endpoint === "/services/rest/record/v1/metadata-catalog") return true;
+  return netsuiteEntities.some((entity) => {
+    const root = `/services/rest/record/v1/${encodeURIComponent(entity.entity)}`;
+    return endpoint === root || endpoint.startsWith(`${root}/`);
+  });
+}
+
+function assertNetsuiteProxyQuery(query: Record<string, unknown> | undefined): void {
+  const limit = query?.limit;
+  const normalizedLimit = limit === undefined ? 100 : Number(limit);
+  if (!Number.isInteger(normalizedLimit) || normalizedLimit < 1 || normalizedLimit > 200) {
+    throw new ProviderRequestError(400, "limit must be between 1 and 200");
+  }
+  const offset = query?.offset === undefined ? 0 : Number(query.offset);
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > normalizedLimit * (erpMaxPages - 1)) {
+    throw new ProviderRequestError(400, `offset must stay within ${erpMaxPages} pages`);
+  }
+}

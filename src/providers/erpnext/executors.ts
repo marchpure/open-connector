@@ -5,12 +5,26 @@ import type {
   ProviderProxyExecutor,
   ProxyExecutionResult,
 } from "../../core/types.ts";
+import type { ProviderResourceCandidate } from "../provider-loader.ts";
 import type { ProviderActionHandlers } from "../provider-runtime.ts";
 
 import { compactObject, optionalRecord, optionalString } from "../../core/cast.ts";
-import { assertPublicHttpUrl, isPrivateNetworkAccessAllowed } from "../../core/request.ts";
+import {
+  discoverErpCapabilities,
+  erpActionOutput,
+  projectErpFields,
+  readErpInput,
+  requireErpCompanyField,
+  resolveErpCompanyId,
+} from "../../core/erp/runtime.ts";
+import { erpMaxPages, erpMaxResponseBytes, erpRequestTimeoutMs } from "../../core/erp/runtime.ts";
+import { normalizeErpBaseUrl } from "../../core/erp/runtime.ts";
+import { withErpConcurrency } from "../../core/erp/runtime.ts";
+import { readBoundedResponseBytes } from "../../core/request.ts";
+import { isPrivateNetworkAccessAllowed } from "../../core/request.ts";
 import {
   createProviderFetch,
+  createProviderTimeout,
   createProviderProxyUrl,
   defineProviderExecutors,
   normalizeProviderProxyHeaders,
@@ -21,6 +35,7 @@ import {
   requireApiKeyCredential,
   toProviderProxyError,
 } from "../provider-runtime.ts";
+import { erpnextEntities } from "./erp.ts";
 
 const service = "erpnext";
 const proxyFetch = createProviderFetch({ allowPrivateNetwork: isPrivateNetworkAccessAllowed });
@@ -35,6 +50,7 @@ interface ErpnextActionContext {
   apiKey: string;
   apiSecret: string;
   baseUrl: string;
+  companyId?: string;
   fetcher: typeof fetch;
   signal?: AbortSignal;
 }
@@ -55,6 +71,89 @@ interface ErpnextRequestOptions {
 type ErpnextActionHandler = (input: Record<string, unknown>, context: ErpnextActionContext) => Promise<unknown>;
 
 const erpnextActionHandlers: ProviderActionHandlers<"erpnext", ErpnextActionHandler> = {
+  async validate_connection(_input, context) {
+    const payload = await requestErpnext({
+      ...context,
+      path: buildMethodPath(erpnextLoggedUserMethod),
+      method: "GET",
+      phase: "execute",
+    });
+    return {
+      accountId: readRequiredMessageString(payload, "ERPNext validation response"),
+      apiVersion: "Frappe REST API v1",
+    };
+  },
+  async discover_capabilities(_input, context) {
+    await requestErpnext({
+      ...context,
+      path: buildMethodPath(erpnextLoggedUserMethod),
+      method: "GET",
+      phase: "execute",
+    });
+    const capabilities = [];
+    for (const entity of erpnextEntities) {
+      try {
+        const companyField = requireErpCompanyField(entity, context.companyId);
+        await requestErpnext({
+          ...context,
+          path: buildResourcePath(entity.entity),
+          method: "GET",
+          query: {
+            fields: JSON.stringify(entity.fields),
+            filters: companyField ? JSON.stringify([[companyField, "=", context.companyId]]) : undefined,
+            limit_page_length: "1",
+          },
+          phase: "execute",
+        });
+        capabilities.push(...discoverErpCapabilities([entity]));
+      } catch (error) {
+        if (error instanceof ProviderRequestError && [400, 403, 404, 422].includes(error.status)) continue;
+        throw error;
+      }
+    }
+    if (capabilities.length === 0) {
+      throw new ProviderRequestError(422, "No supported ERP entities are visible to this connection", {
+        code: "unsupported",
+        supportedDomains: [],
+      });
+    }
+    return { capabilities };
+  },
+  async list_entities(rawInput, context) {
+    const { input, entity } = readErpInput(rawInput, erpnextEntities);
+    const companyId = resolveErpCompanyId(input.companyId, context.companyId);
+    const companyField = requireErpCompanyField(entity, companyId);
+    const start = readOffsetCursor(input.cursor);
+    const filters: unknown[] = [];
+    if (input.modifiedFrom) filters.push(["modified", ">=", input.modifiedFrom]);
+    if (input.modifiedTo) filters.push(["modified", "<", input.modifiedTo]);
+    if (companyId && companyField) filters.push([companyField, "=", companyId]);
+    const payload = await requestErpnext({
+      ...context,
+      path: buildResourcePath(entity.entity),
+      method: "GET",
+      query: compactObject({
+        fields: JSON.stringify(input.fields ?? entity.fields),
+        filters: filters.length ? JSON.stringify(filters) : undefined,
+        order_by: "modified asc",
+        limit_start: String(start),
+        limit_page_length: String(input.pageSize),
+      }),
+      phase: "execute",
+    });
+    const items = readRequiredDataArray(payload, "ERPNext list_entities response").map((item) =>
+      projectErpFields(item, input.fields),
+    );
+    return erpActionOutput(
+      entity,
+      {
+        items,
+        nextCursor: items.length === input.pageSize ? String(start + items.length) : undefined,
+        native: { limitStart: start, count: items.length, orderBy: "modified asc" },
+      },
+      input.pageNumber,
+    );
+  },
   async get_logged_user(_input, context) {
     const payload = await requestErpnext({
       ...context,
@@ -68,6 +167,7 @@ const erpnextActionHandlers: ProviderActionHandlers<"erpnext", ErpnextActionHand
     };
   },
   async list_documents(input, context) {
+    const pageLength = readBoundedPageLength(input.page_length);
     const payload = await requestErpnext({
       ...context,
       path: buildResourcePath(readRequiredString(input.doctype, "doctype")),
@@ -76,8 +176,8 @@ const erpnextActionHandlers: ProviderActionHandlers<"erpnext", ErpnextActionHand
         fields: encodeOptionalJson(input.fields),
         filters: encodeOptionalJson(input.filters),
         order_by: optionalString(input.order_by),
-        limit_start: readOptionalIntegerString(input.start),
-        limit_page_length: readOptionalIntegerString(input.page_length),
+        limit_start: readBoundedOffset(input.start, Number(pageLength)),
+        limit_page_length: pageLength,
       }),
       phase: "execute",
     });
@@ -196,13 +296,19 @@ export const executors: ProviderExecutors = defineProviderExecutors<ErpnextActio
   handlers: erpnextActionHandlers,
   async createContext(context: ExecutionContext, fetcher: typeof fetch): Promise<ErpnextActionContext> {
     const credential = await requireApiKeyCredential(context, service);
+    const privateRunner = credential.values.privateRunner === "true";
     return {
       apiKey: credential.apiKey,
       apiSecret: readRequiredString(credential.values.apiSecret, "apiSecret"),
       baseUrl: normalizeBaseUrl(
         optionalString(credential.values.baseUrl) ?? optionalString(credential.metadata.baseUrl),
+        privateRunner,
       ),
-      fetcher,
+      companyId: optionalString(credential.values.companyId),
+      fetcher: createProviderFetch({
+        fetch: fetcher,
+        allowPrivateNetwork: () => privateRunner && isPrivateNetworkAccessAllowed(),
+      }),
       signal: context.signal,
     };
   },
@@ -211,9 +317,21 @@ export const executors: ProviderExecutors = defineProviderExecutors<ErpnextActio
 
 export const proxy: ProviderProxyExecutor = async (input, context): Promise<ProxyExecutionResult> => {
   try {
+    if (input.method !== "GET") {
+      throw new ProviderRequestError(403, "ERPNext proxy is read-only");
+    }
+    if (!isAllowedErpnextReadEndpoint(input.endpoint)) {
+      throw new ProviderRequestError(403, "ERPNext proxy endpoint is outside the read-only allowlist");
+    }
+    assertErpnextProxyQuery(input.query);
     const credential = await requireApiKeyCredential(context, service);
+    if (optionalString(credential.values.companyId)) {
+      throw new ProviderRequestError(403, "ERPNext proxy is disabled for company-scoped connections");
+    }
+    const privateRunner = credential.values.privateRunner === "true";
     const baseUrl = normalizeBaseUrl(
       optionalString(credential.values.baseUrl) ?? optionalString(credential.metadata.baseUrl),
+      privateRunner,
     );
     const apiSecret = readRequiredString(credential.values.apiSecret, "apiSecret");
     const url = createProviderProxyUrl(baseUrl, input.endpoint, input.query);
@@ -224,18 +342,42 @@ export const proxy: ProviderProxyExecutor = async (input, context): Promise<Prox
       headers.set("content-type", "application/json");
     }
 
-    const response = await proxyFetch(url, {
-      method: input.method,
-      headers,
-      body:
-        input.body === undefined ? undefined : typeof input.body === "string" ? input.body : JSON.stringify(input.body),
-      signal: context.signal,
+    return await withErpConcurrency(async () => {
+      const timeout = createProviderTimeout(context.signal, erpRequestTimeoutMs);
+      try {
+        const response = await createProviderFetch({
+          fetch: proxyFetch,
+          allowPrivateNetwork: () => privateRunner && isPrivateNetworkAccessAllowed(),
+        })(url, {
+          method: input.method,
+          headers,
+          body:
+            input.body === undefined
+              ? undefined
+              : typeof input.body === "string"
+                ? input.body
+                : JSON.stringify(input.body),
+          signal: timeout.signal,
+          redirect: "manual",
+        });
+        if (response.status >= 300 && response.status < 400) {
+          throw new ProviderRequestError(502, "ERPNext redirects are disabled");
+        }
+        if (!response.ok) {
+          await readProviderProxyErrorMessage(response, "");
+          throw new ProviderRequestError(response.status, `ERPNext proxy request failed with HTTP ${response.status}`);
+        }
+        return {
+          ok: true,
+          response: await readProviderProxyResponse(response, { maxBytes: erpMaxResponseBytes }),
+        };
+      } catch (error) {
+        if (error instanceof ProviderRequestError) throw error;
+        throw new ProviderRequestError(timeout.didTimeout() ? 504 : 502, "ERPNext proxy request failed");
+      } finally {
+        timeout.cleanup();
+      }
     });
-    if (!response.ok) {
-      const text = await readProviderProxyErrorMessage(response, "");
-      throw new ProviderRequestError(response.status, text || `provider request failed with HTTP ${response.status}`);
-    }
-    return { ok: true, response: await readProviderProxyResponse(response) };
   } catch (error) {
     return toProviderProxyError(error, "provider request failed");
   }
@@ -243,8 +385,12 @@ export const proxy: ProviderProxyExecutor = async (input, context): Promise<Prox
 
 export const credentialValidators: CredentialValidators = {
   async apiKey(input, { fetcher, signal }) {
-    const guardedFetcher = createProviderFetch({ fetch: fetcher, allowPrivateNetwork: isPrivateNetworkAccessAllowed });
-    const baseUrl = normalizeBaseUrl(input.values.baseUrl);
+    const privateRunner = input.values.privateRunner === "true";
+    const guardedFetcher = createProviderFetch({
+      fetch: fetcher,
+      allowPrivateNetwork: () => privateRunner && isPrivateNetworkAccessAllowed(),
+    });
+    const baseUrl = normalizeBaseUrl(input.values.baseUrl, privateRunner);
     const apiSecret = readRequiredString(input.values.apiSecret, "apiSecret");
     const payload = await requestErpnext({
       baseUrl,
@@ -273,55 +419,66 @@ export const credentialValidators: CredentialValidators = {
   },
 };
 
-async function requestErpnext(input: ErpnextRequestOptions): Promise<unknown> {
-  const url = buildUrl(input.baseUrl, input.path, input.query);
-  let response: Response;
-  try {
-    response = await input.fetcher(url, {
-      method: input.method,
-      headers: buildHeaders(input.apiKey, input.apiSecret, input.body !== undefined),
-      body: input.body === undefined ? undefined : JSON.stringify(input.body),
-      signal: input.signal,
-    });
-  } catch (error) {
-    throw new ProviderRequestError(
-      502,
-      error instanceof Error
-        ? `ERPNext request failed for ${url}: ${error.message}`
-        : `ERPNext request failed for ${url}`,
-    );
-  }
-
-  const payload = await readErpnextPayload(response);
-  if (!response.ok) {
-    throw createErpnextError(response.status, payload, input.phase);
-  }
-  return payload;
+export async function discoverResources(
+  context: ExecutionContext,
+  fetcher: typeof fetch,
+): Promise<ProviderResourceCandidate[]> {
+  const credential = await requireApiKeyCredential(context, service);
+  const actionContext: ErpnextActionContext = {
+    apiKey: credential.apiKey,
+    apiSecret: readRequiredString(credential.values.apiSecret, "apiSecret"),
+    baseUrl: normalizeBaseUrl(
+      optionalString(credential.values.baseUrl) ?? optionalString(credential.metadata.baseUrl),
+      credential.values.privateRunner === "true",
+    ),
+    companyId: optionalString(credential.values.companyId),
+    fetcher: createProviderFetch({
+      fetch: fetcher,
+      allowPrivateNetwork: () => credential.values.privateRunner === "true" && isPrivateNetworkAccessAllowed(),
+    }),
+    signal: context.signal,
+  };
+  const result = (await erpnextActionHandlers.discover_capabilities({}, actionContext)) as {
+    capabilities: Array<{ domain: string; nativeEntity: string; fields: string[] }>;
+  };
+  return result.capabilities.map((capability) => ({
+    sourceType: "erpnext",
+    resourceId: capability.domain,
+    title: `ERPNext: ${capability.domain}`,
+    mimeType: `application/vnd.oomol.erp.${capability.domain}`,
+    schema: { ...capability, readable: true, writable: false },
+  }));
 }
 
-function normalizeBaseUrl(value: unknown, allowPrivateNetwork: boolean = isPrivateNetworkAccessAllowed()): string {
-  const raw = optionalString(value);
-  if (!raw) {
-    throw new ProviderRequestError(400, "baseUrl is required");
-  }
-
-  const url = assertPublicHttpUrl(raw, {
-    fieldName: "baseUrl",
-    allowPrivateNetwork,
-    createError: (message) => new ProviderRequestError(400, message),
+async function requestErpnext(input: ErpnextRequestOptions): Promise<unknown> {
+  return withErpConcurrency(async () => {
+    const url = buildUrl(input.baseUrl, input.path, input.query);
+    const timeout = createProviderTimeout(input.signal, erpRequestTimeoutMs);
+    try {
+      const response = await input.fetcher(url, {
+        method: input.method,
+        headers: buildHeaders(input.apiKey, input.apiSecret, input.body !== undefined),
+        body: input.body === undefined ? undefined : JSON.stringify(input.body),
+        signal: timeout.signal,
+        redirect: "manual",
+      });
+      if (response.status >= 300 && response.status < 400) {
+        throw new ProviderRequestError(502, "ERPNext redirects are disabled");
+      }
+      const payload = await readErpnextPayload(response, timeout.signal);
+      if (!response.ok) throw createErpnextError(response.status, payload, input.phase);
+      return payload;
+    } catch (error) {
+      if (error instanceof ProviderRequestError) throw error;
+      throw new ProviderRequestError(timeout.didTimeout() ? 504 : 502, "ERPNext request failed");
+    } finally {
+      timeout.cleanup();
+    }
   });
+}
 
-  if (url.protocol !== "https:" && !allowPrivateNetwork) {
-    throw new ProviderRequestError(400, "baseUrl must use HTTPS");
-  }
-  if (url.username || url.password) {
-    throw new ProviderRequestError(400, "baseUrl must not include username or password");
-  }
-
-  url.search = "";
-  url.hash = "";
-  url.pathname = url.pathname.replace(/\/+$/, "");
-  return url.toString().replace(/\/+$/, "");
+function normalizeBaseUrl(value: unknown, privateRunner = false): string {
+  return normalizeErpBaseUrl(value, { privateRunner });
 }
 
 function buildUrl(baseUrl: string, path: string, query?: Record<string, string | undefined>): string {
@@ -358,8 +515,47 @@ function buildMethodPath(methodName: string): string {
   return `/api/method/${methodName}`;
 }
 
-async function readErpnextPayload(response: Response): Promise<unknown> {
-  const text = await response.text();
+function isAllowedErpnextReadEndpoint(endpoint: string): boolean {
+  if (endpoint === buildMethodPath(erpnextLoggedUserMethod)) {
+    return true;
+  }
+  return erpnextEntities.some((entity) => {
+    const root = buildResourcePath(entity.entity);
+    return endpoint === root || endpoint.startsWith(`${root}/`);
+  });
+}
+
+function assertErpnextProxyQuery(query: Record<string, unknown> | undefined): void {
+  const pageLength = query?.limit_page_length;
+  const normalizedPageLength = pageLength === undefined ? 100 : Number(pageLength);
+  if (pageLength !== undefined) {
+    if (!Number.isInteger(normalizedPageLength) || normalizedPageLength < 1 || normalizedPageLength > 200) {
+      throw new ProviderRequestError(400, "limit_page_length must be between 1 and 200");
+    }
+  }
+  readBoundedOffset(query?.limit_start, normalizedPageLength);
+  const fields = query?.fields;
+  if (fields !== undefined) {
+    let parsed: unknown;
+    try {
+      parsed = typeof fields === "string" ? JSON.parse(fields) : fields;
+    } catch {
+      throw new ProviderRequestError(400, "fields must be a JSON array");
+    }
+    if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 50) {
+      throw new ProviderRequestError(400, "fields must contain between 1 and 50 field names");
+    }
+  }
+}
+
+async function readErpnextPayload(response: Response, signal?: AbortSignal): Promise<unknown> {
+  const bytes = await readBoundedResponseBytes(response, {
+    maxBytes: erpMaxResponseBytes,
+    fieldName: "ERPNext response",
+    signal,
+    createError: (message) => new ProviderRequestError(413, message),
+  });
+  const text = new TextDecoder().decode(bytes);
   if (!text) {
     return {};
   }
@@ -373,67 +569,16 @@ async function readErpnextPayload(response: Response): Promise<unknown> {
 }
 
 function createErpnextError(status: number, payload: unknown, phase: ErpnextRequestPhase): ProviderRequestError {
-  const message = extractErpnextErrorMessage(payload) ?? `ERPNext request failed with status ${status}`;
-
   if (status === 429) {
-    return new ProviderRequestError(429, message);
+    return new ProviderRequestError(429, "ERPNext rate limit exceeded");
   }
   if (status === 401 || status === 403) {
-    return new ProviderRequestError(phase === "validate" ? 400 : status, message);
+    return new ProviderRequestError(phase === "validate" ? 400 : status, "ERPNext authentication or role denied");
   }
   if (status === 400 || status === 404 || status === 409 || status === 417 || status === 422) {
-    return new ProviderRequestError(status, message);
+    return new ProviderRequestError(status, "ERPNext rejected the request");
   }
-
-  return new ProviderRequestError(status >= 500 ? 502 : status, message);
-}
-
-function extractErpnextErrorMessage(payload: unknown): string | undefined {
-  if (typeof payload === "string" && payload.trim()) {
-    return payload.trim();
-  }
-
-  const record = optionalRecord(payload);
-  if (!record) {
-    return undefined;
-  }
-
-  const directMessage =
-    optionalString(record.exception) ??
-    optionalString(record.exc_type) ??
-    optionalString(record._error_message) ??
-    optionalString(record.message);
-  if (directMessage) {
-    return directMessage;
-  }
-
-  return parseServerMessages(optionalString(record._server_messages));
-}
-
-function parseServerMessages(value: string | undefined): string | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      return undefined;
-    }
-    const firstMessage = parsed[0];
-    if (typeof firstMessage === "string") {
-      try {
-        const nested = JSON.parse(firstMessage) as unknown;
-        return optionalString(optionalRecord(nested)?.message);
-      } catch {
-        return optionalString(firstMessage);
-      }
-    }
-  } catch {
-    return value;
-  }
-
-  return undefined;
+  return new ProviderRequestError(status >= 500 ? 502 : status, "ERPNext upstream request failed");
 }
 
 function readRequiredDataArray(payload: unknown, context: string): Array<Record<string, unknown>> {
@@ -545,9 +690,28 @@ function readRequiredInputObject(value: unknown, fieldName: string): Record<stri
   return record;
 }
 
-function readOptionalIntegerString(value: unknown): string | undefined {
-  if (typeof value !== "number" || !Number.isInteger(value)) {
-    return undefined;
+function readBoundedOffset(value: unknown, pageSize: number): string | undefined {
+  if (value === undefined) return undefined;
+  const offset = Number(value);
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > pageSize * (erpMaxPages - 1)) {
+    throw new ProviderRequestError(400, `offset must stay within ${erpMaxPages} pages`);
+  }
+  return String(offset);
+}
+
+function readBoundedPageLength(value: unknown): string {
+  if (value === undefined) return "100";
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 200) {
+    throw new ProviderRequestError(400, "page_length must be between 1 and 200");
   }
   return String(value);
+}
+
+function readOffsetCursor(value: string | undefined): number {
+  if (!value) return 0;
+  const offset = Number(value);
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    throw new ProviderRequestError(400, "cursor must be a non-negative integer offset");
+  }
+  return offset;
 }

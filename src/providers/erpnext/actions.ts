@@ -1,7 +1,9 @@
 import type { ActionDefinition } from "../../core/types.ts";
 
+import { defineErpReadActions } from "../../core/erp/actions.ts";
 import { s } from "../../core/json-schema.ts";
 import { defineProviderAction } from "../../core/provider-definition.ts";
+import { erpnextEntities } from "./erp.ts";
 
 const service = "erpnext";
 
@@ -44,6 +46,7 @@ const getValueInputSchema = s.object(
 );
 
 export const erpnextActions: ActionDefinition[] = [
+  ...defineErpReadActions(service, erpnextEntities),
   defineProviderAction(service, {
     name: "get_logged_user",
     description: "Get the currently authenticated ERPNext user for the configured connection.",
@@ -62,12 +65,13 @@ export const erpnextActions: ActionDefinition[] = [
         doctype: doctypeField,
         fields: s.stringArray("The ERPNext document fields to include in the response.", {
           minItems: 1,
+          maxItems: 50,
           itemDescription: "A document field to include in the list response.",
         }),
         filters: filtersSchema,
         order_by: s.nonEmptyString("The ERPNext order_by expression such as modified desc."),
         start: s.integer("The zero-based ERPNext list offset.", { minimum: 0 }),
-        page_length: s.positiveInteger("The maximum number of ERPNext documents to return."),
+        page_length: s.integer("The maximum number of ERPNext documents to return.", { minimum: 1, maximum: 200 }),
       },
       { optional: ["fields", "filters", "order_by", "start", "page_length"] },
     ),

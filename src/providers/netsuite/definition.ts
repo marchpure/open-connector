@@ -7,6 +7,8 @@ const service = "netsuite";
 export const provider: ProviderDefinition = {
   service,
   displayName: "NetSuite",
+  description:
+    "NetSuite through official SuiteTalk REST and SuiteQL APIs. Agent leases expose explicit bounded read-only ERP domain mappings; legacy record writes remain outside Agent leases.",
   categories: ["Finance", "Productivity"],
   authTypes: ["custom_credential"],
   auth: [
@@ -58,6 +60,14 @@ export const provider: ProviderDefinition = {
           secret: true,
           placeholder: "netsuite_token_secret",
           description: "Token secret paired with the NetSuite Token ID for token-based authentication.",
+        },
+        {
+          key: "companyId",
+          label: "Default subsidiary ID",
+          inputType: "text",
+          required: false,
+          secret: false,
+          description: "Optional fixed NetSuite subsidiary boundary for Agent reads.",
         },
       ],
       testAction: {

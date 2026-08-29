@@ -215,6 +215,23 @@ function readEnablement(value: string | undefined): EnablementEntry[] {
         owner: "knowledge-platform",
         evidenceRef: "docs/connection-expansion/p2-incremental-cn-office-storage-handoff.json#/connections/6",
       },
+      ...[
+        "erpnext",
+        "netsuite",
+        "sap_s4hana",
+        "oracle_fusion_erp",
+        "dynamics_365_finance",
+        "dynamics_365_business_central",
+        "odoo",
+        "kingdee_cloud",
+        "yonyou_bip",
+      ].map((service) => ({
+        service,
+        tier: "beta" as const,
+        connectorDefinitionVersion: "1.0.0",
+        owner: "erp-ecosystem",
+        evidenceRef: `docs/connection-expansion/p4-erp-ecosystem-handoff.json#/providers/${service}`,
+      })),
     ];
   }
   const parsed = JSON.parse(value) as unknown;

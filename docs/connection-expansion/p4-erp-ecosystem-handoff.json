@@ -1,0 +1,260 @@
+{
+  "schemaVersion": 1,
+  "status": "CONNECTION_INCREMENTAL_P4_FROZEN_WITH_EXTERNAL_BLOCKERS",
+  "baseSha": "3bbd44624933300487a54ee3acba23190b66ee98",
+  "branch": "feat/connection-expansion-p4-erp-ecosystem",
+  "worktree": "/Users/bytedance/.codex/worktrees/knowledge-connection-expansion-p4-erp-ecosystem-20260829-010647",
+  "scope": {
+    "agentVocabulary": [
+      "organization",
+      "company",
+      "account",
+      "customer",
+      "supplier",
+      "item",
+      "warehouse",
+      "inventory_balance",
+      "inventory_transaction",
+      "purchase_order",
+      "purchase_receipt",
+      "sales_order",
+      "delivery",
+      "accounts_receivable",
+      "accounts_payable",
+      "journal_entry",
+      "general_ledger",
+      "cost_center",
+      "project"
+    ],
+    "agentActions": ["validate_connection", "discover_capabilities", "list_entities"],
+    "writePolicy": "All ERP mutation and unrestricted legacy query/record actions are denied at Agent lease issuance.",
+    "notClaimedAsFullErp": ["workday", "sage_hr", "sage_sales_management", "cin7_core"]
+  },
+  "providers": {
+    "erpnext": {
+      "change": "hardened existing canonical provider",
+      "deployment": "Frappe Cloud or self-hosted; private instances require a controlled runner and exact egress allowlist",
+      "auth": "Frappe token api_key:api_secret",
+      "api": "Official Frappe REST API v1",
+      "officialReference": "https://docs.frappe.io/framework/user/en/api/rest",
+      "domains": "17 explicit DocType mappings",
+      "actions": ["validate_connection", "discover_capabilities", "list_entities"],
+      "compatibilityActions": "Existing generic DocType actions remain in the catalog but are denied to Agent leases.",
+      "tier": "beta",
+      "evidence": "Official frappe/erpnext:v16.33.0 image digest sha256:493cecf82c92c828bf0d0c57df60694e07dc61671e374ac93a070d1cc86df1bd was initialized locally. The reproducible verifier passed configure, encrypted credential validation, revision-scoped metadata discovery, company and customer bounded reads, distinct Agent leases, audit assertions, revocation assertions, and deletion on 2026-08-29.",
+      "blocker": "Official local-container evidence passed, but Frappe Cloud and deployment-specific custom DocType/role coverage remain unverified; keep beta."
+    },
+    "netsuite": {
+      "change": "hardened existing canonical provider",
+      "deployment": "NetSuite SaaS",
+      "auth": "OAuth 1.0 token-based authentication",
+      "api": "Official SuiteTalk REST v1 and SuiteQL",
+      "officialReference": "https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/chapter_1540391670.html",
+      "domains": "14 explicit record/SuiteQL mappings",
+      "actions": ["validate_connection", "discover_capabilities", "list_entities"],
+      "compatibilityActions": "Existing generic SuiteQL/record actions remain in the catalog but are denied to Agent leases.",
+      "tier": "beta",
+      "evidence": "SuiteQL is now single-statement read-only and Agent leases cannot grant legacy generic actions.",
+      "blocker": "No real NetSuite test account, integration record, role, or token."
+    },
+    "sap_s4hana": {
+      "change": "new",
+      "deployment": "SAP S/4HANA Cloud or supported gateway",
+      "auth": "Bearer token",
+      "api": "Official OData V2/V4 APIs published through SAP Business Accelerator Hub",
+      "officialReference": "https://api.sap.com/products/SAPS4HANACloud/apis/ODATA",
+      "domains": [
+        "company",
+        "customer",
+        "supplier",
+        "item",
+        "purchase_order",
+        "sales_order",
+        "general_ledger",
+        "cost_center"
+      ],
+      "actions": ["validate_connection", "discover_capabilities", "list_entities"],
+      "tier": "beta",
+      "evidence": "Official OData paths and explicit field mappings are covered by shared contract/runtime/security tests; no tenant result is claimed.",
+      "blocker": "Real SAP tenant, communication arrangement, licensed APIs, and least-privilege role required."
+    },
+    "oracle_fusion_erp": {
+      "change": "new",
+      "deployment": "Oracle Fusion Cloud ERP SaaS",
+      "auth": "Bearer token",
+      "api": "Official fscmRestApi 11.13.18.05",
+      "officialReference": "https://docs.oracle.com/en/cloud/saas/financials/25d/farfa/",
+      "domains": [
+        "company",
+        "supplier",
+        "purchase_order",
+        "accounts_payable",
+        "accounts_receivable",
+        "journal_entry",
+        "project"
+      ],
+      "actions": ["validate_connection", "discover_capabilities", "list_entities"],
+      "tier": "beta",
+      "evidence": "Official Fusion REST resource paths and explicit field mappings are covered by shared contract/runtime/security tests; no tenant result is claimed.",
+      "blocker": "Real Oracle Fusion pod, licensed modules, integration user, and roles required."
+    },
+    "dynamics_365_finance": {
+      "change": "new",
+      "deployment": "Dynamics 365 Finance & Operations SaaS",
+      "auth": "Microsoft Entra bearer token",
+      "api": "Official OData v4 data entities",
+      "officialReference": "https://learn.microsoft.com/dynamics365/fin-ops-core/dev-itpro/data-entities/odata",
+      "domains": ["company", "customer", "supplier", "item", "inventory_balance", "purchase_order", "sales_order"],
+      "actions": ["validate_connection", "discover_capabilities", "list_entities"],
+      "tier": "beta",
+      "evidence": "Official OData data-entity paths and explicit field mappings are covered by shared contract/runtime/security tests; no tenant result is claimed.",
+      "blocker": "Real environment, app registration, legal entities, and data-entity permissions required."
+    },
+    "dynamics_365_business_central": {
+      "change": "new",
+      "deployment": "Business Central online",
+      "auth": "Microsoft Entra bearer token",
+      "api": "Official API v2.0",
+      "officialReference": "https://learn.microsoft.com/dynamics365/business-central/dev-itpro/api-reference/v2.0/",
+      "domains": ["company", "customer", "supplier", "item", "purchase_order", "sales_order"],
+      "actions": ["validate_connection", "discover_capabilities", "list_entities"],
+      "tier": "beta",
+      "evidence": "Official API v2.0 paths and explicit field mappings are covered by shared contract/runtime/security tests; no tenant result is claimed.",
+      "blocker": "Real tenant, environment, company IDs, app registration, and permissions required."
+    },
+    "odoo": {
+      "change": "new",
+      "deployment": "Odoo 19 cloud or self-hosted official server",
+      "auth": "Bearer API key plus X-Odoo-Database",
+      "api": "Official JSON-2 API",
+      "officialReference": "https://www.odoo.com/documentation/19.0/developer/reference/external_api.html",
+      "domains": [
+        "company",
+        "account",
+        "customer",
+        "supplier",
+        "item",
+        "warehouse",
+        "purchase_order",
+        "sales_order",
+        "journal_entry",
+        "cost_center",
+        "project"
+      ],
+      "actions": ["validate_connection", "discover_capabilities", "list_entities"],
+      "tier": "beta",
+      "evidence": "Official odoo:19.0 image digest sha256:f99ffac95cb39a0924622ea4118481c95651d9c84187e5b30a21c2cc4419c7dd was initialized locally with account, sale, purchase, stock, and project modules. The reproducible verifier passed configure, encrypted credential validation, revision-scoped metadata discovery, company and customer bounded reads, distinct Agent leases, audit assertions, revocation assertions, and deletion on 2026-08-29. Live discovery also corrected the Odoo 19 account.account company mapping to company_ids.",
+      "blocker": "Local Community Edition evidence passed, but hosted/Enterprise API entitlement and deployment-specific module/role coverage remain unverified; keep beta."
+    },
+    "kingdee_cloud": {
+      "change": "new",
+      "deployment": "Kingdee Cloud Galaxy/Cosmic cloud or private deployment through controlled runner",
+      "auth": "Official X-KDApi-AcctID/AppID/AppSec/UserName/LCID headers",
+      "api": "Kingdee Cloud WebAPI DynamicFormService",
+      "officialReference": "https://openapi.open.kingdee.com/ApiDoc",
+      "domains": [
+        "organization",
+        "customer",
+        "supplier",
+        "item",
+        "warehouse",
+        "purchase_order",
+        "sales_order",
+        "general_ledger"
+      ],
+      "actions": ["validate_connection", "discover_capabilities", "list_entities"],
+      "tier": "beta",
+      "evidence": "Official WebAPI transport and explicit form/field mappings are covered by shared contract/runtime/security tests; no tenant result is claimed.",
+      "blocker": "Real licensed tenant/private deployment, documented auth contract, forms, and permissions required."
+    },
+    "yonyou_bip": {
+      "change": "new",
+      "deployment": "YonBIP cloud or NC Cloud private deployment through controlled runner",
+      "auth": "Official access_token header",
+      "api": "Official YonBIP OpenAPI paths; exact version varies by purchased service",
+      "officialReference": "https://developer.yonyou.com/",
+      "domains": ["organization", "customer", "supplier", "item", "purchase_order", "sales_order", "general_ledger"],
+      "actions": ["validate_connection", "discover_capabilities", "list_entities"],
+      "tier": "beta",
+      "evidence": "Official OpenAPI transport and explicit resource/field mappings are covered by shared contract/runtime/security tests; no tenant result is claimed.",
+      "blocker": "Real licensed tenant/private deployment, official application, version-specific endpoint confirmation, and roles required."
+    }
+  },
+  "adjacentCatalogProviders": {
+    "workday": {
+      "change": "reused unchanged",
+      "trueCoverage": ["HR workers", "jobs", "job postings"],
+      "notClaimed": "general ERP, finance, procurement, inventory, or order management"
+    },
+    "sage_hr": {
+      "change": "reused unchanged",
+      "trueCoverage": ["HR employees", "teams", "positions", "time off"],
+      "notClaimed": "Sage ERP or finance"
+    },
+    "sage_sales_management": {
+      "change": "reused unchanged",
+      "trueCoverage": ["CRM accounts", "contacts", "opportunities"],
+      "notClaimed": "Sage ERP or finance"
+    },
+    "cin7_core": {
+      "change": "reused unchanged",
+      "trueCoverage": ["inventory customers", "products"],
+      "notClaimed": "complete finance or general-ledger ERP"
+    }
+  },
+  "security": [
+    "All connections use the existing tenant/workspace/owner/visibility/revision control plane and encrypted credential_ref storage.",
+    "Browser and Agent payloads receive redacted profiles, not ERP credentials.",
+    "Agent leases accept only actions belonging to the selected ERP provider and deny legacy generic/write actions.",
+    "All new actions are read-only; no write action was added.",
+    "Reads enforce maximum 100 pages, 200 rows per page, 50 projected fields, 4 MiB response, 30 second timeout, 8 concurrent requests, and 366 day windows.",
+    "Every bounded read requests and returns only its explicit native-field allowlist; Kingdee positional rows are mapped to the requested FieldKeys before output.",
+    "Unknown domains and fields return structured unsupported errors.",
+    "Redirects fail closed; continuation URLs must remain on the configured origin; guarded fetch checks URL and DNS.",
+    "Private SAP/Odoo/Kingdee/Yonyou/ERPNext access requires a per-connection privateRunner opt-in plus CONNECTION_ERP_PRIVATE_RUNNER=true, OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK=true, and CONNECTION_ERP_EGRESS_ALLOWLIST on the dedicated ERP runner.",
+    "Configured company/legal-entity boundaries are reapplied on every page; domains without a safe native company filter are omitted from discovery and return structured unsupported.",
+    "Provider error bodies, financial rows, credentials, and personal information are not written to logs or handoff."
+  ],
+  "verification": {
+    "realLifecycleScript": "examples/verify-erp-connection.ts",
+    "requiredFlow": "configure -> encrypted credential -> validate -> capability discovery -> two bounded domains -> Agent lease -> audit -> revoke -> delete",
+    "automated": [
+      "src/core/erp/runtime.test.ts",
+      "src/core/erp/vendor-runtime.test.ts",
+      "src/providers/erpnext/executors.test.ts",
+      "src/providers/netsuite/executors.test.ts",
+      "src/control-plane/server.test.ts",
+      "src/control-plane/lease.test.ts",
+      "src/control-plane/resource-store.test.ts",
+      "src/control-plane/job-store.test.ts",
+      "src/control-plane/security.test.ts"
+    ],
+    "results": {
+      "catalog": "1460 providers and 15236 actions generated",
+      "fixCheck": "passed",
+      "focusedTests": "ERP contract, vendor runtime, ERPNext/NetSuite proxy policy, control-plane, lease, resource-store, job recovery, and security suites passed.",
+      "fullTests": "174 files passed, 1 skipped; 1572 tests passed, 4 skipped after the completion-audit hardening.",
+      "build": "passed",
+      "productionAudit": "0 vulnerabilities",
+      "fullAudit": "0 vulnerabilities",
+      "sbom": "artifacts/npm-sbom-cyclonedx.json; 656 components; SHA-256 c035a5babcc5ce01acfc4b4da509a5a881105cb8d024be04f58ea08288e013a0; unchanged from the frozen base",
+      "licenseInventory": "652/656 baseline SBOM components carry license metadata. The four pre-existing omissions are busboy, pause-stream, streamsearch, and the internal web workspace; P4 adds no dependency.",
+      "dependencyInventory": "npm ls --all could not produce a clean inventory from the pre-existing shared node_modules tree (589 extraneous/missing reports); package-lock.json and the unchanged baseline SBOM remain authoritative.",
+      "gitDiffCheck": "passed"
+    },
+    "realTenantPolicy": "NetSuite, SAP, Oracle Fusion, Dynamics, Kingdee, and Yonyou remain beta until the script passes against real licensed test tenants.",
+    "localContainerPolicy": "Odoo 19 and ERPNext 16.33.0 both passed the script against initialized official local containers. Both remain beta pending hosted/deployment-specific entitlement, module, customization, and role coverage."
+  },
+  "licensing": [
+    "No vendor SDK, copied vendor code, or new dependency was added.",
+    "API availability and licensing vary by SAP communication scenario, Oracle Fusion module, Microsoft Dynamics product, Odoo edition/plan, and Kingdee/Yonyou product version.",
+    "Deployment owners must confirm API entitlement and data-processing terms before enabling a provider."
+  ],
+  "integrationNotes": [
+    "Regenerate catalog and registries after merge.",
+    "Do not promote any P4 provider to verified without attached real lifecycle evidence.",
+    "Do not treat Workday, Sage HR, Sage Sales Management, or Cin7 Core as full ERP coverage.",
+    "Preserve provider-native entity names, fields, errors, versions, and cursors; the ERP domain is vocabulary, not a fabricated universal API.",
+    "Keep all P4 ERP enablement entries beta until their individual blockers are cleared."
+  ]
+}

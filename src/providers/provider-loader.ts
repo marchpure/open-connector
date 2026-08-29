@@ -30,7 +30,16 @@ export interface ProviderResourceCandidate {
     | "tencent_cos"
     | "huawei_obs"
     | "minio"
-    | "qiniu_kodo";
+    | "qiniu_kodo"
+    | "erpnext"
+    | "netsuite"
+    | "sap_s4hana"
+    | "oracle_fusion_erp"
+    | "dynamics_365_finance"
+    | "dynamics_365_business_central"
+    | "odoo"
+    | "kingdee_cloud"
+    | "yonyou_bip";
   resourceId: string;
   resourceToken?: string;
   version?: string;

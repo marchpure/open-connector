@@ -797,6 +797,90 @@ describe("connection control API", () => {
     database.close();
   });
 
+  it("rejects cross-provider and ERP legacy actions at lease issuance", async () => {
+    const database = new DatabaseSync(":memory:");
+    const erpProvider: ProviderDefinition = {
+      ...provider,
+      service: "erpnext",
+      actions: [
+        {
+          id: "erpnext.list_entities",
+          service: "erpnext",
+          name: "list_entities",
+          description: "Bounded ERP read.",
+          requiredScopes: [],
+          providerPermissions: [],
+          inputSchema: { type: "object" },
+          outputSchema: { type: "object" },
+        },
+        {
+          id: "erpnext.create_document",
+          service: "erpnext",
+          name: "create_document",
+          description: "Legacy ERP write.",
+          requiredScopes: [],
+          providerPermissions: [],
+          inputSchema: { type: "object" },
+          outputSchema: { type: "object" },
+        },
+      ],
+    };
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([erpProvider], {
+        executableActionIds: ["erpnext.list_entities", "erpnext.create_document"],
+      }),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          customCredential: async () => ({ profile: { accountId: "validated" } }),
+        }),
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://localhost:3417",
+      enablement: [{ service: "erpnext", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+    const created = await app.request("/v1/connections", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "erpnext", authType: "custom_credential", values: { secret: "secret" } }),
+    });
+    expect(created.status).toBe(201);
+    const connectionId = String(((await created.json()) as { connection: { id: string } }).connection.id);
+
+    for (const [action, status, code] of [
+      ["netsuite.list_entities", 400, "invalid_action"],
+      ["erpnext.create_document", 403, "action_not_allowed"],
+    ] as const) {
+      const lease = await app.request(`/v1/connections/${connectionId}/lease`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          allowedActions: [action],
+          invocationId: "inv-erp-policy",
+          audience: "knowledge-runtime",
+        }),
+      });
+      expect(lease.status).toBe(status);
+      expect(await lease.json()).toMatchObject({ error: { code } });
+    }
+
+    const readLease = await app.request(`/v1/connections/${connectionId}/lease`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        allowedActions: ["erpnext.list_entities"],
+        invocationId: "inv-erp-read",
+        audience: "knowledge-runtime",
+      }),
+    });
+    expect(readLease.status).toBe(201);
+    database.close();
+  });
+
   it("persists failed validation and marks the connection error", async () => {
     const database = new DatabaseSync(":memory:");
     const validateCredential = vi
