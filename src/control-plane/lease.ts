@@ -209,6 +209,28 @@ export class ConnectionLeaseService {
     return Number(result.changes) === 1;
   }
 
+  scope(jti: string, principal: TenantPrincipal): {
+    invocationId: string;
+    connectionIds: string[];
+    allowedActions: string[];
+  } | undefined {
+    const row = this.database
+      .prepare(
+        `select invocation_id, connection_ids_json, allowed_actions_json
+           from connection_leases
+          where jti=? and tenant_id=? and workspace_id=?`,
+      )
+      .get(jti, principal.tenantId, principal.workspaceId) as
+      | { invocation_id?: unknown; connection_ids_json?: unknown; allowed_actions_json?: unknown }
+      | undefined;
+    if (!row) return undefined;
+    return {
+      invocationId: String(row.invocation_id),
+      connectionIds: JSON.parse(String(row.connection_ids_json)) as string[],
+      allowedActions: JSON.parse(String(row.allowed_actions_json)) as string[],
+    };
+  }
+
   revokeForConnection(connectionId: string, principal: TenantPrincipal): number {
     const pattern = `%"${connectionId.replaceAll("%", "\\%").replaceAll("_", "\\_")}"%`;
     const result = this.database

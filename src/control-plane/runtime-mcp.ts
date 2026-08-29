@@ -83,7 +83,12 @@ export function createLeaseRuntimeMcpServer(
   signal: AbortSignal,
 ): McpServer {
   const runtime = createTenantRuntime(deps, request.principal);
-  const webActions = new TenantWebActionStore(deps.controlDatabase, request.principal, deps.secretCodec);
+  const webActions = new TenantWebActionStore(
+    deps.controlDatabase,
+    request.principal,
+    deps.secretCodec,
+    deps.webEgress,
+  );
   const server = new McpServer(
     { name: "connection-service-runtime", version: "1.0.0" },
     { instructions: "Use only actions explicitly granted by the current connection lease." },
@@ -162,6 +167,7 @@ async function executeDynamicWebAction(
     return failure("lease_scope_denied", "Web Action is not granted by the current lease.");
   }
   const current = verifyCurrentLease(runtime, request);
+  webActions.audit("tools_call", { connectionId: action.connectionId }, actionId, request.invocationId);
   const leaseAbort = new AbortController();
   const leaseWatch = setInterval(() => {
     try {
@@ -187,6 +193,7 @@ async function executeDynamicWebAction(
       invocationId: request.invocationId,
       input,
       signal: AbortSignal.any([signal, leaseAbort.signal]),
+      webEgress: deps.webEgress,
     });
   } finally {
     clearInterval(leaseWatch);
@@ -202,6 +209,14 @@ async function executeDynamicWebAction(
     return leaseFailure(error);
   }
   webActions.audit("credential_use", { connectionId: action.connectionId }, actionId, request.invocationId);
+  if (!run.result.ok) {
+    webActions.audit(
+      "failure",
+      { connectionId: action.connectionId, errorCode: run.result.error?.code ?? "execution_failed" },
+      actionId,
+      request.invocationId,
+    );
+  }
   return run.result.ok
     ? { ok: true, data: run.result.output, ...executionMeta(run) }
     : { ok: false, error: run.result.error, ...executionMeta(run) };
@@ -217,7 +232,12 @@ export function assertLeaseRuntimeRequest(
     const action = deps.catalog.actionsById.get(actionId);
     return action?.service === connection.service && action.execution.locallyExecutable;
   });
-  const dynamicActions = new TenantWebActionStore(deps.controlDatabase, request.principal, deps.secretCodec)
+  const dynamicActions = new TenantWebActionStore(
+    deps.controlDatabase,
+    request.principal,
+    deps.secretCodec,
+    deps.webEgress,
+  )
     .actionIds(connection.id)
     .filter((actionId) => request.claims.allowedActions.includes(actionId));
   if (selectedActions.length === 0 && dynamicActions.length === 0) {
@@ -248,7 +268,12 @@ async function listAllowedActions(
   try {
     const connection = verifyCurrentLease(runtime, request);
     webActionsFor(deps, request).audit("tools_list", { connectionId: connection.id }, undefined, request.invocationId);
-    const dynamic = await new TenantWebActionStore(deps.controlDatabase, request.principal, deps.secretCodec)
+    const dynamic = await new TenantWebActionStore(
+      deps.controlDatabase,
+      request.principal,
+      deps.secretCodec,
+      deps.webEgress,
+    )
       .list(connection.id)
       .catch(() => []);
     return success({
@@ -287,7 +312,12 @@ async function getActionGuide(
     });
   } catch (error) {
     if (actionId.startsWith("web_api.")) {
-      const webActions = new TenantWebActionStore(deps.controlDatabase, request.principal, deps.secretCodec);
+      const webActions = new TenantWebActionStore(
+        deps.controlDatabase,
+        request.principal,
+        deps.secretCodec,
+        deps.webEgress,
+      );
       const action = await webActions.get(actionId);
       if (action && action.connectionId === request.connectionId && request.claims.allowedActions.includes(actionId)) {
         webActions.audit(
@@ -320,7 +350,7 @@ async function getActionGuide(
 }
 
 function webActionsFor(deps: ControlPlaneDependencies, request: LeaseRuntimeMcpContext): TenantWebActionStore {
-  return new TenantWebActionStore(deps.controlDatabase, request.principal, deps.secretCodec);
+  return new TenantWebActionStore(deps.controlDatabase, request.principal, deps.secretCodec, deps.webEgress);
 }
 
 async function executeAction(

@@ -7,6 +7,7 @@ import { createGuardedFetch } from "../core/guarded-fetch.ts";
 import { redactSecrets } from "./redaction.ts";
 import { RestAdapterError, RestIdempotencyStore, RestOpenApiAdapter } from "./rest-adapter.ts";
 import { TenantWebActionStore, WebActionError } from "./web-action-store.ts";
+import type { WebEgressPolicy } from "./service.ts";
 
 const maxOutputBytes = 64 * 1024;
 const requestTimes = new Map<string, number[]>();
@@ -21,6 +22,7 @@ export async function executeWebAction(input: {
   invocationId: string;
   input: Record<string, unknown>;
   signal: AbortSignal;
+  webEgress?: WebEgressPolicy;
   fetcher?: typeof fetch;
 }): Promise<ActionRunResult> {
   const executionId = crypto.randomUUID();
@@ -54,7 +56,7 @@ export async function executeWebAction(input: {
         auth: toRestAuth(input.action, credential),
         definitionVersion: "web-1",
       },
-      sameOriginFetch(input.action.origin, input.action.timeoutMs, input.fetcher),
+      sameOriginFetch(input.action.origin, input.action.timeoutMs, input.fetcher, input.webEgress),
       new RestIdempotencyStore(input.database, input.scope, input.secretCodec),
     );
     const invocation = await adapter.invoke({
@@ -193,8 +195,19 @@ function assertSafeActionInput(value: unknown): void {
   }
 }
 
-function sameOriginFetch(origin: string, timeoutMs: number, fetcher?: typeof fetch): typeof fetch {
-  const guarded = createGuardedFetch({ fetch: fetcher, maxRedirects: 0, ...(fetcher ? { lookup: null } : {}) });
+function sameOriginFetch(
+  origin: string,
+  timeoutMs: number,
+  fetcher?: typeof fetch,
+  webEgress?: WebEgressPolicy,
+): typeof fetch {
+  const guarded = createGuardedFetch({
+    fetch: fetcher,
+    maxRedirects: 0,
+    allowLocalhostDev: webEgress?.allowLocalhostDev,
+    allowedLocalhostPorts: webEgress?.allowedLocalhostPorts,
+    ...(fetcher ? { lookup: null } : {}),
+  });
   return async (input, init) => {
     let url = new URL(input instanceof Request ? input.url : String(input), origin);
     for (let redirects = 0; redirects <= 3; redirects += 1) {
