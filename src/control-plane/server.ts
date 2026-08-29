@@ -38,6 +38,7 @@ import {
 } from "./runtime-mcp.ts";
 import { createTenantRuntime } from "./service.ts";
 import { TenantOAuthStateStore } from "./tenant-store.ts";
+import { TenantWebActionStore, webCredentialFromInput, publicWebAction } from "./web-action-store.ts";
 import { TenantWebDiscoveryStore } from "./web-discovery.ts";
 
 export interface ConnectionControlAppOptions {
@@ -416,6 +417,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
     }
     leases.revokeForConnection(connectionId, principal);
+    new TenantWebActionStore(options.controlDatabase, principal, options.secretCodec).revokeConnection(connectionId);
     return new Response(null, { status: 204 });
   });
   app.put("/v1/connections/:connectionId/acl", async (context) => {
@@ -685,6 +687,31 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     }
     const connectionService = connection.service;
     const requestedActions = requiredStringArray(body.allowedActions);
+    const webActions = new TenantWebActionStore(options.controlDatabase, principalOf(context), options.secretCodec);
+    if (connectionService === "web_api") {
+      const allowed = new Set(webActions.actionIds(connectionId));
+      if (requestedActions.some((actionId) => !allowed.has(actionId))) {
+        return jsonError(
+          context,
+          403,
+          "lease_action_forbidden",
+          "Every leased Web Action must be persisted on the connection.",
+        );
+      }
+      try {
+        const issued = leases.issue(principalOf(context), {
+          connectionIds: [connectionId],
+          connectionRevisions: { [connectionId]: connection.revision },
+          allowedActions: requestedActions,
+          invocationId: requiredString(body.invocationId),
+          audience: requiredString(body.audience),
+          ttlSeconds: body.ttlSeconds === undefined ? undefined : Number(body.ttlSeconds),
+        });
+        return context.json({ token: issued.token, claims: issued.claims }, 201);
+      } catch (error) {
+        return leaseError(context, error);
+      }
+    }
     const provider = options.catalog.providers.find((entry) => entry.service === connectionService);
     const declaredActions = new Set([
       ...(provider?.actions.map((action) => action.id) ?? []),
@@ -1057,16 +1084,50 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
   app.post("/v1/web-discovery/sessions/:sessionId/confirm", async (context) => {
     const body = await readJsonBody(context);
     try {
-      const definition = await tenantWebDiscovery(options, principalOf(context)).confirm(
-        context.req.param("sessionId"),
-        {
-          candidateId: requiredString(body.candidateId),
-          origin: requiredString(body.origin),
-          operationId: requiredString(body.operationId),
-          readOnly: body.readOnly === true,
-        },
-      );
-      return context.json({ definition }, 201);
+      const discovery = tenantWebDiscovery(options, principalOf(context));
+      const candidate = await discovery.getCandidate(context.req.param("sessionId"), requiredString(body.candidateId));
+      if (!candidate) return jsonError(context, 404, "web_discovery_not_found", "Candidate was not found.");
+      if (
+        requiredString(body.origin) !== candidate.origin ||
+        (body.readOnly === true) !== candidate.readOnly ||
+        !/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/.test(requiredString(body.operationId))
+      ) {
+        return jsonError(context, 400, "web_discovery_error", "Confirmation does not match the candidate.");
+      }
+      const authentication = parseWebAuthentication(body.authentication);
+      const action = await new TenantWebActionStore(
+        options.controlDatabase,
+        principalOf(context),
+        options.secretCodec,
+      ).confirm({
+        candidate,
+        operationId: requiredString(body.operationId),
+        connectionName: optionalString(body.connectionName),
+        authentication,
+        credential: webCredentialFromInput(authentication, body.credential),
+        parameterSources: recordOf(body.parameterSources) as Record<string, "path" | "query" | "body">,
+        pagination:
+          body.pagination && typeof body.pagination === "object"
+            ? {
+                supported: recordOf(body.pagination).supported !== false,
+                maxPages: Number(recordOf(body.pagination).maxPages ?? 10),
+              }
+            : undefined,
+        rateLimit:
+          body.rateLimit && typeof body.rateLimit === "object"
+            ? { maxRequestsPerMinute: Number(recordOf(body.rateLimit).maxRequestsPerMinute ?? 60) }
+            : undefined,
+        timeoutMs: body.timeoutMs === undefined ? undefined : Number(body.timeoutMs),
+        sideEffectConfirmed: body.sideEffectConfirmed === true,
+        enabled: body.enabled === undefined ? undefined : body.enabled === true,
+      });
+      const definition = await discovery.confirm(context.req.param("sessionId"), {
+        candidateId: requiredString(body.candidateId),
+        origin: requiredString(body.origin),
+        operationId: requiredString(body.operationId),
+        readOnly: body.readOnly === true,
+      });
+      return context.json({ definition, action: publicWebAction(action) }, 201);
     } catch (error) {
       return jsonError(
         context,
@@ -1368,6 +1429,18 @@ function parseRestAuth(value: unknown) {
   if (type === "bearer") return { type: "bearer" as const, token: requiredString(auth.token) };
   if (type === "oauth2") return { type: "oauth2" as const, accessToken: requiredString(auth.accessToken) };
   return { type: "none" as const };
+}
+
+function parseWebAuthentication(value: unknown): import("./web-action-store.ts").WebAuthProfile {
+  const auth = recordOf(value);
+  const type = optionalString(auth.type) ?? "none";
+  if (type === "api_key") {
+    return { type: "api_key", header: requiredString(auth.header) };
+  }
+  if (type === "bearer") return { type: "bearer" };
+  if (type === "cookie") return { type: "cookie" };
+  if (type !== "none") throw new Error("Web Action authentication must be none, api_key, bearer, or cookie.");
+  return { type: "none" };
 }
 
 function parseMcpDefinition(value: unknown) {
