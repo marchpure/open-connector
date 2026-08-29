@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "providerId": "elasticsearch",
+  "compatibleProduct": {
+    "name": "OpenSearch",
+    "version": "2.19.3",
+    "image": "opensearchproject/opensearch:2.19.3",
+    "imageDigest": "sha256:e96cc6ae1500a073d973c0906f30f7cf4d9c461f32f855f9242a2da933660cdd",
+    "verification": "passed independent product detection and two-page PIT/search_after lifecycle through the shared runtime"
+  },
+  "tier": "verified",
+  "engine": "Elasticsearch",
+  "engineVersion": "8.19.4",
+  "image": "docker.elastic.co/elasticsearch/elasticsearch:8.19.4",
+  "imageDigest": "sha256:13bb550524faa2aef6950b13fb6414c73b957e97e6169e5808743c8378614599",
+  "platform": "linux/arm64",
+  "verifiedAt": "2026-08-29T00:00:00+08:00",
+  "redaction": "No password, connection string, host, account identifier, token, PIT ID, or document ID is recorded.",
+  "canonicalDecision": "Enhance the existing elasticsearch provider. Detect Elasticsearch versus OpenSearch at validation and share the REST runtime; do not duplicate the provider under a second ID.",
+  "lifecycle": {
+    "validateConnection": "passed; root product and version detection identified Elasticsearch 8.19.4",
+    "discovery": "passed; index summary and mappings/settings",
+    "unicodeData": "passed with non-ASCII document content",
+    "boundedRead": "passed; response body is capped at 12 MiB and normalized hits at 10 MiB",
+    "stablePagination": "passed; PIT plus search_after returned two rows then one row with terminal nextCursor=null",
+    "agentWriteDeny": "passed by data-platform lease allowlist for index/delete/reindex/mapping/document mutations",
+    "controlledRunnerEgress": "passed through guarded private-network runtime",
+    "cleanup": "container removed"
+  },
+  "opensearchStatus": "Verified through the shared canonical elasticsearch provider; no duplicate provider ID is introduced."
+}

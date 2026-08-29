@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "providerId": "tidb_sql",
+  "tier": "verified",
+  "engine": "TiDB",
+  "engineVersion": "8.0.11-TiDB-v8.5.3",
+  "image": "pingcap/tidb:v8.5.3",
+  "imageDigest": "sha256:00f015520ce91734c3fbec720f23448e790e691655c7e181544a620872a00c61",
+  "platform": "linux/arm64",
+  "verifiedAt": "2026-08-29T00:00:00+08:00",
+  "redaction": "No password, connection string, host, account identifier, or token is recorded.",
+  "lifecycle": {
+    "validateConnection": "passed; engine and version fingerprint matched TiDB",
+    "discovery": "passed; databases, information_schema tables, and columns",
+    "unicodeIdentifier": "passed with a non-ASCII table name and values",
+    "boundedPreview": "passed; two-row ceiling returned truncated=true",
+    "parameterizedRead": "passed with native mysql2 binding",
+    "writeRejection": "passed for DELETE",
+    "multiStatementRejection": "passed",
+    "dangerousFunctionRejection": "passed for sleep",
+    "wrongCredential": "passed; normalized as database_authentication_failed",
+    "controlPlaneLifecycle": "passed; create=201, encrypted credential payload, explicit validation job=succeeded, lease=201, invocation=200, redacted audit persisted, revoke=200, revoked replay rejected, delete=204",
+    "controlledRunnerEgress": "passed through private-network opt-in plus exact CONNECTION_DATABASE_EGRESS_ALLOWLIST",
+    "cleanup": "container removed"
+  },
+  "runtimeCorrectionsFromRealEngine": [
+    "TiDB rejects MySQL START TRANSACTION READ ONLY as an unsupported no-op; the runtime instead enforces a minimally privileged read-only principal.",
+    "TiDB does not support EXPLAIN FORMAT=JSON; the runtime enforces the scan budget from native EXPLAIN estRows output."
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "providerId": "hive",
+  "tier": "verified",
+  "engine": "Apache Hive",
+  "engineVersion": "4.0.1",
+  "image": "apache/hive:4.0.1",
+  "imageDigest": "sha256:5194161ef50b80875f937dff04936df047cbe894e9727ab8f0606349345b1bd3",
+  "platform": "linux/arm64",
+  "verifiedAt": "2026-08-29T00:00:00+08:00",
+  "redaction": "No password, connection string, host, account identifier, or token is recorded.",
+  "lifecycle": {
+    "validateConnection": "passed through HiveServer2 Thrift; server version 4.0.1",
+    "authentication": "passed with the image's NONE mode through PLAIN SASL; NoSASL remains an explicit separate mode",
+    "discovery": "passed; database, table, and DESCRIBE columns",
+    "unicodeData": "passed with non-ASCII values",
+    "boundedPreview": "passed; two-row ceiling returned truncated=true",
+    "parameterizedRead": "passed after parser-first validation and literal binding with quoting",
+    "writeRejection": "passed for DROP TABLE",
+    "multiStatementRejection": "passed",
+    "controlledRunnerEgress": "passed through private-network opt-in plus exact CONNECTION_DATABASE_EGRESS_ALLOWLIST",
+    "cleanup": "container removed"
+  },
+  "remainingAuthBlocker": "Kerberos requires the optional native kerberos module and a real KDC/service principal; it was not installed or claimed verified."
+}

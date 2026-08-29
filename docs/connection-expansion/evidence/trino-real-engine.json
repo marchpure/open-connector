@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "providerId": "trino",
+  "tier": "verified",
+  "engine": "Trino",
+  "engineVersion": "477",
+  "image": "trinodb/trino:477",
+  "imageDigest": "sha256:ada485e4bffb90f859b401dc04c393d147b5840846ef66b27110662eb2675854",
+  "platform": "linux/arm64",
+  "verifiedAt": "2026-08-29T00:00:00+08:00",
+  "redaction": "No password, connection string, host, account identifier, or token is recorded.",
+  "lifecycle": {
+    "validateConnection": "passed; version() returned 477",
+    "discovery": "passed; catalogs, schemas, TPCH tables, and columns",
+    "boundedPreview": "passed against tpch.tiny.nation with two-row truncation",
+    "parameterizedRead": "passed through Trino prepared statement headers and EXECUTE USING",
+    "queryPolling": "passed across queued, running, and finished nextUri pages",
+    "writeRejection": "passed for DROP TABLE",
+    "multiStatementRejection": "passed",
+    "controlledRunnerEgress": "passed through private-network opt-in plus exact CONNECTION_DATABASE_EGRESS_ALLOWLIST",
+    "cleanup": "container removed"
+  },
+  "runtimeCorrectionsFromRealEngine": [
+    "Authentication is explicit: none for unsecured development coordinators, or Basic only when TLS is enabled.",
+    "Preview uses Trino OFFSET ... FETCH FIRST syntax.",
+    "Parameterized SQL is parser-checked after replacing placeholders with NULL, then sent as an official prepared statement."
+  ]
+}
