@@ -9,6 +9,8 @@ import type {
 import { createHash, randomBytes } from "node:crypto";
 import { requestAuthorizationCodeToken } from "./oauth-token.ts";
 
+const maximumOAuthStateAgeMs = 15 * 60 * 1000;
+
 /**
  * Started OAuth authorization flow returned to the local console.
  */
@@ -29,6 +31,20 @@ export interface OAuthAuthorizationCompleteInput {
   code: string;
   callbackParameters?: Record<string, string>;
   signal?: AbortSignal;
+  /**
+   * A callback route may atomically consume the state before reconstructing
+   * the tenant runtime. Passing the consumed value keeps completion on this
+   * same service while preventing a second database read or replay.
+   */
+  pendingState?: OAuthAuthorizationState;
+}
+
+export interface OAuthAuthorizationPrincipal {
+  tenantId: string;
+  workspaceId: string;
+  subject: string;
+  ownerId: string;
+  audience: string;
 }
 
 /**
@@ -41,6 +57,7 @@ export interface OAuthAuthorizationState {
   createdAt: string;
   pkceCodeVerifier?: string;
   clientConfig?: OAuthClientConfig;
+  principal?: OAuthAuthorizationPrincipal;
 }
 
 export interface OAuthFlowServiceOptions {
@@ -50,6 +67,7 @@ export interface OAuthFlowServiceOptions {
   stateMaxAgeMs?: number;
   secretCodec?: ISecretCodec;
   isCustomClientConfigAllowed?: (service: string) => boolean;
+  principal?: OAuthAuthorizationPrincipal;
 }
 
 /**
@@ -70,14 +88,16 @@ export class OAuthFlowService {
   private readonly stateMaxAgeMs: number;
   private readonly secretCodec?: ISecretCodec;
   private readonly isCustomClientConfigAllowed: (service: string) => boolean;
+  private readonly principal?: OAuthAuthorizationPrincipal;
 
   constructor(input: OAuthFlowServiceOptions) {
     this.clientConfigs = input.clientConfigs;
     this.connections = input.connections;
     this.states = input.states;
-    this.stateMaxAgeMs = input.stateMaxAgeMs ?? 15 * 60 * 1000;
+    this.stateMaxAgeMs = Math.min(input.stateMaxAgeMs ?? maximumOAuthStateAgeMs, maximumOAuthStateAgeMs);
     this.secretCodec = input.secretCodec;
     this.isCustomClientConfigAllowed = input.isCustomClientConfigAllowed ?? (() => false);
+    this.principal = input.principal;
   }
 
   async startAuthorization(input: OAuthAuthorizationStartInput): Promise<OAuthAuthorizationStart> {
@@ -91,7 +111,7 @@ export class OAuthFlowService {
       throw new OAuthFlowError("oauth_client_config_required", `Configure an OAuth client for ${service} first.`);
     }
 
-    const state = crypto.randomUUID();
+    const state = randomBytes(32).toString("base64url");
     const pkceCodeVerifier = auth.pkce ? createPkceCodeVerifier() : undefined;
     await this.states.set({
       service,
@@ -100,6 +120,7 @@ export class OAuthFlowService {
       createdAt: new Date().toISOString(),
       pkceCodeVerifier,
       clientConfig: input.clientConfig ? config : undefined,
+      principal: this.principal,
     });
 
     const authorizationUrl = new URL(this.clientConfigs.resolveEndpointUrl(service, auth.authorizationUrl, config));
@@ -134,8 +155,11 @@ export class OAuthFlowService {
   }
 
   async completeAuthorization(input: OAuthAuthorizationCompleteInput): Promise<{ service: string; connected: true }> {
-    const pending = await this.states.take(input.state);
+    const pending = input.pendingState ?? (await this.states.take(input.state));
     if (!pending) {
+      throw new OAuthFlowError("invalid_oauth_state", "OAuth state is missing or expired.");
+    }
+    if (pending.state !== input.state) {
       throw new OAuthFlowError("invalid_oauth_state", "OAuth state is missing or expired.");
     }
     if (isExpiredOAuthState(pending, this.stateMaxAgeMs)) {
@@ -238,7 +262,8 @@ function readCallbackParameters(
 
 function isExpiredOAuthState(state: OAuthAuthorizationState, maxAgeMs: number): boolean {
   const createdAt = Date.parse(state.createdAt);
-  return !Number.isFinite(createdAt) || Date.now() - createdAt > maxAgeMs;
+  const age = Date.now() - createdAt;
+  return !Number.isFinite(createdAt) || age < 0 || age > maxAgeMs;
 }
 
 function createPkceCodeVerifier(): string {

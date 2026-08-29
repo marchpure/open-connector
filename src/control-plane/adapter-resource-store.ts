@@ -1,9 +1,9 @@
 import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
+import type { TenantPrincipal } from "./types.ts";
 import type { DatabaseSync } from "node:sqlite";
 
 import { randomUUID } from "node:crypto";
 import { redactSecrets } from "./redaction.ts";
-import type { TenantPrincipal } from "./types.ts";
 
 export type AdapterResourceKind = "oracle_database" | "rest_openapi" | "mcp" | "files";
 export type AdapterResourceStatus = "ready" | "revoked";
@@ -137,11 +137,7 @@ export class TenantAdapterResourceStore {
            and (owner_id=? or visibility='team')
          order by created_at`,
       )
-      .all(
-        this.principal.tenantId,
-        this.principal.workspaceId,
-        this.principal.ownerId,
-      ) as Record<string, unknown>[];
+      .all(this.principal.tenantId, this.principal.workspaceId, this.principal.ownerId) as Record<string, unknown>[];
     return rows.map(rowToPublic);
   }
 
@@ -152,12 +148,9 @@ export class TenantAdapterResourceStore {
          where resource_id=? and tenant_id=? and workspace_id=?
            and status <> 'revoked' and (owner_id=? or visibility='team')`,
       )
-      .get(
-        resourceId,
-        this.principal.tenantId,
-        this.principal.workspaceId,
-        this.principal.ownerId,
-      ) as Record<string, unknown> | undefined;
+      .get(resourceId, this.principal.tenantId, this.principal.workspaceId, this.principal.ownerId) as
+      | Record<string, unknown>
+      | undefined;
     if (!row) return undefined;
     return {
       ...rowToPublic(row),
@@ -166,7 +159,10 @@ export class TenantAdapterResourceStore {
       ownerId: String(row.owner_id),
       visibility: String(row.visibility) as "personal" | "team",
       sourceId: String(row.source_id),
-      definition: JSON.parse(await this.secretCodec.decode(String(row.definition_ciphertext))) as Record<string, unknown>,
+      definition: JSON.parse(await this.secretCodec.decode(String(row.definition_ciphertext))) as Record<
+        string,
+        unknown
+      >,
     };
   }
 }

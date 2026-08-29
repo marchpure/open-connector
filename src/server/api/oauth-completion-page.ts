@@ -192,6 +192,34 @@ tick();
 </html>`;
 }
 
+export function renderOAuthErrorPage(kind: "provider" | "generic" = "generic"): string {
+  const title = kind === "provider" ? "Feishu authorization was not completed" : "Connection was not completed";
+  const body =
+    kind === "provider"
+      ? "Feishu returned an authorization error. Close this window and check the app permissions before trying again."
+      : "You can close this window and return to the Knowledge Workspace. No connection was created.";
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connection was not completed</title>
+<style>
+:root { --background: hsl(0 0% 100%); --foreground: hsl(222.2 84% 4.9%); --muted: hsl(210 40% 96.1%); --muted-foreground: hsl(215.4 16.3% 46.9%); --border: hsl(214.3 31.8% 91.4%); --danger: hsl(0 72% 51%); }
+* { box-sizing: border-box; }
+body { min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 24px; background: var(--background); color: var(--foreground); font-family: ui-sans-serif, system-ui, sans-serif; }
+main { width: min(100%, 420px); padding: 24px; border: 1px solid var(--border); border-radius: 12px; }
+h1 { margin: 0 0 10px; font-size: 20px; line-height: 28px; }
+p { margin: 0; color: var(--muted-foreground); font-size: 14px; line-height: 22px; }
+.badge { display: inline-flex; margin-bottom: 12px; color: var(--danger); font-size: 12px; font-weight: 600; }
+</style>
+</head>
+<body><main role="alert"><span class="badge">Authorization not completed</span><h1>${title}</h1><p>${body}</p></main>
+<script>setTimeout(()=>window.close(),5000);</script>
+</body>
+</html>`;
+}
+
 function scriptJson(value: unknown): string {
   return JSON.stringify(value).replaceAll("<", "\\u003c");
 }

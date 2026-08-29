@@ -1,10 +1,5 @@
 import type { CatalogStore, RuntimeProviderDefinition } from "../catalog-store.ts";
-import type {
-  CredentialDefinition,
-  JsonSchema,
-  OAuth2AuthDefinition,
-  ProviderAuthDefinition,
-} from "../core/types.ts";
+import type { CredentialDefinition, JsonSchema, OAuth2AuthDefinition, ProviderAuthDefinition } from "../core/types.ts";
 import type { CatalogTier } from "./types.ts";
 
 export interface EnablementEntry {
@@ -27,10 +22,7 @@ export class CatalogEnablement {
   list(): Array<EnablementEntry & CatalogProviderEntry> {
     return this.catalog.providers
       .map((provider) => this.toEntry(provider))
-      .filter(
-        (entry): entry is EnablementEntry & CatalogProviderEntry =>
-          entry !== undefined,
-      );
+      .filter((entry): entry is EnablementEntry & CatalogProviderEntry => entry !== undefined);
   }
 
   get(service: string): (EnablementEntry & CatalogProviderEntry) | undefined {
@@ -38,9 +30,7 @@ export class CatalogEnablement {
     return provider ? this.toEntry(provider) : undefined;
   }
 
-  private toEntry(
-    provider: RuntimeProviderDefinition,
-  ): (EnablementEntry & CatalogProviderEntry) | undefined {
+  private toEntry(provider: RuntimeProviderDefinition): (EnablementEntry & CatalogProviderEntry) | undefined {
     const configured = this.entries.get(provider.service);
     if (!configured) {
       return undefined;
@@ -80,14 +70,10 @@ function providerAuthSchema(auth: readonly ProviderAuthDefinition[]): JsonSchema
       additionalProperties: false,
     };
   }
-  return alternatives.length === 1
-    ? alternatives[0]
-    : { oneOf: alternatives };
+  return alternatives.length === 1 ? alternatives[0] : { oneOf: alternatives };
 }
 
-function authDefinitionSchema(
-  definition: Exclude<ProviderAuthDefinition, { type: "no_auth" }>,
-): JsonSchema {
+function authDefinitionSchema(definition: Exclude<ProviderAuthDefinition, { type: "no_auth" }>): JsonSchema {
   const properties: Record<string, JsonSchema> = {
     _auth_type: {
       const: definition.type,
@@ -151,8 +137,6 @@ function credentialSchema(field: CredentialDefinition): JsonSchema {
     title: field.label,
     description: field.description,
     ...(field.placeholder ? { placeholder: field.placeholder } : {}),
-    ...(field.inputType === "password" || field.secret
-      ? { format: "password" }
-      : {}),
+    ...(field.inputType === "password" || field.secret ? { format: "password" } : {}),
   };
 }

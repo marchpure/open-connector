@@ -426,12 +426,11 @@ export function assertPublicHttpUrl(value: string, options: PublicHttpUrlOptions
   }
 
   const ipv4 = parseIpv4(hostname);
-  const loopbackAllowed =
-    options.allowLocalhostDev === true && ipv4 !== undefined && ipv4IsLoopback(ipv4);
+  const loopbackAllowed = options.allowLocalhostDev === true && ipv4 !== undefined && ipv4IsLoopback(ipv4);
   if (
-    ipv4 !== undefined
-    && !loopbackAllowed
-    && isAddressClassBlocked(classifyIpv4(ipv4), options.allowPrivateNetwork === true)
+    ipv4 !== undefined &&
+    !loopbackAllowed &&
+    isAddressClassBlocked(classifyIpv4(ipv4), options.allowPrivateNetwork === true)
   ) {
     throw options.createError(`${options.fieldName} must not target private or reserved IP addresses`);
   }

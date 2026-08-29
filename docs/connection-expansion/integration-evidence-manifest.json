@@ -139,22 +139,9 @@
     }
   ],
   "enablement": {
-    "defaultServices": [
-      "feishu",
-      "dingtalk",
-      "wecom",
-      "aws_s3",
-      "aliyun_oss",
-      "volcengine_tos"
-    ],
+    "defaultServices": ["feishu", "dingtalk", "wecom", "aws_s3", "aliyun_oss", "volcengine_tos"],
     "defaultTier": "beta",
-    "requiredFields": [
-      "service",
-      "tier",
-      "connectorDefinitionVersion",
-      "owner",
-      "evidenceRef"
-    ],
+    "requiredFields": ["service", "tier", "connectorDefinitionVersion", "owner", "evidenceRef"],
     "verifiedServicesAreNotAutomaticallyEnabled": true,
     "policySource": "src/control-plane/index.ts"
   },
@@ -173,13 +160,7 @@
       "aliyun_oss",
       "volcengine_tos"
     ],
-    "regressionRequired": [
-      "oracle",
-      "files",
-      "rest_openapi",
-      "custom_mcp",
-      "web_api_discovery"
-    ],
+    "regressionRequired": ["oracle", "files", "rest_openapi", "custom_mcp", "web_api_discovery"],
     "explicitlyNotEnabledOrClaimedAsThisRound": [
       "bigquery",
       "snowflake",
@@ -203,11 +184,7 @@
       "log_platforms",
       "other_vertical_providers"
     ],
-    "compatibilityOnly": [
-      "dingtalk_bot",
-      "wecom_bot",
-      "wecom_mcp"
-    ]
+    "compatibilityOnly": ["dingtalk_bot", "wecom_bot", "wecom_mcp"]
   },
   "conflictResolution": [
     "Cherry-picked all W1 commits in source order, then all W2 commits in source order.",
@@ -271,10 +248,7 @@
   "deployment": {
     "entrypoint": "npm run start:connection-service",
     "dockerfile": "Dockerfile.connection-service",
-    "requiredSecrets": [
-      "CONNECTION_SERVICE_AUTH_SECRET",
-      "CONNECTION_SERVICE_ENCRYPTION_KEY"
-    ],
+    "requiredSecrets": ["CONNECTION_SERVICE_AUTH_SECRET", "CONNECTION_SERVICE_ENCRYPTION_KEY"],
     "importantConfig": [
       "CONNECTION_SERVICE_DATA_DIR",
       "CONNECTION_SERVICE_HOST",

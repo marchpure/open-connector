@@ -212,11 +212,17 @@ function validateDefinition(definition: McpDefinition): void {
     const local = ["localhost", "127.0.0.1", "::1"].includes(endpoint.hostname.toLowerCase());
     if (local) {
       if (!definition.allowLocalhostDev) {
-        throw new McpAdapterError("invalid_definition", "Local MCP endpoints require explicit dev allowlist confirmation.");
+        throw new McpAdapterError(
+          "invalid_definition",
+          "Local MCP endpoints require explicit dev allowlist confirmation.",
+        );
       }
       const port = Number(endpoint.port || (endpoint.protocol === "https:" ? 443 : 80));
       if (!definition.allowedLocalhostPorts?.includes(port)) {
-        throw new McpAdapterError("invalid_definition", "Local MCP endpoint port is not in the explicit dev allowlist.");
+        throw new McpAdapterError(
+          "invalid_definition",
+          "Local MCP endpoint port is not in the explicit dev allowlist.",
+        );
       }
     }
   }

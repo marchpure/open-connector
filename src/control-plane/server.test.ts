@@ -25,6 +25,25 @@ const provider: ProviderDefinition = {
   actions: [],
 };
 
+const oauthProvider: ProviderDefinition = {
+  service: "feishu",
+  displayName: "Feishu",
+  categories: ["Communication"],
+  authTypes: ["oauth2"],
+  auth: [
+    {
+      type: "oauth2",
+      authorizationUrl: "https://accounts.feishu.cn/open-apis/authen/v1/authorize",
+      tokenUrl: "https://open.feishu.cn/open-apis/authen/v2/oauth/token",
+      scopes: ["offline_access", "auth:user.id:read"],
+      minimumScopes: ["offline_access", "auth:user.id:read"],
+      tokenEndpointAuthMethod: "client_secret_post",
+      tokenRequestFormat: "json",
+    },
+  ],
+  actions: [],
+};
+
 const principal = {
   tenantId: "tenant-a",
   workspaceId: "workspace-a",
@@ -36,10 +55,333 @@ const principal = {
 const tempRoots: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 describe("connection control API", () => {
+  it("completes a bearer-free OAuth callback from encrypted, tenant-bound state", async () => {
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([oauthProvider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          oauth2: async () => ({ profile: { accountId: "feishu-user", displayName: "Feishu User" } }),
+        }),
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://127.0.0.1:3400",
+      enablement: [{ service: "feishu", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+    const configured = await app.request("/v1/oauth/configs", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "feishu", clientId: "cli_test", clientSecret: "secret-value" }),
+    });
+    expect(configured.status).toBe(200);
+    const started = await app.request("/v1/oauth/authorizations", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "feishu", connectionName: "my-feishu" }),
+    });
+    const authorization = (await started.json()) as { authorizationUrl: string; state: string };
+    const authorizationUrl = new URL(authorization.authorizationUrl);
+    expect(authorizationUrl.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:3400/oauth/callback");
+    expect(authorization.state).toHaveLength(43);
+    const stateRow = database.prepare("select * from tenant_oauth_states where state=?").get(authorization.state) as {
+      tenant_id: string;
+      workspace_id: string;
+      subject: string;
+      owner_id: string;
+      value_ciphertext: string;
+    };
+    expect(stateRow).toMatchObject({
+      tenant_id: principal.tenantId,
+      workspace_id: principal.workspaceId,
+      subject: principal.subject,
+      owner_id: principal.ownerId,
+    });
+    expect(stateRow.value_ciphertext).toMatch(/^enc:v1:/u);
+    expect(stateRow.value_ciphertext).not.toContain("secret-value");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({ access_token: "access-token", refresh_token: "refresh-token", token_type: "Bearer" }),
+      ),
+    );
+    const callback = await app.request(
+      `/oauth/callback?state=${encodeURIComponent(authorization.state)}&code=authorization-code`,
+    );
+    expect(callback.status).toBe(200);
+    const callbackHtml = await callback.text();
+    expect(callbackHtml).toContain("Connection complete");
+    expect(callbackHtml).not.toContain(authorization.state);
+    expect(callbackHtml).not.toContain("authorization-code");
+    expect(callbackHtml).not.toContain("access-token");
+    expect(callbackHtml).not.toContain("secret-value");
+
+    const status = await app.request(`/oauth/status?state=${encodeURIComponent(authorization.state)}`, {
+      headers: { authorization: `Bearer ${auth}` },
+    });
+    await expect(status.json()).resolves.toEqual({
+      service: "feishu",
+      connectionName: "my-feishu",
+      status: "connected",
+    });
+    const connections = await app.request("/v1/connections", { headers: { authorization: `Bearer ${auth}` } });
+    await expect(connections.json()).resolves.toMatchObject({
+      items: [expect.objectContaining({ service: "feishu", connectionName: "my-feishu", status: "ready" })],
+    });
+    const replay = await app.request(
+      `/oauth/callback?state=${encodeURIComponent(authorization.state)}&code=second-code`,
+    );
+    expect(replay.status).toBe(400);
+    const otherAuth = createPrincipalToken(
+      { ...principal, tenantId: "tenant-b", workspaceId: "workspace-b" },
+      "auth-secret",
+    );
+    const otherCompletion = await app.request("/v1/oauth/complete", {
+      method: "POST",
+      headers: { authorization: `Bearer ${otherAuth}`, "content-type": "application/json" },
+      body: JSON.stringify({ state: authorization.state, code: "other-tenant-code" }),
+    });
+    expect(otherCompletion.status).toBe(400);
+    expect(await otherCompletion.text()).not.toContain("other-tenant-code");
+    const otherStatus = await app.request(`/oauth/status?state=${encodeURIComponent(authorization.state)}`, {
+      headers: { authorization: `Bearer ${otherAuth}` },
+    });
+    expect(otherStatus.status).toBe(404);
+    database.close();
+  });
+
+  it("rejects malformed and provider-error callbacks without exchanging a code", async () => {
+    const database = new DatabaseSync(":memory:");
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([oauthProvider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({ oauth2: async () => ({}) }),
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://127.0.0.1:3400",
+      enablement: [{ service: "feishu", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    expect((await app.request("/oauth/callback")).status).toBe(400);
+    expect((await app.request("/oauth/callback?state=missing-code")).status).toBe(400);
+    const providerError = await app.request(
+      "/oauth/callback?error=access_denied&error_description=User+cancelled&state=unknown-state",
+    );
+    expect(providerError.status).toBe(400);
+    expect(await providerError.text()).not.toContain("User cancelled");
+    expect(fetcher).not.toHaveBeenCalled();
+    const descriptionOnly = await app.request("/oauth/callback?error_description=User+cancelled&state=unknown-state");
+    expect(descriptionOnly.status).toBe(400);
+    expect(await descriptionOnly.text()).toContain("Feishu authorization was not completed");
+    database.close();
+  });
+
+  it("expires a state at the callback boundary without creating a connection", async () => {
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([oauthProvider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({ oauth2: async () => ({}) }),
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://127.0.0.1:3400",
+      enablement: [{ service: "feishu", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+    await app.request("/v1/oauth/configs", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "feishu", clientId: "cli_test", clientSecret: "secret-value" }),
+    });
+    const started = await app.request("/v1/oauth/authorizations", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "feishu", connectionName: "expired" }),
+    });
+    const { state } = (await started.json()) as { state: string };
+    const expiredAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    database.prepare("update tenant_oauth_states set created_at=? where state=?").run(expiredAt, state);
+    database.prepare("update tenant_oauth_flow_status set created_at=? where state=?").run(expiredAt, state);
+
+    const callback = await app.request(`/oauth/callback?state=${state}&code=code`);
+    expect(callback.status).toBe(400);
+    const status = await app.request(`/oauth/status?state=${state}`, {
+      headers: { authorization: `Bearer ${auth}` },
+    });
+    await expect(status.json()).resolves.toEqual({
+      service: "feishu",
+      connectionName: "expired",
+      status: "expired",
+    });
+    const connections = await app.request("/v1/connections", { headers: { authorization: `Bearer ${auth}` } });
+    await expect(connections.json()).resolves.toEqual({ items: [] });
+    database.close();
+  });
+
+  it("migrates an existing SQLite OAuth schema and completes a pending flow after restart", async () => {
+    const root = await mkdtemp(join(tmpdir(), "connection-service-oauth-restart-"));
+    tempRoots.push(root);
+    const databasePath = join(root, "control.sqlite");
+    const firstDatabase = new DatabaseSync(databasePath);
+    firstDatabase.exec(`
+      create table tenant_oauth_states (
+        state text primary key,
+        tenant_id text not null,
+        workspace_id text not null,
+        value_ciphertext text not null,
+        created_at text not null
+      );
+    `);
+    const firstApp = createConnectionControlApp({
+      catalog: createCatalogStore([oauthProvider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          oauth2: async () => ({ profile: { accountId: "feishu-user" } }),
+        }),
+      },
+      controlDatabase: firstDatabase,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://127.0.0.1:3400",
+      enablement: [{ service: "feishu", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+    await firstApp.request("/v1/oauth/configs", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "feishu", clientId: "cli_test", clientSecret: "secret-value" }),
+    });
+    const started = await firstApp.request("/v1/oauth/authorizations", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "feishu", connectionName: "restart-persisted" }),
+    });
+    const authorization = (await started.json()) as { state: string };
+    expect(
+      (firstDatabase.prepare("pragma table_info(tenant_oauth_states)").all() as Array<{ name: string }>).map(
+        (column) => column.name,
+      ),
+    ).toEqual(expect.arrayContaining(["subject", "owner_id"]));
+    const pendingStatus = await firstApp.request(`/oauth/status?state=${authorization.state}`, {
+      headers: { authorization: `Bearer ${auth}` },
+    });
+    await expect(pendingStatus.json()).resolves.toMatchObject({ status: "pending" });
+    firstDatabase.close();
+
+    const secondDatabase = new DatabaseSync(databasePath);
+    const secondApp = createConnectionControlApp({
+      catalog: createCatalogStore([oauthProvider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          oauth2: async () => ({ profile: { accountId: "feishu-user" } }),
+        }),
+      },
+      controlDatabase: secondDatabase,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://127.0.0.1:3400",
+      enablement: [{ service: "feishu", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ access_token: "access-token", token_type: "Bearer" })),
+    );
+    const callback = await secondApp.request(
+      `/oauth/callback?state=${encodeURIComponent(authorization.state)}&code=authorization-code`,
+    );
+    expect(callback.status).toBe(200);
+    const connectedStatus = await secondApp.request(`/oauth/status?state=${authorization.state}`, {
+      headers: { authorization: `Bearer ${auth}` },
+    });
+    await expect(connectedStatus.json()).resolves.toMatchObject({ status: "connected" });
+    secondDatabase.close();
+
+    const thirdDatabase = new DatabaseSync(databasePath);
+    const thirdApp = createConnectionControlApp({
+      catalog: createCatalogStore([oauthProvider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          oauth2: async () => ({ profile: { accountId: "feishu-user" } }),
+        }),
+      },
+      controlDatabase: thirdDatabase,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://127.0.0.1:3400",
+      enablement: [{ service: "feishu", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const connections = await thirdApp.request("/v1/connections", { headers: { authorization: `Bearer ${auth}` } });
+    await expect(connections.json()).resolves.toMatchObject({
+      items: [expect.objectContaining({ service: "feishu", connectionName: "restart-persisted", status: "ready" })],
+    });
+    thirdDatabase.close();
+  });
+
+  it("does not create a half-finished connection when the token endpoint fails", async () => {
+    const database = new DatabaseSync(":memory:");
+    const app = createConnectionControlApp({
+      catalog: createCatalogStore([oauthProvider]),
+      providerLoader: {
+        loadActionExecutor: async () => undefined,
+        loadProxyExecutor: async () => undefined,
+        loadCredentialValidators: async () => ({
+          oauth2: async () => ({ profile: { accountId: "feishu-user" } }),
+        }),
+      },
+      controlDatabase: database,
+      secretCodec: new AesGcmSecretCodec("test-key"),
+      authSecret: "auth-secret",
+      publicOrigin: "http://127.0.0.1:3400",
+      enablement: [{ service: "feishu", tier: "beta", connectorDefinitionVersion: "1.0.0", owner: "team" }],
+    });
+    const auth = createPrincipalToken(principal, "auth-secret");
+    await app.request("/v1/oauth/configs", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "feishu", clientId: "cli_test", clientSecret: "secret-value" }),
+    });
+    const started = await app.request("/v1/oauth/authorizations", {
+      method: "POST",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({ service: "feishu", connectionName: "failed" }),
+    });
+    const { state } = (await started.json()) as { state: string };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("provider failure", { status: 500 })),
+    );
+    const callback = await app.request(`/oauth/callback?state=${state}&code=code`);
+    expect(callback.status).toBe(400);
+    const listed = await app.request("/v1/connections", { headers: { authorization: `Bearer ${auth}` } });
+    await expect(listed.json()).resolves.toEqual({ items: [] });
+    database.close();
+  });
+
   it("persists the lease invocation id in the redacted audit feed", async () => {
     const database = new DatabaseSync(":memory:");
     const executableProvider: ProviderDefinition = {

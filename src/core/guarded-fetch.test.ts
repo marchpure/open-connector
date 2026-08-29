@@ -388,9 +388,7 @@ describe("createGuardedFetch request URL guard", () => {
       allowLocalhostDev: true,
       allowedLocalhostPorts: [3418],
     });
-    await expect(wrongPort("http://127.0.0.1:3417/mcp")).rejects.toThrow(
-      "explicitly allowlisted local port",
-    );
+    await expect(wrongPort("http://127.0.0.1:3417/mcp")).rejects.toThrow("explicitly allowlisted local port");
   });
 });
 

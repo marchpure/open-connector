@@ -31168,10 +31168,7 @@
     },
     {
       "ref": "@antfu/install-pkg@1.1.0",
-      "dependsOn": [
-        "package-manager-detector@1.7.0",
-        "tinyexec@1.2.4"
-      ]
+      "dependsOn": ["package-manager-detector@1.7.0", "tinyexec@1.2.4"]
     },
     {
       "ref": "@aws-sdk/checksums@3.1000.28",
@@ -31342,12 +31339,7 @@
     },
     {
       "ref": "@aws-sdk/signature-v4-multi-region@3.996.45",
-      "dependsOn": [
-        "@aws-sdk/types@3.974.4",
-        "@smithy/signature-v4@5.7.2",
-        "@smithy/types@4.17.2",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["@aws-sdk/types@3.974.4", "@smithy/signature-v4@5.7.2", "@smithy/types@4.17.2", "tslib@2.8.1"]
     },
     {
       "ref": "@aws-sdk/token-providers@3.1111.0",
@@ -31362,17 +31354,11 @@
     },
     {
       "ref": "@aws-sdk/types@3.974.4",
-      "dependsOn": [
-        "@smithy/types@4.17.2",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["@smithy/types@4.17.2", "tslib@2.8.1"]
     },
     {
       "ref": "@aws-sdk/xml-builder@3.972.39",
-      "dependsOn": [
-        "@smithy/types@4.17.2",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["@smithy/types@4.17.2", "tslib@2.8.1"]
     },
     {
       "ref": "@aws/lambda-invoke-store@0.3.0",
@@ -31391,17 +31377,11 @@
     },
     {
       "ref": "@azure/abort-controller@2.2.0",
-      "dependsOn": [
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["tslib@2.8.1"]
     },
     {
       "ref": "@azure/core-auth@1.11.0",
-      "dependsOn": [
-        "@azure/abort-controller@2.2.0",
-        "@azure/core-util@1.14.0",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["@azure/abort-controller@2.2.0", "@azure/core-util@1.14.0", "tslib@2.8.1"]
     },
     {
       "ref": "@azure/core-client@1.11.0",
@@ -31417,18 +31397,11 @@
     },
     {
       "ref": "@azure/core-lro@2.7.2",
-      "dependsOn": [
-        "@azure/abort-controller@2.2.0",
-        "@azure/core-util@1.14.0",
-        "@azure/logger@1.4.0",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["@azure/abort-controller@2.2.0", "@azure/core-util@1.14.0", "@azure/logger@1.4.0", "tslib@2.8.1"]
     },
     {
       "ref": "@azure/core-paging@1.7.0",
-      "dependsOn": [
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["tslib@2.8.1"]
     },
     {
       "ref": "@azure/core-process@1.0.0",
@@ -31448,17 +31421,11 @@
     },
     {
       "ref": "@azure/core-tracing@1.4.0",
-      "dependsOn": [
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["tslib@2.8.1"]
     },
     {
       "ref": "@azure/core-util@1.14.0",
-      "dependsOn": [
-        "@azure/abort-controller@2.2.0",
-        "@typespec/ts-http-runtime@0.3.8",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["@azure/abort-controller@2.2.0", "@typespec/ts-http-runtime@0.3.8", "tslib@2.8.1"]
     },
     {
       "ref": "@azure/identity@4.13.2",
@@ -31508,16 +31475,11 @@
     },
     {
       "ref": "@azure/logger@1.4.0",
-      "dependsOn": [
-        "@typespec/ts-http-runtime@0.3.8",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["@typespec/ts-http-runtime@0.3.8", "tslib@2.8.1"]
     },
     {
       "ref": "@azure/msal-browser@5.19.0",
-      "dependsOn": [
-        "@azure/msal-common@16.13.0"
-      ]
+      "dependsOn": ["@azure/msal-common@16.13.0"]
     },
     {
       "ref": "@azure/msal-common@16.13.0",
@@ -31525,10 +31487,7 @@
     },
     {
       "ref": "@azure/msal-node@5.6.0",
-      "dependsOn": [
-        "@azure/msal-common@16.13.0",
-        "jsonwebtoken@9.0.3"
-      ]
+      "dependsOn": ["@azure/msal-common@16.13.0", "jsonwebtoken@9.0.3"]
     },
     {
       "ref": "@babel/runtime@7.29.7",
@@ -31544,10 +31503,7 @@
     },
     {
       "ref": "@cloudflare/unenv-preset@2.16.1",
-      "dependsOn": [
-        "unenv@2.0.0-rc.24",
-        "workerd@1.20260826.1"
-      ]
+      "dependsOn": ["unenv@2.0.0-rc.24", "workerd@1.20260826.1"]
     },
     {
       "ref": "@cloudflare/workerd-darwin-arm64@1.20260826.1",
@@ -31555,9 +31511,7 @@
     },
     {
       "ref": "@cspotcode/source-map-support@0.8.1",
-      "dependsOn": [
-        "@jridgewell/trace-mapping@0.3.9"
-      ]
+      "dependsOn": ["@jridgewell/trace-mapping@0.3.9"]
     },
     {
       "ref": "@electric-sql/pglite@0.5.5",
@@ -31565,45 +31519,31 @@
     },
     {
       "ref": "@electric-sql/pglite-age@0.0.6",
-      "dependsOn": [
-        "@electric-sql/pglite@0.5.5"
-      ]
+      "dependsOn": ["@electric-sql/pglite@0.5.5"]
     },
     {
       "ref": "@electric-sql/pglite-pg_hashids@0.0.6",
-      "dependsOn": [
-        "@electric-sql/pglite@0.5.5"
-      ]
+      "dependsOn": ["@electric-sql/pglite@0.5.5"]
     },
     {
       "ref": "@electric-sql/pglite-pg_ivm@0.0.6",
-      "dependsOn": [
-        "@electric-sql/pglite@0.5.5"
-      ]
+      "dependsOn": ["@electric-sql/pglite@0.5.5"]
     },
     {
       "ref": "@electric-sql/pglite-pg_textsearch@0.0.7",
-      "dependsOn": [
-        "@electric-sql/pglite@0.5.5"
-      ]
+      "dependsOn": ["@electric-sql/pglite@0.5.5"]
     },
     {
       "ref": "@electric-sql/pglite-pg_uuidv7@0.0.6",
-      "dependsOn": [
-        "@electric-sql/pglite@0.5.5"
-      ]
+      "dependsOn": ["@electric-sql/pglite@0.5.5"]
     },
     {
       "ref": "@electric-sql/pglite-pgtap@0.0.6",
-      "dependsOn": [
-        "@electric-sql/pglite@0.5.5"
-      ]
+      "dependsOn": ["@electric-sql/pglite@0.5.5"]
     },
     {
       "ref": "@electric-sql/pglite-pgvector@0.0.6",
-      "dependsOn": [
-        "@electric-sql/pglite@0.5.5"
-      ]
+      "dependsOn": ["@electric-sql/pglite@0.5.5"]
     },
     {
       "ref": "@electric-sql/pglite-socket@0.2.8",
@@ -31620,37 +31560,23 @@
     },
     {
       "ref": "@embra/i18n@0.0.10",
-      "dependsOn": [
-        "@embra/reactivity@0.0.8",
-        "@types/react@19.2.17",
-        "react@19.2.7"
-      ]
+      "dependsOn": ["@embra/reactivity@0.0.8", "@types/react@19.2.17", "react@19.2.7"]
     },
     {
       "ref": "@embra/reactivity@0.0.8",
-      "dependsOn": [
-        "@types/react@19.2.17",
-        "react@19.2.7"
-      ]
+      "dependsOn": ["@types/react@19.2.17", "react@19.2.7"]
     },
     {
       "ref": "@emnapi/core@1.11.1",
-      "dependsOn": [
-        "@emnapi/wasi-threads@1.2.2",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["@emnapi/wasi-threads@1.2.2", "tslib@2.8.1"]
     },
     {
       "ref": "@emnapi/runtime@1.11.1",
-      "dependsOn": [
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["tslib@2.8.1"]
     },
     {
       "ref": "@emnapi/wasi-threads@1.2.2",
-      "dependsOn": [
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["tslib@2.8.1"]
     },
     {
       "ref": "@esbuild/darwin-arm64@0.28.1",
@@ -31658,24 +31584,15 @@
     },
     {
       "ref": "@floating-ui/core@1.7.5",
-      "dependsOn": [
-        "@floating-ui/utils@0.2.11"
-      ]
+      "dependsOn": ["@floating-ui/utils@0.2.11"]
     },
     {
       "ref": "@floating-ui/dom@1.7.6",
-      "dependsOn": [
-        "@floating-ui/core@1.7.5",
-        "@floating-ui/utils@0.2.11"
-      ]
+      "dependsOn": ["@floating-ui/core@1.7.5", "@floating-ui/utils@0.2.11"]
     },
     {
       "ref": "@floating-ui/react-dom@2.1.8",
-      "dependsOn": [
-        "react@19.2.7",
-        "react-dom@19.2.7",
-        "@floating-ui/dom@1.7.6"
-      ]
+      "dependsOn": ["react@19.2.7", "react-dom@19.2.7", "@floating-ui/dom@1.7.6"]
     },
     {
       "ref": "@floating-ui/utils@0.2.11",
@@ -31683,10 +31600,7 @@
     },
     {
       "ref": "@griffithswaite/ts-plsql-parser@1.1.1",
-      "dependsOn": [
-        "antlr4@4.13.0",
-        "typescript@5.9.3"
-      ]
+      "dependsOn": ["antlr4@4.13.0", "typescript@5.9.3"]
     },
     {
       "ref": "typescript@5.9.3",
@@ -31694,9 +31608,7 @@
     },
     {
       "ref": "@hono/node-server@2.0.10",
-      "dependsOn": [
-        "hono@4.13.5"
-      ]
+      "dependsOn": ["hono@4.13.5"]
     },
     {
       "ref": "@hyrious/configs@0.1.6",
@@ -31704,9 +31616,7 @@
     },
     {
       "ref": "@iconify-json/logos@1.2.11",
-      "dependsOn": [
-        "@iconify/types@2.0.0"
-      ]
+      "dependsOn": ["@iconify/types@2.0.0"]
     },
     {
       "ref": "@iconify/types@2.0.0",
@@ -31714,11 +31624,7 @@
     },
     {
       "ref": "@iconify/utils@3.1.4",
-      "dependsOn": [
-        "@antfu/install-pkg@1.1.0",
-        "import-meta-resolve@4.2.0",
-        "@iconify/types@2.0.0"
-      ]
+      "dependsOn": ["@antfu/install-pkg@1.1.0", "import-meta-resolve@4.2.0", "@iconify/types@2.0.0"]
     },
     {
       "ref": "@img/colour@1.1.0",
@@ -31726,9 +31632,7 @@
     },
     {
       "ref": "@img/sharp-darwin-arm64@0.35.2",
-      "dependsOn": [
-        "@img/sharp-libvips-darwin-arm64@1.3.1"
-      ]
+      "dependsOn": ["@img/sharp-libvips-darwin-arm64@1.3.1"]
     },
     {
       "ref": "@img/sharp-libvips-darwin-arm64@1.3.1",
@@ -31736,37 +31640,23 @@
     },
     {
       "ref": "@img/sharp-wasm32@0.35.2",
-      "dependsOn": [
-        "@emnapi/runtime@1.11.1"
-      ]
+      "dependsOn": ["@emnapi/runtime@1.11.1"]
     },
     {
       "ref": "@jridgewell/gen-mapping@0.3.13",
-      "dependsOn": [
-        "@jridgewell/sourcemap-codec@1.5.5",
-        "@jridgewell/trace-mapping@0.3.31"
-      ]
+      "dependsOn": ["@jridgewell/sourcemap-codec@1.5.5", "@jridgewell/trace-mapping@0.3.31"]
     },
     {
       "ref": "@jridgewell/trace-mapping@0.3.31",
-      "dependsOn": [
-        "@jridgewell/resolve-uri@3.1.2",
-        "@jridgewell/sourcemap-codec@1.5.5"
-      ]
+      "dependsOn": ["@jridgewell/resolve-uri@3.1.2", "@jridgewell/sourcemap-codec@1.5.5"]
     },
     {
       "ref": "@jridgewell/remapping@2.3.5",
-      "dependsOn": [
-        "@jridgewell/gen-mapping@0.3.13",
-        "@jridgewell/trace-mapping@0.3.31"
-      ]
+      "dependsOn": ["@jridgewell/gen-mapping@0.3.13", "@jridgewell/trace-mapping@0.3.31"]
     },
     {
       "ref": "@jridgewell/trace-mapping@0.3.31",
-      "dependsOn": [
-        "@jridgewell/resolve-uri@3.1.2",
-        "@jridgewell/sourcemap-codec@1.5.5"
-      ]
+      "dependsOn": ["@jridgewell/resolve-uri@3.1.2", "@jridgewell/sourcemap-codec@1.5.5"]
     },
     {
       "ref": "@jridgewell/resolve-uri@3.1.2",
@@ -31778,10 +31668,7 @@
     },
     {
       "ref": "@jridgewell/trace-mapping@0.3.9",
-      "dependsOn": [
-        "@jridgewell/resolve-uri@3.1.2",
-        "@jridgewell/sourcemap-codec@1.5.5"
-      ]
+      "dependsOn": ["@jridgewell/resolve-uri@3.1.2", "@jridgewell/sourcemap-codec@1.5.5"]
     },
     {
       "ref": "@js-joda/core@6.1.0",
@@ -31801,22 +31688,15 @@
     },
     {
       "ref": "@modelcontextprotocol/core@2.0.0",
-      "dependsOn": [
-        "zod@4.4.3"
-      ]
+      "dependsOn": ["zod@4.4.3"]
     },
     {
       "ref": "@modelcontextprotocol/server@2.0.0",
-      "dependsOn": [
-        "zod@4.4.3",
-        "@modelcontextprotocol/core@2.0.0"
-      ]
+      "dependsOn": ["zod@4.4.3", "@modelcontextprotocol/core@2.0.0"]
     },
     {
       "ref": "@napi-rs/canvas@0.1.100",
-      "dependsOn": [
-        "@napi-rs/canvas-darwin-arm64@0.1.100"
-      ]
+      "dependsOn": ["@napi-rs/canvas-darwin-arm64@0.1.100"]
     },
     {
       "ref": "@napi-rs/canvas-darwin-arm64@0.1.100",
@@ -31824,20 +31704,11 @@
     },
     {
       "ref": "@napi-rs/wasm-runtime@1.1.6",
-      "dependsOn": [
-        "@emnapi/core@1.11.1",
-        "@emnapi/runtime@1.11.1",
-        "@tybys/wasm-util@0.10.3"
-      ]
+      "dependsOn": ["@emnapi/core@1.11.1", "@emnapi/runtime@1.11.1", "@tybys/wasm-util@0.10.3"]
     },
     {
       "ref": "@nodable/base-output-builder@2.0.0",
-      "dependsOn": [
-        "@nodable/entities@2.2.0",
-        "is-unsafe@1.0.1",
-        "path-expression-matcher@1.6.2",
-        "strnum@2.4.1"
-      ]
+      "dependsOn": ["@nodable/entities@2.2.0", "is-unsafe@1.0.1", "path-expression-matcher@1.6.2", "strnum@2.4.1"]
     },
     {
       "ref": "@nodable/entities@2.2.0",
@@ -31849,10 +31720,7 @@
     },
     {
       "ref": "@nodable/compact-builder@2.0.0",
-      "dependsOn": [
-        "@nodable/base-output-builder@2.0.0",
-        "path-expression-matcher@1.6.2"
-      ]
+      "dependsOn": ["@nodable/base-output-builder@2.0.0", "path-expression-matcher@1.6.2"]
     },
     {
       "ref": "@nodable/entities@3.0.0",
@@ -31927,17 +31795,11 @@
     },
     {
       "ref": "@poppinss/colors@4.1.6",
-      "dependsOn": [
-        "kleur@4.1.5"
-      ]
+      "dependsOn": ["kleur@4.1.5"]
     },
     {
       "ref": "@poppinss/dumper@0.6.5",
-      "dependsOn": [
-        "@poppinss/colors@4.1.6",
-        "@sindresorhus/is@7.2.0",
-        "supports-color@10.2.2"
-      ]
+      "dependsOn": ["@poppinss/colors@4.1.6", "@sindresorhus/is@7.2.0", "supports-color@10.2.2"]
     },
     {
       "ref": "@poppinss/exception@1.2.3",
@@ -31945,9 +31807,7 @@
     },
     {
       "ref": "@quansync/fs@1.0.0",
-      "dependsOn": [
-        "quansync@1.0.0"
-      ]
+      "dependsOn": ["quansync@1.0.0"]
     },
     {
       "ref": "@radix-ui/number@1.1.2",
@@ -31982,17 +31842,11 @@
     },
     {
       "ref": "@radix-ui/react-compose-refs@1.1.3",
-      "dependsOn": [
-        "react@19.2.7",
-        "@types/react@19.2.17"
-      ]
+      "dependsOn": ["react@19.2.7", "@types/react@19.2.17"]
     },
     {
       "ref": "@radix-ui/react-context@1.1.4",
-      "dependsOn": [
-        "react@19.2.7",
-        "@types/react@19.2.17"
-      ]
+      "dependsOn": ["react@19.2.7", "@types/react@19.2.17"]
     },
     {
       "ref": "@radix-ui/react-dialog@1.1.18",
@@ -32019,10 +31873,7 @@
     },
     {
       "ref": "@radix-ui/react-direction@1.1.2",
-      "dependsOn": [
-        "react@19.2.7",
-        "@types/react@19.2.17"
-      ]
+      "dependsOn": ["react@19.2.7", "@types/react@19.2.17"]
     },
     {
       "ref": "@radix-ui/react-dismissable-layer@1.1.14",
@@ -32040,10 +31891,7 @@
     },
     {
       "ref": "@radix-ui/react-focus-guards@1.1.4",
-      "dependsOn": [
-        "react@19.2.7",
-        "@types/react@19.2.17"
-      ]
+      "dependsOn": ["react@19.2.7", "@types/react@19.2.17"]
     },
     {
       "ref": "@radix-ui/react-focus-scope@1.1.11",
@@ -32059,11 +31907,7 @@
     },
     {
       "ref": "@radix-ui/react-id@1.1.2",
-      "dependsOn": [
-        "react@19.2.7",
-        "@types/react@19.2.17",
-        "@radix-ui/react-use-layout-effect@1.1.2"
-      ]
+      "dependsOn": ["react@19.2.7", "@types/react@19.2.17", "@radix-ui/react-use-layout-effect@1.1.2"]
     },
     {
       "ref": "@radix-ui/react-label@2.1.11",
@@ -32204,11 +32048,7 @@
     },
     {
       "ref": "@radix-ui/react-slot@1.3.0",
-      "dependsOn": [
-        "react@19.2.7",
-        "@types/react@19.2.17",
-        "@radix-ui/react-compose-refs@1.1.3"
-      ]
+      "dependsOn": ["react@19.2.7", "@types/react@19.2.17", "@radix-ui/react-compose-refs@1.1.3"]
     },
     {
       "ref": "@radix-ui/react-tabs@1.1.16",
@@ -32278,10 +32118,7 @@
     },
     {
       "ref": "@radix-ui/react-use-callback-ref@1.1.2",
-      "dependsOn": [
-        "react@19.2.7",
-        "@types/react@19.2.17"
-      ]
+      "dependsOn": ["react@19.2.7", "@types/react@19.2.17"]
     },
     {
       "ref": "@radix-ui/react-use-controllable-state@1.2.3",
@@ -32294,41 +32131,23 @@
     },
     {
       "ref": "@radix-ui/react-use-effect-event@0.0.3",
-      "dependsOn": [
-        "react@19.2.7",
-        "@types/react@19.2.17",
-        "@radix-ui/react-use-layout-effect@1.1.2"
-      ]
+      "dependsOn": ["react@19.2.7", "@types/react@19.2.17", "@radix-ui/react-use-layout-effect@1.1.2"]
     },
     {
       "ref": "@radix-ui/react-use-layout-effect@1.1.2",
-      "dependsOn": [
-        "react@19.2.7",
-        "@types/react@19.2.17"
-      ]
+      "dependsOn": ["react@19.2.7", "@types/react@19.2.17"]
     },
     {
       "ref": "@radix-ui/react-use-previous@1.1.2",
-      "dependsOn": [
-        "react@19.2.7",
-        "@types/react@19.2.17"
-      ]
+      "dependsOn": ["react@19.2.7", "@types/react@19.2.17"]
     },
     {
       "ref": "@radix-ui/react-use-rect@1.1.2",
-      "dependsOn": [
-        "react@19.2.7",
-        "@types/react@19.2.17",
-        "@radix-ui/rect@1.1.2"
-      ]
+      "dependsOn": ["react@19.2.7", "@types/react@19.2.17", "@radix-ui/rect@1.1.2"]
     },
     {
       "ref": "@radix-ui/react-use-size@1.1.2",
-      "dependsOn": [
-        "react@19.2.7",
-        "@types/react@19.2.17",
-        "@radix-ui/react-use-layout-effect@1.1.2"
-      ]
+      "dependsOn": ["react@19.2.7", "@types/react@19.2.17", "@radix-ui/react-use-layout-effect@1.1.2"]
     },
     {
       "ref": "@radix-ui/react-visually-hidden@1.2.7",
@@ -32367,11 +32186,7 @@
     },
     {
       "ref": "@scalar/client-side-rendering@0.3.0",
-      "dependsOn": [
-        "@scalar/validation@0.6.0",
-        "@scalar/schemas@0.7.0",
-        "@scalar/types@0.16.0"
-      ]
+      "dependsOn": ["@scalar/validation@0.6.0", "@scalar/schemas@0.7.0", "@scalar/types@0.16.0"]
     },
     {
       "ref": "@scalar/helpers@0.9.0",
@@ -32379,26 +32194,15 @@
     },
     {
       "ref": "@scalar/hono-api-reference@0.11.7",
-      "dependsOn": [
-        "hono@4.13.5",
-        "@scalar/client-side-rendering@0.3.0"
-      ]
+      "dependsOn": ["hono@4.13.5", "@scalar/client-side-rendering@0.3.0"]
     },
     {
       "ref": "@scalar/schemas@0.7.0",
-      "dependsOn": [
-        "@scalar/helpers@0.9.0",
-        "@scalar/validation@0.6.0"
-      ]
+      "dependsOn": ["@scalar/helpers@0.9.0", "@scalar/validation@0.6.0"]
     },
     {
       "ref": "@scalar/types@0.16.0",
-      "dependsOn": [
-        "nanoid@5.1.16",
-        "type-fest@5.7.0",
-        "zod@4.4.3",
-        "@scalar/helpers@0.9.0"
-      ]
+      "dependsOn": ["nanoid@5.1.16", "type-fest@5.7.0", "zod@4.4.3", "@scalar/helpers@0.9.0"]
     },
     {
       "ref": "nanoid@5.1.16",
@@ -32410,11 +32214,7 @@
     },
     {
       "ref": "@selderee/plugin-htmlparser2@0.12.0",
-      "dependsOn": [
-        "selderee@0.12.0",
-        "domelementtype@2.3.0",
-        "domhandler@5.0.3"
-      ]
+      "dependsOn": ["selderee@0.12.0", "domelementtype@2.3.0", "domhandler@5.0.3"]
     },
     {
       "ref": "@sindresorhus/is@7.2.0",
@@ -32422,48 +32222,27 @@
     },
     {
       "ref": "@smithy/core@3.33.2",
-      "dependsOn": [
-        "@smithy/types@4.17.2",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["@smithy/types@4.17.2", "tslib@2.8.1"]
     },
     {
       "ref": "@smithy/credential-provider-imds@4.5.2",
-      "dependsOn": [
-        "@smithy/core@3.33.2",
-        "@smithy/types@4.17.2",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["@smithy/core@3.33.2", "@smithy/types@4.17.2", "tslib@2.8.1"]
     },
     {
       "ref": "@smithy/fetch-http-handler@5.7.2",
-      "dependsOn": [
-        "@smithy/core@3.33.2",
-        "@smithy/types@4.17.2",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["@smithy/core@3.33.2", "@smithy/types@4.17.2", "tslib@2.8.1"]
     },
     {
       "ref": "@smithy/node-http-handler@4.11.2",
-      "dependsOn": [
-        "@smithy/core@3.33.2",
-        "@smithy/types@4.17.2",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["@smithy/core@3.33.2", "@smithy/types@4.17.2", "tslib@2.8.1"]
     },
     {
       "ref": "@smithy/signature-v4@5.7.2",
-      "dependsOn": [
-        "@smithy/core@3.33.2",
-        "@smithy/types@4.17.2",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["@smithy/core@3.33.2", "@smithy/types@4.17.2", "tslib@2.8.1"]
     },
     {
       "ref": "@smithy/types@4.17.2",
-      "dependsOn": [
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["tslib@2.8.1"]
     },
     {
       "ref": "@speed-highlight/core@1.2.24",
@@ -32491,9 +32270,7 @@
     },
     {
       "ref": "@tailwindcss/oxide@4.3.2",
-      "dependsOn": [
-        "@tailwindcss/oxide-darwin-arm64@4.3.2"
-      ]
+      "dependsOn": ["@tailwindcss/oxide-darwin-arm64@4.3.2"]
     },
     {
       "ref": "@tailwindcss/oxide-darwin-arm64@4.3.2",
@@ -32501,12 +32278,7 @@
     },
     {
       "ref": "@tailwindcss/vite@4.3.2",
-      "dependsOn": [
-        "vite@8.1.0",
-        "@tailwindcss/node@4.3.2",
-        "@tailwindcss/oxide@4.3.2",
-        "tailwindcss@4.3.2"
-      ]
+      "dependsOn": ["vite@8.1.0", "@tailwindcss/node@4.3.2", "@tailwindcss/oxide@4.3.2", "tailwindcss@4.3.2"]
     },
     {
       "ref": "@tediousjs/connection-string@1.1.0",
@@ -32514,9 +32286,7 @@
     },
     {
       "ref": "@tybys/wasm-util@0.10.3",
-      "dependsOn": [
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["tslib@2.8.1"]
     },
     {
       "ref": "@types/ali-oss@6.23.3",
@@ -32524,16 +32294,11 @@
     },
     {
       "ref": "@types/busboy@1.5.4",
-      "dependsOn": [
-        "@types/node@26.1.0"
-      ]
+      "dependsOn": ["@types/node@26.1.0"]
     },
     {
       "ref": "@types/chai@5.2.3",
-      "dependsOn": [
-        "@types/deep-eql@4.0.2",
-        "assertion-error@2.0.1"
-      ]
+      "dependsOn": ["@types/deep-eql@4.0.2", "assertion-error@2.0.1"]
     },
     {
       "ref": "@types/d3-array@3.2.2",
@@ -32549,9 +32314,7 @@
     },
     {
       "ref": "@types/d3-interpolate@3.0.4",
-      "dependsOn": [
-        "@types/d3-color@3.1.3"
-      ]
+      "dependsOn": ["@types/d3-color@3.1.3"]
     },
     {
       "ref": "@types/d3-path@3.1.1",
@@ -32559,15 +32322,11 @@
     },
     {
       "ref": "@types/d3-scale@4.0.9",
-      "dependsOn": [
-        "@types/d3-time@3.0.4"
-      ]
+      "dependsOn": ["@types/d3-time@3.0.4"]
     },
     {
       "ref": "@types/d3-shape@3.1.8",
-      "dependsOn": [
-        "@types/d3-path@3.1.1"
-      ]
+      "dependsOn": ["@types/d3-path@3.1.1"]
     },
     {
       "ref": "@types/d3-time@3.0.4",
@@ -32579,9 +32338,7 @@
     },
     {
       "ref": "@types/debug@4.1.13",
-      "dependsOn": [
-        "@types/ms@2.1.0"
-      ]
+      "dependsOn": ["@types/ms@2.1.0"]
     },
     {
       "ref": "@types/deep-eql@4.0.2",
@@ -32593,22 +32350,15 @@
     },
     {
       "ref": "@types/mailparser@3.4.6",
-      "dependsOn": [
-        "@types/node@26.1.0",
-        "iconv-lite@0.6.3"
-      ]
+      "dependsOn": ["@types/node@26.1.0", "iconv-lite@0.6.3"]
     },
     {
       "ref": "iconv-lite@0.6.3",
-      "dependsOn": [
-        "safer-buffer@2.1.2"
-      ]
+      "dependsOn": ["safer-buffer@2.1.2"]
     },
     {
       "ref": "@types/mdast@4.0.4",
-      "dependsOn": [
-        "@types/unist@3.0.3"
-      ]
+      "dependsOn": ["@types/unist@3.0.3"]
     },
     {
       "ref": "@types/ms@2.1.0",
@@ -32616,23 +32366,15 @@
     },
     {
       "ref": "@types/mssql@9.1.11",
-      "dependsOn": [
-        "@types/node@26.1.0",
-        "tedious@20.0.0",
-        "tarn@3.1.2"
-      ]
+      "dependsOn": ["@types/node@26.1.0", "tedious@20.0.0", "tarn@3.1.2"]
     },
     {
       "ref": "@types/node@26.1.0",
-      "dependsOn": [
-        "undici-types@8.3.0"
-      ]
+      "dependsOn": ["undici-types@8.3.0"]
     },
     {
       "ref": "@types/nodemailer@8.0.1",
-      "dependsOn": [
-        "@types/node@26.1.0"
-      ]
+      "dependsOn": ["@types/node@26.1.0"]
     },
     {
       "ref": "@types/pegjs@0.10.6",
@@ -32640,29 +32382,19 @@
     },
     {
       "ref": "@types/pg@8.23.1",
-      "dependsOn": [
-        "@types/node@26.1.0",
-        "pg-protocol@1.16.0",
-        "pg-types@2.2.0"
-      ]
+      "dependsOn": ["@types/node@26.1.0", "pg-protocol@1.16.0", "pg-types@2.2.0"]
     },
     {
       "ref": "@types/react@19.2.17",
-      "dependsOn": [
-        "csstype@3.2.3"
-      ]
+      "dependsOn": ["csstype@3.2.3"]
     },
     {
       "ref": "@types/react-dom@19.2.3",
-      "dependsOn": [
-        "@types/react@19.2.17"
-      ]
+      "dependsOn": ["@types/react@19.2.17"]
     },
     {
       "ref": "@types/readable-stream@4.0.24",
-      "dependsOn": [
-        "@types/node@26.1.0"
-      ]
+      "dependsOn": ["@types/node@26.1.0"]
     },
     {
       "ref": "@types/unist@3.0.3",
@@ -32674,9 +32406,7 @@
     },
     {
       "ref": "@types/ws@8.18.1",
-      "dependsOn": [
-        "@types/node@26.1.0"
-      ]
+      "dependsOn": ["@types/node@26.1.0"]
     },
     {
       "ref": "@typescript/typescript-darwin-arm64@7.0.2",
@@ -32684,20 +32414,11 @@
     },
     {
       "ref": "@typespec/ts-http-runtime@0.3.8",
-      "dependsOn": [
-        "http-proxy-agent@7.0.2",
-        "https-proxy-agent@7.0.6",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["http-proxy-agent@7.0.2", "https-proxy-agent@7.0.6", "tslib@2.8.1"]
     },
     {
       "ref": "@unocss/config@66.7.4",
-      "dependsOn": [
-        "colorette@2.0.20",
-        "consola@3.4.2",
-        "unconfig@7.5.0",
-        "@unocss/core@66.7.4"
-      ]
+      "dependsOn": ["colorette@2.0.20", "consola@3.4.2", "unconfig@7.5.0", "@unocss/core@66.7.4"]
     },
     {
       "ref": "@unocss/core@66.7.4",
@@ -32715,18 +32436,11 @@
     },
     {
       "ref": "@unocss/preset-icons@66.7.4",
-      "dependsOn": [
-        "@iconify/utils@3.1.4",
-        "ofetch@1.5.1",
-        "@unocss/core@66.7.4"
-      ]
+      "dependsOn": ["@iconify/utils@3.1.4", "ofetch@1.5.1", "@unocss/core@66.7.4"]
     },
     {
       "ref": "@unocss/rule-utils@66.7.4",
-      "dependsOn": [
-        "magic-string@0.30.21",
-        "@unocss/core@66.7.4"
-      ]
+      "dependsOn": ["magic-string@0.30.21", "@unocss/core@66.7.4"]
     },
     {
       "ref": "@unocss/vite@66.7.4",
@@ -32745,10 +32459,7 @@
     },
     {
       "ref": "@vitejs/plugin-react@6.0.3",
-      "dependsOn": [
-        "vite@8.1.0",
-        "@rolldown/pluginutils@1.0.1"
-      ]
+      "dependsOn": ["vite@8.1.0", "@rolldown/pluginutils@1.0.1"]
     },
     {
       "ref": "@vitest/expect@4.1.9",
@@ -32763,34 +32474,19 @@
     },
     {
       "ref": "@vitest/mocker@4.1.9",
-      "dependsOn": [
-        "vite@8.1.0",
-        "estree-walker@3.0.3",
-        "magic-string@0.30.21",
-        "@vitest/spy@4.1.9"
-      ]
+      "dependsOn": ["vite@8.1.0", "estree-walker@3.0.3", "magic-string@0.30.21", "@vitest/spy@4.1.9"]
     },
     {
       "ref": "@vitest/pretty-format@4.1.9",
-      "dependsOn": [
-        "tinyrainbow@3.1.0"
-      ]
+      "dependsOn": ["tinyrainbow@3.1.0"]
     },
     {
       "ref": "@vitest/runner@4.1.9",
-      "dependsOn": [
-        "pathe@2.0.3",
-        "@vitest/utils@4.1.9"
-      ]
+      "dependsOn": ["pathe@2.0.3", "@vitest/utils@4.1.9"]
     },
     {
       "ref": "@vitest/snapshot@4.1.9",
-      "dependsOn": [
-        "magic-string@0.30.21",
-        "pathe@2.0.3",
-        "@vitest/pretty-format@4.1.9",
-        "@vitest/utils@4.1.9"
-      ]
+      "dependsOn": ["magic-string@0.30.21", "pathe@2.0.3", "@vitest/pretty-format@4.1.9", "@vitest/utils@4.1.9"]
     },
     {
       "ref": "@vitest/spy@4.1.9",
@@ -32798,25 +32494,15 @@
     },
     {
       "ref": "@vitest/utils@4.1.9",
-      "dependsOn": [
-        "convert-source-map@2.0.0",
-        "tinyrainbow@3.1.0",
-        "@vitest/pretty-format@4.1.9"
-      ]
+      "dependsOn": ["convert-source-map@2.0.0", "tinyrainbow@3.1.0", "@vitest/pretty-format@4.1.9"]
     },
     {
       "ref": "@zone-eu/mailsplit@5.4.14",
-      "dependsOn": [
-        "libbase64@1.3.0",
-        "libmime@5.4.1",
-        "libqp@2.1.1"
-      ]
+      "dependsOn": ["libbase64@1.3.0", "libmime@5.4.1", "libqp@2.1.1"]
     },
     {
       "ref": "abort-controller@3.0.0",
-      "dependsOn": [
-        "event-target-shim@5.0.1"
-      ]
+      "dependsOn": ["event-target-shim@5.0.1"]
     },
     {
       "ref": "address@1.2.2",
@@ -32828,9 +32514,7 @@
     },
     {
       "ref": "agentkeepalive@3.5.3",
-      "dependsOn": [
-        "humanize-ms@1.2.1"
-      ]
+      "dependsOn": ["humanize-ms@1.2.1"]
     },
     {
       "ref": "ali-oss@6.23.0",
@@ -32884,9 +32568,7 @@
     },
     {
       "ref": "aria-hidden@1.2.6",
-      "dependsOn": [
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["tslib@2.8.1"]
     },
     {
       "ref": "assertion-error@2.0.1",
@@ -32910,22 +32592,11 @@
     },
     {
       "ref": "bl@6.1.6",
-      "dependsOn": [
-        "@types/readable-stream@4.0.24",
-        "buffer@6.0.3",
-        "inherits@2.0.4",
-        "readable-stream@4.7.0"
-      ]
+      "dependsOn": ["@types/readable-stream@4.0.24", "buffer@6.0.3", "inherits@2.0.4", "readable-stream@4.7.0"]
     },
     {
       "ref": "readable-stream@4.7.0",
-      "dependsOn": [
-        "abort-controller@3.0.0",
-        "buffer@6.0.3",
-        "events@3.3.0",
-        "process@0.11.10",
-        "string_decoder@1.3.0"
-      ]
+      "dependsOn": ["abort-controller@3.0.0", "buffer@6.0.3", "events@3.3.0", "process@0.11.10", "string_decoder@1.3.0"]
     },
     {
       "ref": "safe-buffer@5.2.1",
@@ -32933,9 +32604,7 @@
     },
     {
       "ref": "string_decoder@1.3.0",
-      "dependsOn": [
-        "safe-buffer@5.2.1"
-      ]
+      "dependsOn": ["safe-buffer@5.2.1"]
     },
     {
       "ref": "blake3-wasm@2.1.5",
@@ -32947,19 +32616,11 @@
     },
     {
       "ref": "broker-factory@3.1.15",
-      "dependsOn": [
-        "@babel/runtime@7.29.7",
-        "fast-unique-numbers@9.0.27",
-        "tslib@2.8.1",
-        "worker-factory@7.0.50"
-      ]
+      "dependsOn": ["@babel/runtime@7.29.7", "fast-unique-numbers@9.0.27", "tslib@2.8.1", "worker-factory@7.0.50"]
     },
     {
       "ref": "buffer@6.0.3",
-      "dependsOn": [
-        "base64-js@1.5.1",
-        "ieee754@1.2.1"
-      ]
+      "dependsOn": ["base64-js@1.5.1", "ieee754@1.2.1"]
     },
     {
       "ref": "buffer-equal-constant-time@1.0.1",
@@ -32975,29 +32636,19 @@
     },
     {
       "ref": "bundle-name@4.1.0",
-      "dependsOn": [
-        "run-applescript@7.1.0"
-      ]
+      "dependsOn": ["run-applescript@7.1.0"]
     },
     {
       "ref": "busboy@1.6.0",
-      "dependsOn": [
-        "streamsearch@1.1.0"
-      ]
+      "dependsOn": ["streamsearch@1.1.0"]
     },
     {
       "ref": "call-bind-apply-helpers@1.0.2",
-      "dependsOn": [
-        "es-errors@1.3.0",
-        "function-bind@1.1.2"
-      ]
+      "dependsOn": ["es-errors@1.3.0", "function-bind@1.1.2"]
     },
     {
       "ref": "call-bound@1.0.4",
-      "dependsOn": [
-        "call-bind-apply-helpers@1.0.2",
-        "get-intrinsic@1.3.0"
-      ]
+      "dependsOn": ["call-bind-apply-helpers@1.0.2", "get-intrinsic@1.3.0"]
     },
     {
       "ref": "ccount@2.0.1",
@@ -33013,15 +32664,11 @@
     },
     {
       "ref": "chokidar@5.0.0",
-      "dependsOn": [
-        "readdirp@5.0.0"
-      ]
+      "dependsOn": ["readdirp@5.0.0"]
     },
     {
       "ref": "class-variance-authority@0.7.1",
-      "dependsOn": [
-        "clsx@2.1.1"
-      ]
+      "dependsOn": ["clsx@2.1.1"]
     },
     {
       "ref": "client-only@0.0.1",
@@ -33045,20 +32692,11 @@
     },
     {
       "ref": "concat-stream@2.0.0",
-      "dependsOn": [
-        "buffer-from@1.1.2",
-        "inherits@2.0.4",
-        "readable-stream@3.6.2",
-        "typedarray@0.0.6"
-      ]
+      "dependsOn": ["buffer-from@1.1.2", "inherits@2.0.4", "readable-stream@3.6.2", "typedarray@0.0.6"]
     },
     {
       "ref": "readable-stream@3.6.2",
-      "dependsOn": [
-        "inherits@2.0.4",
-        "string_decoder@1.1.1",
-        "util-deprecate@1.0.2"
-      ]
+      "dependsOn": ["inherits@2.0.4", "string_decoder@1.1.1", "util-deprecate@1.0.2"]
     },
     {
       "ref": "consola@3.4.2",
@@ -33090,11 +32728,7 @@
     },
     {
       "ref": "cross-spawn@7.0.6",
-      "dependsOn": [
-        "path-key@3.1.1",
-        "shebang-command@2.0.0",
-        "which@2.0.2"
-      ]
+      "dependsOn": ["path-key@3.1.1", "shebang-command@2.0.0", "which@2.0.2"]
     },
     {
       "ref": "csstype@3.2.3",
@@ -33102,9 +32736,7 @@
     },
     {
       "ref": "d3-array@3.2.4",
-      "dependsOn": [
-        "internmap@2.0.3"
-      ]
+      "dependsOn": ["internmap@2.0.3"]
     },
     {
       "ref": "d3-color@3.1.0",
@@ -33120,9 +32752,7 @@
     },
     {
       "ref": "d3-interpolate@3.0.1",
-      "dependsOn": [
-        "d3-color@3.1.0"
-      ]
+      "dependsOn": ["d3-color@3.1.0"]
     },
     {
       "ref": "d3-path@3.1.0",
@@ -33140,21 +32770,15 @@
     },
     {
       "ref": "d3-shape@3.2.0",
-      "dependsOn": [
-        "d3-path@3.1.0"
-      ]
+      "dependsOn": ["d3-path@3.1.0"]
     },
     {
       "ref": "d3-time@3.1.0",
-      "dependsOn": [
-        "d3-array@3.2.4"
-      ]
+      "dependsOn": ["d3-array@3.2.4"]
     },
     {
       "ref": "d3-time-format@4.1.0",
-      "dependsOn": [
-        "d3-time@3.1.0"
-      ]
+      "dependsOn": ["d3-time@3.1.0"]
     },
     {
       "ref": "d3-timer@3.0.1",
@@ -33166,9 +32790,7 @@
     },
     {
       "ref": "debug@4.4.3",
-      "dependsOn": [
-        "ms@2.1.3"
-      ]
+      "dependsOn": ["ms@2.1.3"]
     },
     {
       "ref": "decimal.js-light@2.5.1",
@@ -33176,9 +32798,7 @@
     },
     {
       "ref": "decode-named-character-reference@1.3.0",
-      "dependsOn": [
-        "character-entities@2.0.2"
-      ]
+      "dependsOn": ["character-entities@2.0.2"]
     },
     {
       "ref": "deepmerge-ts@8.0.2",
@@ -33186,10 +32806,7 @@
     },
     {
       "ref": "default-browser@5.5.1",
-      "dependsOn": [
-        "bundle-name@4.1.0",
-        "default-browser-id@5.0.1"
-      ]
+      "dependsOn": ["bundle-name@4.1.0", "default-browser-id@5.0.1"]
     },
     {
       "ref": "default-browser-id@5.0.1",
@@ -33197,9 +32814,7 @@
     },
     {
       "ref": "default-user-agent@1.0.0",
-      "dependsOn": [
-        "os-name@1.0.3"
-      ]
+      "dependsOn": ["os-name@1.0.3"]
     },
     {
       "ref": "define-lazy-prop@3.0.0",
@@ -33239,9 +32854,7 @@
     },
     {
       "ref": "devlop@1.1.0",
-      "dependsOn": [
-        "dequal@2.0.3"
-      ]
+      "dependsOn": ["dequal@2.0.3"]
     },
     {
       "ref": "digest-header@1.1.0",
@@ -33249,11 +32862,7 @@
     },
     {
       "ref": "dom-serializer@2.0.0",
-      "dependsOn": [
-        "domelementtype@2.3.0",
-        "domhandler@5.0.3",
-        "entities@4.5.0"
-      ]
+      "dependsOn": ["domelementtype@2.3.0", "domhandler@5.0.3", "entities@4.5.0"]
     },
     {
       "ref": "entities@4.5.0",
@@ -33265,25 +32874,15 @@
     },
     {
       "ref": "domhandler@5.0.3",
-      "dependsOn": [
-        "domelementtype@2.3.0"
-      ]
+      "dependsOn": ["domelementtype@2.3.0"]
     },
     {
       "ref": "domutils@3.2.2",
-      "dependsOn": [
-        "dom-serializer@2.0.0",
-        "domelementtype@2.3.0",
-        "domhandler@5.0.3"
-      ]
+      "dependsOn": ["dom-serializer@2.0.0", "domelementtype@2.3.0", "domhandler@5.0.3"]
     },
     {
       "ref": "dunder-proto@1.0.1",
-      "dependsOn": [
-        "call-bind-apply-helpers@1.0.2",
-        "es-errors@1.3.0",
-        "gopd@1.2.0"
-      ]
+      "dependsOn": ["call-bind-apply-helpers@1.0.2", "es-errors@1.3.0", "gopd@1.2.0"]
     },
     {
       "ref": "duplexer@0.1.2",
@@ -33291,9 +32890,7 @@
     },
     {
       "ref": "ecdsa-sig-formatter@1.0.11",
-      "dependsOn": [
-        "safe-buffer@5.1.2"
-      ]
+      "dependsOn": ["safe-buffer@5.1.2"]
     },
     {
       "ref": "ee-first@1.1.1",
@@ -33305,9 +32902,7 @@
     },
     {
       "ref": "end-of-stream@1.4.5",
-      "dependsOn": [
-        "once@1.4.0"
-      ]
+      "dependsOn": ["once@1.4.0"]
     },
     {
       "ref": "end-or-error@1.0.1",
@@ -33315,10 +32910,7 @@
     },
     {
       "ref": "enhanced-resolve@5.21.6",
-      "dependsOn": [
-        "graceful-fs@4.2.11",
-        "tapable@2.3.3"
-      ]
+      "dependsOn": ["graceful-fs@4.2.11", "tapable@2.3.3"]
     },
     {
       "ref": "entities@2.2.0",
@@ -33342,9 +32934,7 @@
     },
     {
       "ref": "es-object-atoms@1.1.2",
-      "dependsOn": [
-        "es-errors@1.3.0"
-      ]
+      "dependsOn": ["es-errors@1.3.0"]
     },
     {
       "ref": "es-toolkit@1.49.0",
@@ -33352,9 +32942,7 @@
     },
     {
       "ref": "esbuild@0.28.1",
-      "dependsOn": [
-        "@esbuild/darwin-arm64@0.28.1"
-      ]
+      "dependsOn": ["@esbuild/darwin-arm64@0.28.1"]
     },
     {
       "ref": "escape-html@1.0.3",
@@ -33366,9 +32954,7 @@
     },
     {
       "ref": "estree-walker@3.0.3",
-      "dependsOn": [
-        "@types/estree@1.0.9"
-      ]
+      "dependsOn": ["@types/estree@1.0.9"]
     },
     {
       "ref": "event-target-bus@1.0.0",
@@ -33388,9 +32974,7 @@
     },
     {
       "ref": "eventsource@3.0.7",
-      "dependsOn": [
-        "eventsource-parser@3.1.0"
-      ]
+      "dependsOn": ["eventsource-parser@3.1.0"]
     },
     {
       "ref": "eventsource-parser@3.1.0",
@@ -33402,9 +32986,7 @@
     },
     {
       "ref": "extend-shallow@2.0.1",
-      "dependsOn": [
-        "is-extendable@0.1.1"
-      ]
+      "dependsOn": ["is-extendable@0.1.1"]
     },
     {
       "ref": "fast-copy@4.0.3",
@@ -33416,17 +32998,11 @@
     },
     {
       "ref": "fast-unique-numbers@9.0.27",
-      "dependsOn": [
-        "@babel/runtime@7.29.7",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["@babel/runtime@7.29.7", "tslib@2.8.1"]
     },
     {
       "ref": "fast-xml-builder@1.3.0",
-      "dependsOn": [
-        "path-expression-matcher@1.6.2",
-        "xml-naming@0.3.0"
-      ]
+      "dependsOn": ["path-expression-matcher@1.6.2", "xml-naming@0.3.0"]
     },
     {
       "ref": "fast-xml-parser@5.10.1",
@@ -33441,17 +33017,11 @@
     },
     {
       "ref": "fast-xml-validator@1.4.1",
-      "dependsOn": [
-        "detailed-xml-validator@2.2.0",
-        "path-expression-matcher@1.6.2",
-        "xml-naming@0.3.0"
-      ]
+      "dependsOn": ["detailed-xml-validator@2.2.0", "path-expression-matcher@1.6.2", "xml-naming@0.3.0"]
     },
     {
       "ref": "fdir@6.5.0",
-      "dependsOn": [
-        "picomatch@4.0.4"
-      ]
+      "dependsOn": ["picomatch@4.0.4"]
     },
     {
       "ref": "fflate@0.8.3",
@@ -33459,12 +33029,7 @@
     },
     {
       "ref": "formstream@1.5.2",
-      "dependsOn": [
-        "destroy@1.2.0",
-        "mime@2.6.0",
-        "node-hex@1.0.1",
-        "pause-stream@0.0.11"
-      ]
+      "dependsOn": ["destroy@1.2.0", "mime@2.6.0", "node-hex@1.0.1", "pause-stream@0.0.11"]
     },
     {
       "ref": "foxact@0.3.8",
@@ -33490,9 +33055,7 @@
     },
     {
       "ref": "generate-function@2.3.1",
-      "dependsOn": [
-        "is-property@1.0.2"
-      ]
+      "dependsOn": ["is-property@1.0.2"]
     },
     {
       "ref": "get-intrinsic@1.3.0",
@@ -33515,10 +33078,7 @@
     },
     {
       "ref": "get-proto@1.0.1",
-      "dependsOn": [
-        "dunder-proto@1.0.1",
-        "es-object-atoms@1.1.2"
-      ]
+      "dependsOn": ["dunder-proto@1.0.1", "es-object-atoms@1.1.2"]
     },
     {
       "ref": "get-ready@1.0.0",
@@ -33534,9 +33094,7 @@
     },
     {
       "ref": "gzip-size@6.0.0",
-      "dependsOn": [
-        "duplexer@0.1.2"
-      ]
+      "dependsOn": ["duplexer@0.1.2"]
     },
     {
       "ref": "has-symbols@1.1.0",
@@ -33544,9 +33102,7 @@
     },
     {
       "ref": "hasown@2.0.4",
-      "dependsOn": [
-        "function-bind@1.1.2"
-      ]
+      "dependsOn": ["function-bind@1.1.2"]
     },
     {
       "ref": "he@1.2.0",
@@ -33572,12 +33128,7 @@
     },
     {
       "ref": "htmlparser2@10.1.0",
-      "dependsOn": [
-        "domelementtype@2.3.0",
-        "domhandler@5.0.3",
-        "domutils@3.2.2",
-        "entities@7.0.1"
-      ]
+      "dependsOn": ["domelementtype@2.3.0", "domhandler@5.0.3", "domutils@3.2.2", "entities@7.0.1"]
     },
     {
       "ref": "entities@7.0.1",
@@ -33585,23 +33136,15 @@
     },
     {
       "ref": "http-proxy-agent@7.0.2",
-      "dependsOn": [
-        "agent-base@7.1.4",
-        "debug@4.4.3"
-      ]
+      "dependsOn": ["agent-base@7.1.4", "debug@4.4.3"]
     },
     {
       "ref": "https-proxy-agent@7.0.6",
-      "dependsOn": [
-        "agent-base@7.1.4",
-        "debug@4.4.3"
-      ]
+      "dependsOn": ["agent-base@7.1.4", "debug@4.4.3"]
     },
     {
       "ref": "humanize-ms@1.2.1",
-      "dependsOn": [
-        "ms@2.1.3"
-      ]
+      "dependsOn": ["ms@2.1.3"]
     },
     {
       "ref": "hyparquet@1.29.2",
@@ -33609,10 +33152,7 @@
     },
     {
       "ref": "hyparquet-compressors@1.1.1",
-      "dependsOn": [
-        "fzstd@0.1.1",
-        "hysnappy@1.0.0"
-      ]
+      "dependsOn": ["fzstd@0.1.1", "hysnappy@1.0.0"]
     },
     {
       "ref": "hysnappy@1.0.0",
@@ -33620,9 +33160,7 @@
     },
     {
       "ref": "iconv-lite@0.7.3",
-      "dependsOn": [
-        "safer-buffer@2.1.2"
-      ]
+      "dependsOn": ["safer-buffer@2.1.2"]
     },
     {
       "ref": "ieee754@1.2.1",
@@ -33676,9 +33214,7 @@
     },
     {
       "ref": "is-inside-container@1.0.0",
-      "dependsOn": [
-        "is-docker@3.0.0"
-      ]
+      "dependsOn": ["is-docker@3.0.0"]
     },
     {
       "ref": "is-property@1.0.2",
@@ -33686,11 +33222,7 @@
     },
     {
       "ref": "is-type-of@1.4.0",
-      "dependsOn": [
-        "core-util-is@1.0.3",
-        "is-class-hotfix@0.0.6",
-        "isstream@0.1.2"
-      ]
+      "dependsOn": ["core-util-is@1.0.3", "is-class-hotfix@0.0.6", "isstream@0.1.2"]
     },
     {
       "ref": "is-unsafe@2.0.0",
@@ -33698,9 +33230,7 @@
     },
     {
       "ref": "is-wsl@3.1.1",
-      "dependsOn": [
-        "is-inside-container@1.0.0"
-      ]
+      "dependsOn": ["is-inside-container@1.0.0"]
     },
     {
       "ref": "isarray@1.0.0",
@@ -33763,18 +33293,11 @@
     },
     {
       "ref": "jwa@2.0.1",
-      "dependsOn": [
-        "buffer-equal-constant-time@1.0.1",
-        "ecdsa-sig-formatter@1.0.11",
-        "safe-buffer@5.1.2"
-      ]
+      "dependsOn": ["buffer-equal-constant-time@1.0.1", "ecdsa-sig-formatter@1.0.11", "safe-buffer@5.1.2"]
     },
     {
       "ref": "jws@4.0.1",
-      "dependsOn": [
-        "jwa@2.0.1",
-        "safe-buffer@5.1.2"
-      ]
+      "dependsOn": ["jwa@2.0.1", "safe-buffer@5.1.2"]
     },
     {
       "ref": "kleur@4.1.5",
@@ -33790,12 +33313,7 @@
     },
     {
       "ref": "libmime@5.4.1",
-      "dependsOn": [
-        "encoding-japanese@2.2.0",
-        "iconv-lite@0.7.3",
-        "libbase64@1.3.0",
-        "libqp@2.1.1"
-      ]
+      "dependsOn": ["encoding-japanese@2.2.0", "iconv-lite@0.7.3", "libbase64@1.3.0", "libqp@2.1.1"]
     },
     {
       "ref": "libqp@2.1.1",
@@ -33803,10 +33321,7 @@
     },
     {
       "ref": "lightningcss@1.32.0",
-      "dependsOn": [
-        "detect-libc@2.1.2",
-        "lightningcss-darwin-arm64@1.32.0"
-      ]
+      "dependsOn": ["detect-libc@2.1.2", "lightningcss-darwin-arm64@1.32.0"]
     },
     {
       "ref": "lightningcss-darwin-arm64@1.32.0",
@@ -33814,9 +33329,7 @@
     },
     {
       "ref": "linkify-it@5.0.2",
-      "dependsOn": [
-        "uc.micro@2.1.0"
-      ]
+      "dependsOn": ["uc.micro@2.1.0"]
     },
     {
       "ref": "lodash@4.18.1",
@@ -33868,15 +33381,11 @@
     },
     {
       "ref": "lucide-react@1.22.0",
-      "dependsOn": [
-        "react@19.2.7"
-      ]
+      "dependsOn": ["react@19.2.7"]
     },
     {
       "ref": "magic-string@0.30.21",
-      "dependsOn": [
-        "@jridgewell/sourcemap-codec@1.5.5"
-      ]
+      "dependsOn": ["@jridgewell/sourcemap-codec@1.5.5"]
     },
     {
       "ref": "mailparser@3.9.17",
@@ -33895,20 +33404,11 @@
     },
     {
       "ref": "@zone-eu/mailsplit@5.4.15",
-      "dependsOn": [
-        "libbase64@1.3.0",
-        "libmime@5.4.2",
-        "libqp@2.1.1"
-      ]
+      "dependsOn": ["libbase64@1.3.0", "libmime@5.4.2", "libqp@2.1.1"]
     },
     {
       "ref": "libmime@5.4.2",
-      "dependsOn": [
-        "encoding-japanese@2.2.0",
-        "iconv-lite@0.7.3",
-        "libbase64@1.3.0",
-        "libqp@2.1.1"
-      ]
+      "dependsOn": ["encoding-japanese@2.2.0", "iconv-lite@0.7.3", "libbase64@1.3.0", "libqp@2.1.1"]
     },
     {
       "ref": "nodemailer@9.0.6",
@@ -33982,11 +33482,7 @@
     },
     {
       "ref": "mdast-util-gfm-strikethrough@2.0.0",
-      "dependsOn": [
-        "@types/mdast@4.0.4",
-        "mdast-util-from-markdown@2.0.3",
-        "mdast-util-to-markdown@2.1.2"
-      ]
+      "dependsOn": ["@types/mdast@4.0.4", "mdast-util-from-markdown@2.0.3", "mdast-util-to-markdown@2.1.2"]
     },
     {
       "ref": "mdast-util-gfm-table@2.0.0",
@@ -34009,10 +33505,7 @@
     },
     {
       "ref": "mdast-util-phrasing@4.1.0",
-      "dependsOn": [
-        "@types/mdast@4.0.4",
-        "unist-util-is@6.0.1"
-      ]
+      "dependsOn": ["@types/mdast@4.0.4", "unist-util-is@6.0.1"]
     },
     {
       "ref": "mdast-util-to-markdown@2.1.2",
@@ -34030,9 +33523,7 @@
     },
     {
       "ref": "mdast-util-to-string@4.0.0",
-      "dependsOn": [
-        "@types/mdast@4.0.4"
-      ]
+      "dependsOn": ["@types/mdast@4.0.4"]
     },
     {
       "ref": "micromark@4.0.2",
@@ -34135,9 +33626,7 @@
     },
     {
       "ref": "micromark-extension-gfm-tagfilter@2.0.0",
-      "dependsOn": [
-        "micromark-util-types@2.0.2"
-      ]
+      "dependsOn": ["micromark-util-types@2.0.2"]
     },
     {
       "ref": "micromark-extension-gfm-task-list-item@2.1.0",
@@ -34151,11 +33640,7 @@
     },
     {
       "ref": "micromark-factory-destination@2.0.1",
-      "dependsOn": [
-        "micromark-util-character@2.1.1",
-        "micromark-util-symbol@2.0.1",
-        "micromark-util-types@2.0.2"
-      ]
+      "dependsOn": ["micromark-util-character@2.1.1", "micromark-util-symbol@2.0.1", "micromark-util-types@2.0.2"]
     },
     {
       "ref": "micromark-factory-label@2.0.1",
@@ -34168,10 +33653,7 @@
     },
     {
       "ref": "micromark-factory-space@2.0.1",
-      "dependsOn": [
-        "micromark-util-character@2.1.1",
-        "micromark-util-types@2.0.2"
-      ]
+      "dependsOn": ["micromark-util-character@2.1.1", "micromark-util-types@2.0.2"]
     },
     {
       "ref": "micromark-factory-title@2.0.1",
@@ -34193,37 +33675,23 @@
     },
     {
       "ref": "micromark-util-character@2.1.1",
-      "dependsOn": [
-        "micromark-util-symbol@2.0.1",
-        "micromark-util-types@2.0.2"
-      ]
+      "dependsOn": ["micromark-util-symbol@2.0.1", "micromark-util-types@2.0.2"]
     },
     {
       "ref": "micromark-util-chunked@2.0.1",
-      "dependsOn": [
-        "micromark-util-symbol@2.0.1"
-      ]
+      "dependsOn": ["micromark-util-symbol@2.0.1"]
     },
     {
       "ref": "micromark-util-classify-character@2.0.1",
-      "dependsOn": [
-        "micromark-util-character@2.1.1",
-        "micromark-util-symbol@2.0.1",
-        "micromark-util-types@2.0.2"
-      ]
+      "dependsOn": ["micromark-util-character@2.1.1", "micromark-util-symbol@2.0.1", "micromark-util-types@2.0.2"]
     },
     {
       "ref": "micromark-util-combine-extensions@2.0.1",
-      "dependsOn": [
-        "micromark-util-chunked@2.0.1",
-        "micromark-util-types@2.0.2"
-      ]
+      "dependsOn": ["micromark-util-chunked@2.0.1", "micromark-util-types@2.0.2"]
     },
     {
       "ref": "micromark-util-decode-numeric-character-reference@2.0.2",
-      "dependsOn": [
-        "micromark-util-symbol@2.0.1"
-      ]
+      "dependsOn": ["micromark-util-symbol@2.0.1"]
     },
     {
       "ref": "micromark-util-decode-string@2.0.1",
@@ -34244,23 +33712,15 @@
     },
     {
       "ref": "micromark-util-normalize-identifier@2.0.1",
-      "dependsOn": [
-        "micromark-util-symbol@2.0.1"
-      ]
+      "dependsOn": ["micromark-util-symbol@2.0.1"]
     },
     {
       "ref": "micromark-util-resolve-all@2.0.1",
-      "dependsOn": [
-        "micromark-util-types@2.0.2"
-      ]
+      "dependsOn": ["micromark-util-types@2.0.2"]
     },
     {
       "ref": "micromark-util-sanitize-uri@2.0.1",
-      "dependsOn": [
-        "micromark-util-character@2.1.1",
-        "micromark-util-encode@2.0.1",
-        "micromark-util-symbol@2.0.1"
-      ]
+      "dependsOn": ["micromark-util-character@2.1.1", "micromark-util-encode@2.0.1", "micromark-util-symbol@2.0.1"]
     },
     {
       "ref": "micromark-util-subtokenize@2.1.0",
@@ -34304,9 +33764,7 @@
     },
     {
       "ref": "mkdirp@0.5.6",
-      "dependsOn": [
-        "minimist@1.2.8"
-      ]
+      "dependsOn": ["minimist@1.2.8"]
     },
     {
       "ref": "mqtt@5.15.2",
@@ -34331,21 +33789,11 @@
     },
     {
       "ref": "mqtt-packet@9.0.2",
-      "dependsOn": [
-        "bl@6.1.6",
-        "debug@4.4.3",
-        "process-nextick-args@2.0.1"
-      ]
+      "dependsOn": ["bl@6.1.6", "debug@4.4.3", "process-nextick-args@2.0.1"]
     },
     {
       "ref": "readable-stream@4.7.0",
-      "dependsOn": [
-        "abort-controller@3.0.0",
-        "buffer@6.0.3",
-        "events@3.3.0",
-        "process@0.11.10",
-        "string_decoder@1.3.0"
-      ]
+      "dependsOn": ["abort-controller@3.0.0", "buffer@6.0.3", "events@3.3.0", "process@0.11.10", "string_decoder@1.3.0"]
     },
     {
       "ref": "safe-buffer@5.2.1",
@@ -34353,9 +33801,7 @@
     },
     {
       "ref": "string_decoder@1.3.0",
-      "dependsOn": [
-        "safe-buffer@5.2.1"
-      ]
+      "dependsOn": ["safe-buffer@5.2.1"]
     },
     {
       "ref": "mrmime@2.0.1",
@@ -34390,17 +33836,11 @@
     },
     {
       "ref": "mz@2.7.0",
-      "dependsOn": [
-        "any-promise@1.3.0",
-        "object-assign@4.1.1",
-        "thenify-all@1.6.0"
-      ]
+      "dependsOn": ["any-promise@1.3.0", "object-assign@4.1.1", "thenify-all@1.6.0"]
     },
     {
       "ref": "named-placeholders@1.1.6",
-      "dependsOn": [
-        "lru.min@1.1.4"
-      ]
+      "dependsOn": ["lru.min@1.1.4"]
     },
     {
       "ref": "nanoid@3.3.18",
@@ -34420,10 +33860,7 @@
     },
     {
       "ref": "node-sql-parser@5.4.0",
-      "dependsOn": [
-        "@types/pegjs@0.10.6",
-        "big-integer@1.6.52"
-      ]
+      "dependsOn": ["@types/pegjs@0.10.6", "big-integer@1.6.52"]
     },
     {
       "ref": "nodemailer@9.0.3",
@@ -34431,10 +33868,7 @@
     },
     {
       "ref": "number-allocator@1.0.14",
-      "dependsOn": [
-        "debug@4.4.3",
-        "js-sdsl@4.3.0"
-      ]
+      "dependsOn": ["debug@4.4.3", "js-sdsl@4.3.0"]
     },
     {
       "ref": "object-assign@4.1.1",
@@ -34450,11 +33884,7 @@
     },
     {
       "ref": "ofetch@1.5.1",
-      "dependsOn": [
-        "destr@2.0.5",
-        "node-fetch-native@1.6.7",
-        "ufo@1.6.4"
-      ]
+      "dependsOn": ["destr@2.0.5", "node-fetch-native@1.6.7", "ufo@1.6.4"]
     },
     {
       "ref": "on-exit-leak-free@2.1.2",
@@ -34462,18 +33892,11 @@
     },
     {
       "ref": "once@1.4.0",
-      "dependsOn": [
-        "wrappy@1.0.2"
-      ]
+      "dependsOn": ["wrappy@1.0.2"]
     },
     {
       "ref": "open@10.2.0",
-      "dependsOn": [
-        "default-browser@5.5.1",
-        "define-lazy-prop@3.0.0",
-        "is-inside-container@1.0.0",
-        "wsl-utils@0.1.0"
-      ]
+      "dependsOn": ["default-browser@5.5.1", "define-lazy-prop@3.0.0", "is-inside-container@1.0.0", "wsl-utils@0.1.0"]
     },
     {
       "ref": "oracledb@6.10.0",
@@ -34481,29 +33904,19 @@
     },
     {
       "ref": "os-name@1.0.3",
-      "dependsOn": [
-        "osx-release@1.1.0",
-        "win-release@1.1.1"
-      ]
+      "dependsOn": ["osx-release@1.1.0", "win-release@1.1.1"]
     },
     {
       "ref": "osx-release@1.1.0",
-      "dependsOn": [
-        "minimist@1.2.8"
-      ]
+      "dependsOn": ["minimist@1.2.8"]
     },
     {
       "ref": "oxfmt@0.56.0",
-      "dependsOn": [
-        "tinypool@2.1.0",
-        "@oxfmt/binding-darwin-arm64@0.56.0"
-      ]
+      "dependsOn": ["tinypool@2.1.0", "@oxfmt/binding-darwin-arm64@0.56.0"]
     },
     {
       "ref": "oxlint@1.71.0",
-      "dependsOn": [
-        "@oxlint/binding-darwin-arm64@1.71.0"
-      ]
+      "dependsOn": ["@oxlint/binding-darwin-arm64@1.71.0"]
     },
     {
       "ref": "package-manager-detector@1.7.0",
@@ -34511,10 +33924,7 @@
     },
     {
       "ref": "parseley@0.13.1",
-      "dependsOn": [
-        "leac@0.7.0",
-        "peberminta@0.10.0"
-      ]
+      "dependsOn": ["leac@0.7.0", "peberminta@0.10.0"]
     },
     {
       "ref": "path-expression-matcher@1.6.2",
@@ -34530,15 +33940,11 @@
     },
     {
       "ref": "pause-stream@0.0.11",
-      "dependsOn": [
-        "through@2.3.8"
-      ]
+      "dependsOn": ["through@2.3.8"]
     },
     {
       "ref": "pdfjs-dist@5.4.296",
-      "dependsOn": [
-        "@napi-rs/canvas@0.1.100"
-      ]
+      "dependsOn": ["@napi-rs/canvas@0.1.100"]
     },
     {
       "ref": "peberminta@0.10.0",
@@ -34569,9 +33975,7 @@
     },
     {
       "ref": "pg-pool@3.14.0",
-      "dependsOn": [
-        "pg@8.23.0"
-      ]
+      "dependsOn": ["pg@8.23.0"]
     },
     {
       "ref": "pg-protocol@1.16.0",
@@ -34589,9 +33993,7 @@
     },
     {
       "ref": "pgpass@1.0.5",
-      "dependsOn": [
-        "split2@4.2.0"
-      ]
+      "dependsOn": ["split2@4.2.0"]
     },
     {
       "ref": "picocolors@1.1.1",
@@ -34619,9 +34021,7 @@
     },
     {
       "ref": "pino-abstract-transport@3.0.0",
-      "dependsOn": [
-        "split2@4.2.0"
-      ]
+      "dependsOn": ["split2@4.2.0"]
     },
     {
       "ref": "pino-pretty@13.1.3",
@@ -34659,11 +34059,7 @@
     },
     {
       "ref": "postcss@8.5.23",
-      "dependsOn": [
-        "nanoid@3.3.18",
-        "picocolors@1.1.1",
-        "source-map-js@1.2.1"
-      ]
+      "dependsOn": ["nanoid@3.3.18", "picocolors@1.1.1", "source-map-js@1.2.1"]
     },
     {
       "ref": "postgres-array@2.0.0",
@@ -34679,9 +34075,7 @@
     },
     {
       "ref": "postgres-interval@1.2.0",
-      "dependsOn": [
-        "xtend@4.0.2"
-      ]
+      "dependsOn": ["xtend@4.0.2"]
     },
     {
       "ref": "process@0.11.10",
@@ -34697,10 +34091,7 @@
     },
     {
       "ref": "pump@3.0.4",
-      "dependsOn": [
-        "end-of-stream@1.4.5",
-        "once@1.4.0"
-      ]
+      "dependsOn": ["end-of-stream@1.4.5", "once@1.4.0"]
     },
     {
       "ref": "punycode.js@2.3.1",
@@ -34708,10 +34099,7 @@
     },
     {
       "ref": "qs@6.15.3",
-      "dependsOn": [
-        "es-define-property@1.0.1",
-        "side-channel@1.1.1"
-      ]
+      "dependsOn": ["es-define-property@1.0.1", "side-channel@1.1.1"]
     },
     {
       "ref": "quansync@1.0.0",
@@ -34727,10 +34115,7 @@
     },
     {
       "ref": "react-dom@19.2.7",
-      "dependsOn": [
-        "react@19.2.7",
-        "scheduler@0.27.0"
-      ]
+      "dependsOn": ["react@19.2.7", "scheduler@0.27.0"]
     },
     {
       "ref": "react-is@19.2.7",
@@ -34760,29 +34145,15 @@
     },
     {
       "ref": "react-remove-scroll-bar@2.3.8",
-      "dependsOn": [
-        "react@19.2.7",
-        "@types/react@19.2.17",
-        "react-style-singleton@2.2.3",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["react@19.2.7", "@types/react@19.2.17", "react-style-singleton@2.2.3", "tslib@2.8.1"]
     },
     {
       "ref": "react-router@8.3.0",
-      "dependsOn": [
-        "react@19.2.7",
-        "react-dom@19.2.7",
-        "cookie-es@3.1.1"
-      ]
+      "dependsOn": ["react@19.2.7", "react-dom@19.2.7", "cookie-es@3.1.1"]
     },
     {
       "ref": "react-style-singleton@2.2.3",
-      "dependsOn": [
-        "react@19.2.7",
-        "@types/react@19.2.17",
-        "tslib@2.8.1",
-        "get-nonce@1.0.1"
-      ]
+      "dependsOn": ["react@19.2.7", "@types/react@19.2.17", "tslib@2.8.1", "get-nonce@1.0.1"]
     },
     {
       "ref": "readable-stream@2.3.8",
@@ -34829,9 +34200,7 @@
     },
     {
       "ref": "redux-thunk@3.1.0",
-      "dependsOn": [
-        "redux@5.0.1"
-      ]
+      "dependsOn": ["redux@5.0.1"]
     },
     {
       "ref": "reselect@5.2.0",
@@ -34843,25 +34212,15 @@
     },
     {
       "ref": "rolldown@1.1.3",
-      "dependsOn": [
-        "@oxc-project/types@0.137.0",
-        "@rolldown/pluginutils@1.0.1",
-        "@rolldown/binding-darwin-arm64@1.1.3"
-      ]
+      "dependsOn": ["@oxc-project/types@0.137.0", "@rolldown/pluginutils@1.0.1", "@rolldown/binding-darwin-arm64@1.1.3"]
     },
     {
       "ref": "rss-parser@3.13.0",
-      "dependsOn": [
-        "entities@2.2.0",
-        "xml2js@0.5.0"
-      ]
+      "dependsOn": ["entities@2.2.0", "xml2js@0.5.0"]
     },
     {
       "ref": "xml2js@0.5.0",
-      "dependsOn": [
-        "sax@1.6.0",
-        "xmlbuilder@11.0.1"
-      ]
+      "dependsOn": ["sax@1.6.0", "xmlbuilder@11.0.1"]
     },
     {
       "ref": "run-applescript@7.1.0",
@@ -34889,9 +34248,7 @@
     },
     {
       "ref": "sdk-base@2.0.1",
-      "dependsOn": [
-        "get-ready@1.0.0"
-      ]
+      "dependsOn": ["get-ready@1.0.0"]
     },
     {
       "ref": "secure-json-parse@4.1.0",
@@ -34899,9 +34256,7 @@
     },
     {
       "ref": "selderee@0.12.0",
-      "dependsOn": [
-        "parseley@0.13.1"
-      ]
+      "dependsOn": ["parseley@0.13.1"]
     },
     {
       "ref": "semver@5.7.2",
@@ -34927,9 +34282,7 @@
     },
     {
       "ref": "shebang-command@2.0.0",
-      "dependsOn": [
-        "shebang-regex@3.0.0"
-      ]
+      "dependsOn": ["shebang-regex@3.0.0"]
     },
     {
       "ref": "shebang-regex@3.0.0",
@@ -34947,19 +34300,11 @@
     },
     {
       "ref": "side-channel-list@1.0.1",
-      "dependsOn": [
-        "es-errors@1.3.0",
-        "object-inspect@1.13.4"
-      ]
+      "dependsOn": ["es-errors@1.3.0", "object-inspect@1.13.4"]
     },
     {
       "ref": "side-channel-map@1.0.1",
-      "dependsOn": [
-        "call-bound@1.0.4",
-        "es-errors@1.3.0",
-        "get-intrinsic@1.3.0",
-        "object-inspect@1.13.4"
-      ]
+      "dependsOn": ["call-bound@1.0.4", "es-errors@1.3.0", "get-intrinsic@1.3.0", "object-inspect@1.13.4"]
     },
     {
       "ref": "side-channel-weakmap@1.0.2",
@@ -34977,11 +34322,7 @@
     },
     {
       "ref": "sirv@3.0.2",
-      "dependsOn": [
-        "@polka/url@1.0.0-next.29",
-        "mrmime@2.0.1",
-        "totalist@3.0.1"
-      ]
+      "dependsOn": ["@polka/url@1.0.0-next.29", "mrmime@2.0.1", "totalist@3.0.1"]
     },
     {
       "ref": "smart-buffer@4.2.0",
@@ -34989,16 +34330,11 @@
     },
     {
       "ref": "socks@2.8.9",
-      "dependsOn": [
-        "ip-address@10.5.0",
-        "smart-buffer@4.2.0"
-      ]
+      "dependsOn": ["ip-address@10.5.0", "smart-buffer@4.2.0"]
     },
     {
       "ref": "sonic-boom@4.2.1",
-      "dependsOn": [
-        "atomic-sleep@1.0.0"
-      ]
+      "dependsOn": ["atomic-sleep@1.0.0"]
     },
     {
       "ref": "source-map-js@1.2.1",
@@ -35044,9 +34380,7 @@
     },
     {
       "ref": "string_decoder@1.1.1",
-      "dependsOn": [
-        "safe-buffer@5.1.2"
-      ]
+      "dependsOn": ["safe-buffer@5.1.2"]
     },
     {
       "ref": "strip-json-comments@5.0.3",
@@ -35054,9 +34388,7 @@
     },
     {
       "ref": "strnum@2.4.1",
-      "dependsOn": [
-        "anynum@1.0.1"
-      ]
+      "dependsOn": ["anynum@1.0.1"]
     },
     {
       "ref": "supports-color@10.2.2",
@@ -35099,21 +34431,15 @@
     },
     {
       "ref": "thenify@3.3.1",
-      "dependsOn": [
-        "any-promise@1.3.0"
-      ]
+      "dependsOn": ["any-promise@1.3.0"]
     },
     {
       "ref": "thenify-all@1.6.0",
-      "dependsOn": [
-        "thenify@3.3.1"
-      ]
+      "dependsOn": ["thenify@3.3.1"]
     },
     {
       "ref": "thread-stream@4.2.0",
-      "dependsOn": [
-        "real-require@1.0.0"
-      ]
+      "dependsOn": ["real-require@1.0.0"]
     },
     {
       "ref": "real-require@1.0.0",
@@ -35137,10 +34463,7 @@
     },
     {
       "ref": "tinyglobby@0.2.17",
-      "dependsOn": [
-        "fdir@6.5.0",
-        "picomatch@4.0.4"
-      ]
+      "dependsOn": ["fdir@6.5.0", "picomatch@4.0.4"]
     },
     {
       "ref": "tinypool@2.1.0",
@@ -35172,9 +34495,7 @@
     },
     {
       "ref": "type-fest@5.7.0",
-      "dependsOn": [
-        "tagged-tag@1.0.0"
-      ]
+      "dependsOn": ["tagged-tag@1.0.0"]
     },
     {
       "ref": "typedarray@0.0.6",
@@ -35182,9 +34503,7 @@
     },
     {
       "ref": "typescript@7.0.2",
-      "dependsOn": [
-        "@typescript/typescript-darwin-arm64@7.0.2"
-      ]
+      "dependsOn": ["@typescript/typescript-darwin-arm64@7.0.2"]
     },
     {
       "ref": "uc.micro@2.1.0",
@@ -35196,20 +34515,11 @@
     },
     {
       "ref": "unconfig@7.5.0",
-      "dependsOn": [
-        "@quansync/fs@1.0.0",
-        "defu@6.1.7",
-        "jiti@2.7.0",
-        "quansync@1.0.0",
-        "unconfig-core@7.5.0"
-      ]
+      "dependsOn": ["@quansync/fs@1.0.0", "defu@6.1.7", "jiti@2.7.0", "quansync@1.0.0", "unconfig-core@7.5.0"]
     },
     {
       "ref": "unconfig-core@7.5.0",
-      "dependsOn": [
-        "@quansync/fs@1.0.0",
-        "quansync@1.0.0"
-      ]
+      "dependsOn": ["@quansync/fs@1.0.0", "quansync@1.0.0"]
     },
     {
       "ref": "undici@7.29.0",
@@ -35221,49 +34531,31 @@
     },
     {
       "ref": "unenv@2.0.0-rc.24",
-      "dependsOn": [
-        "pathe@2.0.3"
-      ]
+      "dependsOn": ["pathe@2.0.3"]
     },
     {
       "ref": "unescape@1.0.1",
-      "dependsOn": [
-        "extend-shallow@2.0.1"
-      ]
+      "dependsOn": ["extend-shallow@2.0.1"]
     },
     {
       "ref": "unist-util-is@6.0.1",
-      "dependsOn": [
-        "@types/unist@3.0.3"
-      ]
+      "dependsOn": ["@types/unist@3.0.3"]
     },
     {
       "ref": "unist-util-stringify-position@4.0.0",
-      "dependsOn": [
-        "@types/unist@3.0.3"
-      ]
+      "dependsOn": ["@types/unist@3.0.3"]
     },
     {
       "ref": "unist-util-visit@5.1.0",
-      "dependsOn": [
-        "@types/unist@3.0.3",
-        "unist-util-is@6.0.1",
-        "unist-util-visit-parents@6.0.2"
-      ]
+      "dependsOn": ["@types/unist@3.0.3", "unist-util-is@6.0.1", "unist-util-visit-parents@6.0.2"]
     },
     {
       "ref": "unist-util-visit-parents@6.0.2",
-      "dependsOn": [
-        "@types/unist@3.0.3",
-        "unist-util-is@6.0.1"
-      ]
+      "dependsOn": ["@types/unist@3.0.3", "unist-util-is@6.0.1"]
     },
     {
       "ref": "unplugin-utils@0.3.2",
-      "dependsOn": [
-        "pathe@2.0.3",
-        "picomatch@4.0.4"
-      ]
+      "dependsOn": ["pathe@2.0.3", "picomatch@4.0.4"]
     },
     {
       "ref": "urllib@2.44.1",
@@ -35284,9 +34576,7 @@
     },
     {
       "ref": "iconv-lite@0.6.3",
-      "dependsOn": [
-        "safer-buffer@2.1.2"
-      ]
+      "dependsOn": ["safer-buffer@2.1.2"]
     },
     {
       "ref": "statuses@1.5.0",
@@ -35294,26 +34584,15 @@
     },
     {
       "ref": "use-callback-ref@1.3.3",
-      "dependsOn": [
-        "react@19.2.7",
-        "@types/react@19.2.17",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["react@19.2.7", "@types/react@19.2.17", "tslib@2.8.1"]
     },
     {
       "ref": "use-sidecar@1.1.3",
-      "dependsOn": [
-        "react@19.2.7",
-        "@types/react@19.2.17",
-        "detect-node-es@1.1.0",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["react@19.2.7", "@types/react@19.2.17", "detect-node-es@1.1.0", "tslib@2.8.1"]
     },
     {
       "ref": "use-sync-external-store@1.6.0",
-      "dependsOn": [
-        "react@19.2.7"
-      ]
+      "dependsOn": ["react@19.2.7"]
     },
     {
       "ref": "util-deprecate@1.0.2",
@@ -35321,13 +34600,7 @@
     },
     {
       "ref": "utility@1.18.0",
-      "dependsOn": [
-        "copy-to@2.0.1",
-        "escape-html@1.0.3",
-        "mkdirp@0.5.6",
-        "mz@2.7.0",
-        "unescape@1.0.1"
-      ]
+      "dependsOn": ["copy-to@2.0.1", "escape-html@1.0.3", "mkdirp@0.5.6", "mz@2.7.0", "unescape@1.0.1"]
     },
     {
       "ref": "victory-vendor@37.3.6",
@@ -35390,30 +34663,19 @@
     },
     {
       "ref": "which@2.0.2",
-      "dependsOn": [
-        "isexe@2.0.0"
-      ]
+      "dependsOn": ["isexe@2.0.0"]
     },
     {
       "ref": "why-is-node-running@2.3.0",
-      "dependsOn": [
-        "siginfo@2.0.0",
-        "stackback@0.0.2"
-      ]
+      "dependsOn": ["siginfo@2.0.0", "stackback@0.0.2"]
     },
     {
       "ref": "win-release@1.1.1",
-      "dependsOn": [
-        "semver@5.7.2"
-      ]
+      "dependsOn": ["semver@5.7.2"]
     },
     {
       "ref": "worker-factory@7.0.50",
-      "dependsOn": [
-        "@babel/runtime@7.29.7",
-        "fast-unique-numbers@9.0.27",
-        "tslib@2.8.1"
-      ]
+      "dependsOn": ["@babel/runtime@7.29.7", "fast-unique-numbers@9.0.27", "tslib@2.8.1"]
     },
     {
       "ref": "worker-timers@8.0.34",
@@ -35436,17 +34698,11 @@
     },
     {
       "ref": "worker-timers-worker@9.0.15",
-      "dependsOn": [
-        "@babel/runtime@7.29.7",
-        "tslib@2.8.1",
-        "worker-factory@7.0.50"
-      ]
+      "dependsOn": ["@babel/runtime@7.29.7", "tslib@2.8.1", "worker-factory@7.0.50"]
     },
     {
       "ref": "workerd@1.20260826.1",
-      "dependsOn": [
-        "@cloudflare/workerd-darwin-arm64@1.20260826.1"
-      ]
+      "dependsOn": ["@cloudflare/workerd-darwin-arm64@1.20260826.1"]
     },
     {
       "ref": "wrangler@4.127.0",
@@ -35476,9 +34732,7 @@
     },
     {
       "ref": "wsl-utils@0.1.0",
-      "dependsOn": [
-        "is-wsl@3.1.1"
-      ]
+      "dependsOn": ["is-wsl@3.1.1"]
     },
     {
       "ref": "xml-naming@0.3.0",
@@ -35486,10 +34740,7 @@
     },
     {
       "ref": "xml2js@0.6.2",
-      "dependsOn": [
-        "sax@1.6.0",
-        "xmlbuilder@11.0.1"
-      ]
+      "dependsOn": ["sax@1.6.0", "xmlbuilder@11.0.1"]
     },
     {
       "ref": "xmlbuilder@11.0.1",
@@ -35511,10 +34762,7 @@
     },
     {
       "ref": "youch-core@0.3.3",
-      "dependsOn": [
-        "@poppinss/exception@1.2.3",
-        "error-stack-parser-es@1.0.5"
-      ]
+      "dependsOn": ["@poppinss/exception@1.2.3", "error-stack-parser-es@1.0.5"]
     },
     {
       "ref": "zod@4.4.3",

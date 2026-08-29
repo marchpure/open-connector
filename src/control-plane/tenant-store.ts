@@ -1,7 +1,11 @@
 import type { IConnectionStore, StoredConnection } from "../connection-service.ts";
 import type { ResolvedCredential } from "../core/types.ts";
 import type { IOAuthClientConfigStore, OAuthClientConfig } from "../oauth/oauth-client-config-service.ts";
-import type { IOAuthStateStore, OAuthAuthorizationState } from "../oauth/oauth-flow-service.ts";
+import type {
+  IOAuthStateStore,
+  OAuthAuthorizationPrincipal,
+  OAuthAuthorizationState,
+} from "../oauth/oauth-flow-service.ts";
 import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
 import type {
   IRunLogStore,
@@ -513,43 +517,276 @@ export class TenantOAuthStateStore implements IOAuthStateStore {
     this.database = database;
     this.principal = principal;
     this.secretCodec = secretCodec;
-    this.database.exec(`
-      create table if not exists tenant_oauth_states (
-        state text primary key,
-        tenant_id text not null,
-        workspace_id text not null,
-        value_ciphertext text not null,
-        created_at text not null
-      );
-      create index if not exists idx_tenant_oauth_states_expiry on tenant_oauth_states (tenant_id, workspace_id, created_at);
-    `);
+    ensureOAuthStateSchema(this.database);
   }
 
   async set(state: OAuthAuthorizationState): Promise<void> {
+    ensureOAuthStatusSchema(this.database);
     this.database
       .prepare(
-        "insert into tenant_oauth_states (state, tenant_id, workspace_id, value_ciphertext, created_at) values (?, ?, ?, ?, ?)",
+        `insert into tenant_oauth_states
+          (state, tenant_id, workspace_id, subject, owner_id, value_ciphertext, created_at)
+         values (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         state.state,
         this.principal.tenantId,
         this.principal.workspaceId,
+        state.principal?.subject ?? this.principal.subject,
+        state.principal?.ownerId ?? this.principal.ownerId,
         await this.secretCodec.encode(JSON.stringify(state)),
         state.createdAt,
       );
+    setOAuthFlowStatus(this.database, this.principal, state, "pending");
   }
 
   async take(state: string): Promise<OAuthAuthorizationState | undefined> {
-    const row = this.database
-      .prepare("select value_ciphertext from tenant_oauth_states where state=? and tenant_id=? and workspace_id=?")
-      .get(state, this.principal.tenantId, this.principal.workspaceId) as Record<string, unknown> | undefined;
-    if (!row) {
-      return undefined;
+    ensureOAuthStatusSchema(this.database);
+    const stateKey = this.stateKey(state);
+    if (!stateKey || stateKey.length > 512) return undefined;
+    this.database.exec("begin immediate");
+    let committed = false;
+    try {
+      const row = this.database
+        .prepare(
+          `select value_ciphertext
+             from tenant_oauth_states
+            where state=? and tenant_id=? and workspace_id=?`,
+        )
+        .get(stateKey, this.principal.tenantId, this.principal.workspaceId) as Record<string, unknown> | undefined;
+      if (!row) {
+        this.database.exec("commit");
+        return undefined;
+      }
+      this.database
+        .prepare("delete from tenant_oauth_states where state=? and tenant_id=? and workspace_id=?")
+        .run(stateKey, this.principal.tenantId, this.principal.workspaceId);
+      this.database.exec("commit");
+      committed = true;
+      return JSON.parse(await this.secretCodec.decode(String(row.value_ciphertext))) as OAuthAuthorizationState;
+    } catch (error) {
+      if (!committed) this.database.exec("rollback");
+      throw error;
     }
-    this.database
-      .prepare("delete from tenant_oauth_states where state=? and tenant_id=? and workspace_id=?")
-      .run(state, this.principal.tenantId, this.principal.workspaceId);
-    return JSON.parse(await this.secretCodec.decode(String(row.value_ciphertext))) as OAuthAuthorizationState;
+  }
+
+  /**
+   * Atomically consumes a callback state without accepting tenant identity
+   * from the callback request. The principal is recovered only from the
+   * encrypted server-side state record.
+   */
+  static async takeForCallback(
+    database: DatabaseSync,
+    secretCodec: ISecretCodec,
+    state: string,
+  ): Promise<{ state: OAuthAuthorizationState; principal: OAuthAuthorizationPrincipal } | undefined> {
+    ensureOAuthStateSchema(database);
+    ensureOAuthStatusSchema(database);
+    const stateKey = state.trim();
+    if (!stateKey || stateKey.length > 512) return undefined;
+    database.exec("begin immediate");
+    let committed = false;
+    try {
+      const row = database
+        .prepare(
+          `select value_ciphertext, tenant_id, workspace_id, subject, owner_id
+             from tenant_oauth_states
+            where state=?`,
+        )
+        .get(stateKey) as Record<string, unknown> | undefined;
+      if (!row) {
+        database.exec("commit");
+        return undefined;
+      }
+      database.prepare("delete from tenant_oauth_states where state=?").run(stateKey);
+      database
+        .prepare("update tenant_oauth_flow_status set status='processing', updated_at=? where state=?")
+        .run(new Date().toISOString(), stateKey);
+      database.exec("commit");
+      committed = true;
+      const pending = JSON.parse(await secretCodec.decode(String(row.value_ciphertext))) as OAuthAuthorizationState;
+      const storedPrincipal = {
+        tenantId: String(row.tenant_id ?? ""),
+        workspaceId: String(row.workspace_id ?? ""),
+        subject: String(row.subject ?? ""),
+        ownerId: String(row.owner_id ?? ""),
+        audience: "knowledge-runtime",
+      };
+      const principal = pending.principal ?? storedPrincipal;
+      if (
+        !principal.tenantId ||
+        !principal.workspaceId ||
+        !principal.subject ||
+        !principal.ownerId ||
+        pending.state !== stateKey ||
+        (storedPrincipal.tenantId && principal.tenantId !== storedPrincipal.tenantId) ||
+        (storedPrincipal.workspaceId && principal.workspaceId !== storedPrincipal.workspaceId) ||
+        (storedPrincipal.subject && principal.subject !== storedPrincipal.subject) ||
+        (storedPrincipal.ownerId && principal.ownerId !== storedPrincipal.ownerId)
+      ) {
+        return undefined;
+      }
+      return { state: pending, principal };
+    } catch (error) {
+      if (!committed) database.exec("rollback");
+      throw error;
+    }
+  }
+
+  static updateStatus(
+    database: DatabaseSync,
+    state: string,
+    status: OAuthFlowStatus,
+    principal?: OAuthAuthorizationPrincipal,
+  ): void {
+    ensureOAuthStatusSchema(database);
+    const updatedAt = new Date().toISOString();
+    if (principal) {
+      database
+        .prepare(
+          `update tenant_oauth_flow_status
+              set status=?, updated_at=?
+            where state=? and tenant_id=? and workspace_id=? and subject=? and owner_id=?`,
+        )
+        .run(
+          status,
+          updatedAt,
+          state.trim(),
+          principal.tenantId,
+          principal.workspaceId,
+          principal.subject,
+          principal.ownerId,
+        );
+      return;
+    }
+    database
+      .prepare("update tenant_oauth_flow_status set status=?, updated_at=? where state=?")
+      .run(status, updatedAt, state.trim());
+  }
+
+  static getStatus(
+    database: DatabaseSync,
+    state: string,
+    principal?: OAuthAuthorizationPrincipal,
+  ): { service: string; connectionName: string; status: OAuthFlowStatus } | undefined {
+    ensureOAuthStatusSchema(database);
+    const query = principal
+      ? database
+          .prepare(
+            `select service, connection_name, status, created_at
+             from tenant_oauth_flow_status
+            where state=? and tenant_id=? and workspace_id=? and subject=? and owner_id=?`,
+          )
+          .get(state.trim(), principal.tenantId, principal.workspaceId, principal.subject, principal.ownerId)
+      : undefined;
+    const row = query as
+      | { service?: unknown; connection_name?: unknown; status?: unknown; created_at?: unknown }
+      | undefined;
+    if (
+      !row ||
+      typeof row.service !== "string" ||
+      typeof row.connection_name !== "string" ||
+      typeof row.status !== "string"
+    )
+      return undefined;
+    if (row.status === "connected") {
+      return { service: row.service, connectionName: row.connection_name, status: "connected" };
+    }
+    const createdAt = Date.parse(String(row.created_at ?? ""));
+    if (!Number.isFinite(createdAt) || Date.now() - createdAt < 0 || Date.now() - createdAt > 15 * 60 * 1000) {
+      return { service: row.service, connectionName: row.connection_name, status: "expired" };
+    }
+    return { service: row.service, connectionName: row.connection_name, status: row.status as OAuthFlowStatus };
+  }
+
+  private stateKey(state: string): string {
+    return state.trim();
+  }
+}
+
+export type OAuthFlowStatus = "pending" | "processing" | "connected" | "provider_error" | "error" | "expired";
+
+function setOAuthFlowStatus(
+  database: DatabaseSync,
+  principal: TenantPrincipal,
+  state: OAuthAuthorizationState,
+  status: OAuthFlowStatus,
+): void {
+  database
+    .prepare(
+      `insert into tenant_oauth_flow_status
+        (state, tenant_id, workspace_id, subject, owner_id, service, connection_name, status, created_at, updated_at)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       on conflict(state) do update set
+         service=excluded.service,
+         connection_name=excluded.connection_name,
+         status=excluded.status,
+         updated_at=excluded.updated_at`,
+    )
+    .run(
+      state.state,
+      principal.tenantId,
+      principal.workspaceId,
+      principal.subject,
+      principal.ownerId,
+      state.service,
+      state.connectionName ?? "default",
+      status,
+      state.createdAt,
+      new Date().toISOString(),
+    );
+}
+
+function ensureOAuthStateSchema(database: DatabaseSync): void {
+  database.exec(`
+      create table if not exists tenant_oauth_states (
+        state text primary key,
+        tenant_id text not null,
+        workspace_id text not null,
+        subject text,
+        owner_id text,
+        value_ciphertext text not null,
+        created_at text not null
+      );
+      create index if not exists idx_tenant_oauth_states_expiry on tenant_oauth_states (tenant_id, workspace_id, created_at);
+    `);
+  const columns = new Set(
+    (database.prepare("pragma table_info(tenant_oauth_states)").all() as Array<{ name?: unknown }>).map((column) =>
+      String(column.name ?? ""),
+    ),
+  );
+  if (!columns.has("subject")) database.exec("alter table tenant_oauth_states add column subject text");
+  if (!columns.has("owner_id")) database.exec("alter table tenant_oauth_states add column owner_id text");
+}
+
+function ensureOAuthStatusSchema(database: DatabaseSync): void {
+  database.exec(`
+    create table if not exists tenant_oauth_flow_status (
+      state text primary key,
+      tenant_id text,
+      workspace_id text,
+      subject text,
+      owner_id text,
+      service text not null,
+      connection_name text not null default 'default',
+      status text not null check (status in ('pending', 'processing', 'connected', 'provider_error', 'error', 'expired')),
+      created_at text not null,
+      updated_at text not null
+    );
+    create index if not exists idx_tenant_oauth_flow_status_updated
+      on tenant_oauth_flow_status (updated_at);
+  `);
+  const columns = new Set(
+    (database.prepare("pragma table_info(tenant_oauth_flow_status)").all() as Array<{ name?: unknown }>).map((column) =>
+      String(column.name ?? ""),
+    ),
+  );
+  if (!columns.has("tenant_id")) database.exec("alter table tenant_oauth_flow_status add column tenant_id text");
+  if (!columns.has("workspace_id")) database.exec("alter table tenant_oauth_flow_status add column workspace_id text");
+  if (!columns.has("subject")) database.exec("alter table tenant_oauth_flow_status add column subject text");
+  if (!columns.has("owner_id")) database.exec("alter table tenant_oauth_flow_status add column owner_id text");
+  if (!columns.has("connection_name")) {
+    database.exec("alter table tenant_oauth_flow_status add column connection_name text not null default 'default'");
   }
 }
 

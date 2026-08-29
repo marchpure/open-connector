@@ -75,6 +75,7 @@ export function createTenantRuntime(deps: ControlPlaneDependencies, principal: T
       states: new TenantOAuthStateStore(deps.controlDatabase, principal, deps.secretCodec),
       secretCodec: deps.secretCodec,
       isCustomClientConfigAllowed: () => deps.secretCodec.encrypted,
+      principal,
     }),
     connectionService,
     actions,

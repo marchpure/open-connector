@@ -291,10 +291,7 @@ export class ConnectionService {
    * plane needs a durable record for visibility, validation, leases, and
    * revision-bound runtime authorization.
    */
-  async connectAndPersistWithoutAuth(
-    service: string,
-    input: ConnectWithoutAuthInput = {},
-  ): Promise<ConnectionSummary> {
+  async connectAndPersistWithoutAuth(service: string, input: ConnectWithoutAuthInput = {}): Promise<ConnectionSummary> {
     const provider = this.getAvailableProvider(service);
     if (!this.supportsAuth(provider, "no_auth")) {
       throw new ConnectionError("unsupported_auth_type", `${service} does not support no_auth.`);

@@ -405,17 +405,11 @@ async function assertResolvedAddressesAllowed(
   for (const entry of results) {
     if (entry && typeof entry.address === "string") {
       const addressClass = classifyIpAddress(entry.address);
-      const localhost =
-        policy.allowLocalhostDev
-        && (entry.address === "127.0.0.1" || entry.address.startsWith("127."));
+      const localhost = policy.allowLocalhostDev && (entry.address === "127.0.0.1" || entry.address.startsWith("127."));
       if (addressClass === "always-blocked" && !localhost) {
         throw policy.createError(`${fieldName} must not resolve to private or reserved IP addresses`);
       }
-      if (
-        addressClass === "public"
-        || (addressClass === "private" && policy.allowPrivateNetwork)
-        || localhost
-      ) {
+      if (addressClass === "public" || (addressClass === "private" && policy.allowPrivateNetwork) || localhost) {
         continue;
       }
       if (trustedHost) {

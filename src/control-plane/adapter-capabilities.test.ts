@@ -1,6 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-
 import { createCatalogStore } from "../catalog-store.ts";
 import { AesGcmSecretCodec } from "../server/secrets/secret-codec.ts";
 import { createPrincipalToken } from "./auth.ts";
@@ -53,12 +52,7 @@ describe("specialized adapter capability routes", () => {
     });
     expect(response.status).toBe(200);
     const capabilities = (await response.json()) as { items: Array<Record<string, unknown>> };
-    expect(capabilities.items.map((item) => item.service)).toEqual([
-      "oracle_database",
-      "rest_openapi",
-      "mcp",
-      "files",
-    ]);
+    expect(capabilities.items.map((item) => item.service)).toEqual(["oracle_database", "rest_openapi", "mcp", "files"]);
     expect(capabilities.items.every((item) => item.tier === "beta")).toBe(true);
 
     const rest = await app().request("/v1/adapters/rest/validate", {
