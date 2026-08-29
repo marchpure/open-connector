@@ -1,0 +1,140 @@
+(node:83045) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+Warning: UnknownErrorException: Ensure that the `standardFontDataUrl` API parameter is provided.
+{
+  "generatedAt": "2026-08-29T10:46:01.700Z",
+  "evidenceDir": "/var/folders/y5/s7wzkl8d44q4z4lj2ljg4lrc0000gn/T/step2b-evidence-UE9o3p",
+  "checks": {
+    "rest": {
+      "status": true,
+      "idempotentReplay": true,
+      "fixtureUrl": "http://192.168.43.68:53547"
+    },
+    "mcp": {
+      "status": true,
+      "discovery": {
+        "tools": 1,
+        "resources": 1,
+        "prompts": 1
+      },
+      "toolCall": true,
+      "reconnect": true,
+      "independentProcessLaunches": 2,
+      "disconnectRejected": true,
+      "timeoutRejected": true
+    },
+    "files": {
+      "status": true,
+      "kinds": [
+        "csv",
+        "json",
+        "excel",
+        "pdf",
+        "parquet"
+      ],
+      "ids": [
+        "9ca436f67f26622f3ad05cfbd85b7ef2.csv",
+        "de6c44a32a7005614c324b21c53dc459.json",
+        "20a9b214306b8be5e6898a8c3fbb8399.pdf",
+        "0c62fa29878094cd0b1bde3853417b2b.xlsx",
+        "5c72805260b038af887058f194a8eea2.parquet"
+      ],
+      "previews": {
+        "csv": {
+          "columns": [
+            "a",
+            "b"
+          ],
+          "rows": 1
+        },
+        "json": {
+          "truncated": false
+        },
+        "excel": {
+          "sheets": 1
+        },
+        "pdf": {
+          "pages": 10,
+          "textCharacters": 4515
+        },
+        "parquet": {
+          "columns": [
+            "SERIES",
+            "BRANDID",
+            "BRANDNAME",
+            "BRANDENAME",
+            "BUID",
+            "CANCELSIGN",
+            "SIMPLENAME",
+            "UPTIME",
+            "UPSTAFF",
+            "UPTIMESTAMP",
+            "STORAGEID",
+            "MERGEBRANDID",
+            "REMOVESIGN",
+            "ACCOUNTCOMPANYID",
+            "SAPID",
+            "APIBRANDID",
+            "APICODE",
+            "ENBRANDNAME",
+            "PREFIXSTR",
+            "RETURNSTORAGEID",
+            "UNLOCKSIGN",
+            "SIZEGROUP"
+          ],
+          "rows": 17
+        }
+      }
+    },
+    "controlPlane": {
+      "status": true,
+      "createStatus": 201,
+      "listStatus": 200,
+      "validateStatus": 202,
+      "discoverStatus": 202,
+      "updateStatus": 200,
+      "leaseIssueStatus": 201,
+      "invocationStatus": 200,
+      "invocationResult": {
+        "executionId": "8bf6a468-eab5-4902-b80f-1fb5d07e8695",
+        "auditPersisted": true,
+        "ok": true,
+        "result": {
+          "ok": true,
+          "output": {
+            "id": "record-42",
+            "source": "tcp-fixture"
+          }
+        }
+      },
+      "leaseRevokeStatus": 200,
+      "revokedLeaseInvocationStatus": 400,
+      "deleteStatus": 204,
+      "deletedFromList": true,
+      "otherTenantHasNoConnections": true,
+      "credentialRedacted": true,
+      "ciphertextStored": true
+    }
+  },
+  "benchmark": {
+    "concurrentRestInvocations": {
+      "count": 50,
+      "p95Ms": 119.48,
+      "p99Ms": 124.33,
+      "rssDeltaBytes": 8601600
+    },
+    "connectionCatalog": {
+      "count": 99,
+      "createP95Ms": 1.03,
+      "createP99Ms": 4.49,
+      "listMs": 0.93
+    },
+    "largeFileUpload": {
+      "bytes": 10485760,
+      "durationMs": 45.89,
+      "rssDeltaBytes": 13680640,
+      "requestChunkBytes": 65536,
+      "storagePath": "authenticated multipart HTTP -> disk staging -> transit file service"
+    }
+  }
+}
