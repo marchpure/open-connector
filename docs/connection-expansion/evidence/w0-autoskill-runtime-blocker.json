@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "status": "BLOCKED_EXTERNAL",
+  "autoskillSha": "8dc9f14c1a0b0169ef865f3d87d4a6ea3e623533",
+  "attemptedPort": 38100,
+  "listenerVerified": false,
+  "blocker": "The read-only AutoSkill reference bundles x86_64 CPython native extensions (bytedlogger/proto and pydantic_core), while this host is arm64. The HTTP server fails during import before binding; no process was killed or modified.",
+  "requiredToUnblock": ["arm64-compatible AutoSkill dependency build or a compatible Linux runtime", "model endpoint access"],
+  "connectionPrerequisite": "PostgreSQL create/validate/discover/scoped execute_read_query/revoke/restart lifecycle passed in postgresql-real-engine-w0.json.",
+  "secrets": "No credentials, tokens, database data, or runtime logs are included."
+}

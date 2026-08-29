@@ -10303,7 +10303,7 @@
     },
     {
       "service_id": "chuhaijiang",
-      "display_name": "出海匠",
+      "display_name": "\u51fa\u6d77\u5320",
       "category": [
         "Data",
         "Marketing"
@@ -47431,8 +47431,8 @@
       "restart": true,
       "skill_context": true,
       "skill_e2e": false,
-      "evidence_ref": "docs/connection-expansion/evidence/postgresql-real-engine.json",
-      "blocker": "external_account_or_lifecycle_evidence",
+      "evidence_ref": "docs/connection-expansion/evidence/postgresql-real-engine-w0.json",
+      "blocker": "AutoSkill HTTP E2E pending: reference runtime native dependencies are platform-incompatible on this host",
       "owner": "knowledge-platform"
     },
     {
@@ -59799,7 +59799,7 @@
     },
     {
       "service_id": "tave",
-      "display_name": "Táve",
+      "display_name": "T\u00e1ve",
       "category": [
         "Productivity",
         "Communication"
