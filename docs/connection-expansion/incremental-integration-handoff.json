@@ -23,5 +23,5 @@
   "externalBlockers": "See evidence manifest; blockers are external accounts, credentials, tenants, entitlements, private-network/TLS targets, or bounded-read targets, not known uncompleted implementation work.",
   "rollback": "Redeploy base SHA 3bbd44624933300487a54ee3acba23190b66ee98 or remove this candidate deployment; preserve backups and do not reuse expansion credentials.",
   "finalSha": "f014da25432fcabbb3fd99515bc381f9cac9ba4f",
-  "finalShaMeaning": "Current pushed branch tip; this commit contains the final per-worker lease validation evidence metadata."
+  "finalShaMeaning": "Last verified code/evidence commit; terminal metadata commits after it do not alter source, generated artifacts, or verification results. The exact current branch tip is verified in the terminal audit and final output."
 }
