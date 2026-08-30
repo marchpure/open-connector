@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { randomUUID } from "node:crypto";
 import { createGuardedFetch } from "../core/guarded-fetch.ts";
+import { readBoundedResponseBytes } from "../core/request.ts";
 import {
   createIdempotencyExpiry,
   hashActionRequest,
@@ -12,6 +13,7 @@ import {
 export type RestAuth =
   | { type: "none" }
   | { type: "api_key"; header: string; value: string }
+  | { type: "cookie"; value: string }
   | { type: "bearer"; token: string }
   | { type: "oauth2"; accessToken: string };
 
@@ -39,6 +41,8 @@ export interface RestInvokeInput {
   confirmed?: boolean;
   idempotencyKey?: string;
   pagination?: { maxPages: number };
+  timeoutMs?: number;
+  maxResponseBytes?: number;
 }
 
 export class RestAdapterError extends Error {
@@ -310,7 +314,7 @@ export class RestOpenApiAdapter {
       method,
       headers,
       body: input.body === undefined ? undefined : JSON.stringify(input.body),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(input.timeoutMs ?? 30_000),
     };
     const maxPages = input.pagination?.maxPages ?? 1;
     if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 100) {
@@ -321,7 +325,17 @@ export class RestOpenApiAdapter {
     let nextUrl: URL | undefined = url;
     for (let page = 0; page < maxPages && nextUrl; page += 1) {
       response = await fetchWithRateLimit(this.fetcher, nextUrl, request);
-      const text = await response.text();
+      const maxResponseBytes = input.maxResponseBytes ?? 1024 * 1024;
+      const contentLength = Number(response.headers.get("content-length") ?? "0");
+      if (contentLength > maxResponseBytes) {
+        throw new RestAdapterError("request_failed", "REST response exceeded the response size limit.");
+      }
+      const bytes = await readBoundedResponseBytes(response, {
+        maxBytes: maxResponseBytes,
+        fieldName: "REST response",
+        createError: (message) => new RestAdapterError("request_failed", message),
+      });
+      const text = new TextDecoder().decode(bytes);
       let data: unknown = text;
       try {
         data = text ? JSON.parse(text) : null;
@@ -399,6 +413,8 @@ function parseOperations(spec: Record<string, unknown>): RestOperation[] {
 function applyAuth(headers: Headers, auth: RestAuth): void {
   if (auth.type === "api_key") {
     headers.set(auth.header, auth.value);
+  } else if (auth.type === "cookie") {
+    headers.set("cookie", auth.value);
   } else if (auth.type === "bearer" || auth.type === "oauth2") {
     headers.set("authorization", `Bearer ${auth.type === "bearer" ? auth.token : auth.accessToken}`);
   }

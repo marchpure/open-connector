@@ -12,6 +12,8 @@ import { summarizeForRunLog } from "../server/actions/run-log-summary.ts";
 import { ConnectionLeaseService, LeaseError } from "./lease.ts";
 import { redactSecrets } from "./redaction.ts";
 import { createLeasePolicy, createTenantRuntime } from "./service.ts";
+import { executeWebAction } from "./web-action-runtime.ts";
+import { TenantWebActionStore } from "./web-action-store.ts";
 
 const maxOutputBytes = 64 * 1024;
 const executionTimeoutMs = 30_000;
@@ -82,6 +84,12 @@ export function createLeaseRuntimeMcpServer(
   signal: AbortSignal,
 ): McpServer {
   const runtime = createTenantRuntime(deps, request.principal);
+  const webActions = new TenantWebActionStore(
+    deps.controlDatabase,
+    request.principal,
+    deps.secretCodec,
+    deps.webEgress,
+  );
   const server = new McpServer(
     { name: "connection-service-runtime", version: "1.0.0" },
     { instructions: "Use only actions explicitly granted by the current connection lease." },
@@ -94,7 +102,7 @@ export function createLeaseRuntimeMcpServer(
       description: "List actions granted by the current connection lease.",
       inputSchema: {},
     },
-    async () => toolResult(await listAllowedActions(deps.catalog, runtime, request)),
+    async () => toolResult(await listAllowedActions(deps, runtime, request)),
   );
   server.registerTool(
     "get_action_guide",
@@ -103,7 +111,7 @@ export function createLeaseRuntimeMcpServer(
       description: "Get the bounded schema and usage details for one lease-allowed action.",
       inputSchema: { actionId: z.string().trim().min(1) },
     },
-    async ({ actionId }) => toolResult(await getActionGuide(deps.catalog, runtime, request, actionId)),
+    async ({ actionId }) => toolResult(await getActionGuide(deps, runtime, request, actionId)),
   );
   server.registerTool(
     "execute_action",
@@ -117,17 +125,102 @@ export function createLeaseRuntimeMcpServer(
     },
     async ({ actionId, input }, context) =>
       toolResult(
-        await executeAction(
-          deps.catalog,
-          runtime,
-          request,
-          actionId,
-          input,
-          AbortSignal.any([signal, context.mcpReq.signal]),
-        ),
+        actionId.startsWith("web_api.")
+          ? await executeDynamicWebAction(
+              deps,
+              webActions,
+              runtime,
+              request,
+              actionId,
+              input,
+              AbortSignal.any([signal, context.mcpReq.signal]),
+            )
+          : await executeAction(
+              deps.catalog,
+              runtime,
+              request,
+              actionId,
+              input,
+              AbortSignal.any([signal, context.mcpReq.signal]),
+            ),
       ),
   );
   return server;
+}
+
+async function executeDynamicWebAction(
+  deps: ControlPlaneDependencies,
+  webActions: TenantWebActionStore,
+  runtime: TenantRuntime,
+  request: LeaseRuntimeMcpContext,
+  actionId: string,
+  input: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<Record<string, unknown>> {
+  const action = await webActions.get(actionId);
+  if (!action || action.connectionId !== request.connectionId || !request.claims.allowedActions.includes(actionId)) {
+    await recordRejectedExecution(
+      runtime,
+      request,
+      actionId,
+      new LeaseError("lease_scope_denied", "Web Action is not leased."),
+    );
+    return failure("lease_scope_denied", "Web Action is not granted by the current lease.");
+  }
+  const current = verifyCurrentLease(runtime, request);
+  webActions.audit("tools_call", { connectionId: action.connectionId }, actionId, request.invocationId);
+  const leaseAbort = new AbortController();
+  const leaseWatch = setInterval(() => {
+    try {
+      runtime.leases.verifyConnection(request.token, request.principal, {
+        connectionId: current.id,
+        connectionRevision: current.revision,
+        invocationId: request.invocationId,
+        audience: request.audience,
+      });
+    } catch {
+      leaseAbort.abort();
+    }
+  }, leaseCheckIntervalMs);
+  let run: ActionRunResult;
+  try {
+    run = await executeWebAction({
+      action,
+      webActions,
+      runs: runtime.runs,
+      database: deps.controlDatabase,
+      scope: { tenantId: request.principal.tenantId, workspaceId: request.principal.workspaceId },
+      secretCodec: deps.secretCodec,
+      invocationId: request.invocationId,
+      input,
+      signal: AbortSignal.any([signal, leaseAbort.signal]),
+      webEgress: deps.webEgress,
+    });
+  } finally {
+    clearInterval(leaseWatch);
+  }
+  try {
+    runtime.leases.verifyConnection(request.token, request.principal, {
+      connectionId: current.id,
+      connectionRevision: current.revision,
+      invocationId: request.invocationId,
+      audience: request.audience,
+    });
+  } catch (error) {
+    return leaseFailure(error);
+  }
+  webActions.audit("credential_use", { connectionId: action.connectionId }, actionId, request.invocationId);
+  if (!run.result.ok) {
+    webActions.audit(
+      "failure",
+      { connectionId: action.connectionId, errorCode: run.result.error?.code ?? "execution_failed" },
+      actionId,
+      request.invocationId,
+    );
+  }
+  return run.result.ok
+    ? { ok: true, data: run.result.output, ...executionMeta(run) }
+    : { ok: false, error: run.result.error, ...executionMeta(run) };
 }
 
 export function assertLeaseRuntimeRequest(
@@ -140,7 +233,15 @@ export function assertLeaseRuntimeRequest(
     const action = deps.catalog.actionsById.get(actionId);
     return action?.service === connection.service && action.execution.locallyExecutable;
   });
-  if (selectedActions.length === 0) {
+  const dynamicActions = new TenantWebActionStore(
+    deps.controlDatabase,
+    request.principal,
+    deps.secretCodec,
+    deps.webEgress,
+  )
+    .actionIds(connection.id)
+    .filter((actionId) => request.claims.allowedActions.includes(actionId));
+  if (selectedActions.length === 0 && dynamicActions.length === 0) {
     throw new LeaseError("lease_scope_denied", "Lease grants no executable action for the selected connection.");
   }
   for (const actionId of selectedActions) {
@@ -152,23 +253,40 @@ export function assertLeaseRuntimeRequest(
       audience: request.audience,
     });
   }
+  for (const actionId of dynamicActions) {
+    if (!actionId.startsWith("web_api.")) {
+      throw new LeaseError("lease_scope_denied", "Lease grants an invalid Web Action.");
+    }
+  }
   return connection;
 }
 
 async function listAllowedActions(
-  catalog: CatalogStore,
+  deps: ControlPlaneDependencies,
   runtime: TenantRuntime,
   request: LeaseRuntimeMcpContext,
 ): Promise<Record<string, unknown>> {
   try {
     const connection = verifyCurrentLease(runtime, request);
+    webActionsFor(deps, request).audit("tools_list", { connectionId: connection.id }, undefined, request.invocationId);
+    const dynamic = await new TenantWebActionStore(
+      deps.controlDatabase,
+      request.principal,
+      deps.secretCodec,
+      deps.webEgress,
+    )
+      .list(connection.id)
+      .catch(() => []);
     return success({
       connectionId: connection.id,
       actions: request.claims.allowedActions.flatMap((actionId) => {
-        const action = catalog.actionsById.get(actionId);
-        return action && action.service === connection.service
-          ? [{ id: action.id, name: action.name, description: action.description }]
-          : [];
+        const action = deps.catalog.actionsById.get(actionId);
+        const webAction = dynamic.find((candidate) => candidate.id === actionId);
+        return webAction && webAction.connectionId === connection.id
+          ? [{ id: webAction.id, name: webAction.name, description: webAction.description }]
+          : action && action.service === connection.service
+            ? [{ id: action.id, name: action.name, description: action.description }]
+            : [];
       }),
     });
   } catch (error) {
@@ -177,13 +295,13 @@ async function listAllowedActions(
 }
 
 async function getActionGuide(
-  catalog: CatalogStore,
+  deps: ControlPlaneDependencies,
   runtime: TenantRuntime,
   request: LeaseRuntimeMcpContext,
   actionId: string,
 ): Promise<Record<string, unknown>> {
   try {
-    const { action } = verifyAction(catalog, runtime, request, actionId);
+    const { action } = verifyAction(deps.catalog, runtime, request, actionId);
     return success({
       id: action.id,
       name: action.name,
@@ -194,8 +312,46 @@ async function getActionGuide(
       providerPermissions: action.providerPermissions,
     });
   } catch (error) {
+    if (actionId.startsWith("web_api.")) {
+      const webActions = new TenantWebActionStore(
+        deps.controlDatabase,
+        request.principal,
+        deps.secretCodec,
+        deps.webEgress,
+      );
+      const action = await webActions.get(actionId);
+      if (action && action.connectionId === request.connectionId && request.claims.allowedActions.includes(actionId)) {
+        webActions.audit(
+          "tools_get_action_guide",
+          { connectionId: request.connectionId },
+          actionId,
+          request.invocationId,
+        );
+        return success({
+          id: action.id,
+          name: action.name,
+          description: action.description,
+          inputSchema: action.inputSchema,
+          outputSchema: action.outputSchema,
+          method: action.method,
+          path: action.path,
+          readOnly: action.readOnly,
+          authentication: action.authentication,
+          parameterSources: action.parameterSources,
+          pagination: action.pagination,
+          rateLimit: action.rateLimit,
+          timeoutMs: action.timeoutMs,
+          idempotency: action.idempotency,
+          sideEffect: action.sideEffect,
+        });
+      }
+    }
     return leaseFailure(error);
   }
+}
+
+function webActionsFor(deps: ControlPlaneDependencies, request: LeaseRuntimeMcpContext): TenantWebActionStore {
+  return new TenantWebActionStore(deps.controlDatabase, request.principal, deps.secretCodec, deps.webEgress);
 }
 
 async function executeAction(

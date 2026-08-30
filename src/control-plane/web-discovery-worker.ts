@@ -8,9 +8,14 @@ export interface WebDiscoveryCaptureOptions {
   approvedOrigin: string;
   executablePath?: string;
   storageStatePath?: string;
+  ignoreHTTPSErrors?: boolean;
   durationMs?: number;
   submitObservation(observation: WebObservation): Promise<void>;
   interact?: (page: Page) => Promise<void>;
+  interactAfterNavigate?: (page: Page) => Promise<void>;
+  onAuthenticatedCookies?: (
+    cookies: Array<{ name: string; value: string; domain: string; path: string }>,
+  ) => Promise<void>;
 }
 
 export async function runWebDiscoveryCapture(
@@ -31,11 +36,12 @@ export async function runWebDiscoveryCapture(
   try {
     context = await browser.newContext({
       serviceWorkers: "block",
+      ...(options.ignoreHTTPSErrors === true ? { ignoreHTTPSErrors: true } : {}),
       ...(options.storageStatePath ? { storageState: options.storageStatePath } : {}),
     });
     await context.route("**/*", async (route) => {
       const requestUrl = new URL(route.request().url());
-      if (!["data:", "blob:"].includes(requestUrl.protocol) && requestUrl.origin !== approvedOrigin) {
+      if (requestUrl.protocol !== "https:" || requestUrl.origin !== approvedOrigin) {
         crossOriginNavigationsBlocked += 1;
         await route.abort("blockedbyclient");
         return;
@@ -53,6 +59,15 @@ export async function runWebDiscoveryCapture(
     });
     if (options.interact) await options.interact(page);
     await page.goto(pageUrl.href, { waitUntil: "networkidle" });
+    if (options.interactAfterNavigate) {
+      await options.interactAfterNavigate(page);
+      await page.waitForLoadState("networkidle").catch(() => undefined);
+    }
+    if (options.onAuthenticatedCookies) {
+      await options.onAuthenticatedCookies(
+        (await context.cookies()).map(({ name, value, domain, path }) => ({ name, value, domain, path })),
+      );
+    }
     if (options.durationMs) await page.waitForTimeout(options.durationMs);
     await Promise.all(pending);
     return { observationsSubmitted, crossOriginNavigationsBlocked };
@@ -81,17 +96,27 @@ async function observeResponse(
   }
   const requestHeaders = sanitizeHeaders(await request.allHeaders());
   const requestSample = sanitizeValue(parseJson(request.postData()));
-  const responseSample = sanitizeValue(await response.json().catch(() => undefined));
+  const requestQuerySample = sanitizeQuery(url.searchParams);
+  const body = await response.body().catch(() => undefined);
+  if (!body || body.byteLength > 1024 * 1024) return false;
+  const responseSample = sanitizeValue(parseJson(new TextDecoder().decode(body)));
   await submit({
     url: `${url.origin}${url.pathname}`,
     method: request.method(),
     requestHeaders,
     ...(requestSample === undefined ? {} : { requestSample }),
+    ...(Object.keys(requestQuerySample).length ? { requestQuerySample } : {}),
     responseStatus: response.status(),
     responseContentType: contentType,
     ...(responseSample === undefined ? {} : { responseSample }),
   });
   return true;
+}
+
+function sanitizeQuery(params: URLSearchParams): Record<string, string> {
+  return Object.fromEntries(
+    [...params.entries()].filter(([key]) => !isSensitiveName(key)).map(([key, value]) => [key, value]),
+  );
 }
 
 function sanitizeHeaders(headers: Record<string, string>): Record<string, string> {
@@ -122,7 +147,9 @@ function parseJson(value: string | null): unknown {
 }
 
 function isSensitiveName(name: string): boolean {
-  return /password|secret|token|cookie|authorization|csrf|xsrf/i.test(name);
+  return /password|secret|token|cookie|authorization|csrf|xsrf|email|phone|ssn|social.?security|date.?of.?birth/i.test(
+    name,
+  );
 }
 
 function normalizeOrigin(value: string): string {

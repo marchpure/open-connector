@@ -1,3 +1,4 @@
+import type { ResolvedCredential } from "../core/types.ts";
 import type { EnablementEntry } from "./catalog.ts";
 
 import { serve } from "@hono/node-server";
@@ -14,6 +15,7 @@ import { TransitFileService } from "../server/files/transit-files.ts";
 import { createSecretCodec } from "../server/secrets/secret-codec.ts";
 import { OracleThinDriver } from "./oracle-driver.ts";
 import { createConnectionControlApp } from "./server.ts";
+import { runWebDiscoveryCapture } from "./web-discovery-worker.ts";
 
 const port = positiveInteger(process.env.CONNECTION_SERVICE_PORT, 3400);
 const host = process.env.CONNECTION_SERVICE_HOST ?? "127.0.0.1";
@@ -22,6 +24,7 @@ const authSecret = requiredEnv("CONNECTION_SERVICE_AUTH_SECRET");
 const encryptionKey = requiredEnv("CONNECTION_SERVICE_ENCRYPTION_KEY");
 const enablement = readEnablement(process.env.CONNECTION_SERVICE_ENABLEMENT_JSON);
 setPrivateNetworkAccessAllowed(parsePrivateNetworkAccessFlag(process.env.OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK));
+const webEgress = readWebEgress();
 
 await mkdir(dataDir, { recursive: true });
 const catalog = await loadCatalog(undefined, { executableServices: Object.keys(executorModules) });
@@ -41,11 +44,17 @@ const app = createConnectionControlApp({
   authSecret,
   publicOrigin: process.env.CONNECTION_SERVICE_PUBLIC_ORIGIN ?? `http://${host}:${port}`,
   enablement,
+  webEgress,
   transitFiles,
   fileStore: transitFiles,
   stageFileUpload: (request, consume) =>
     withNodeStagedFile(request, { tempDir: transitFileTempDir, maxBytes: transitFiles.maxBytes }, consume),
   oracleDriverFactory: (config, credentials) => new OracleThinDriver(config, credentials),
+  captureWebDiscovery: async (input) =>
+    captureWithCredential({
+      input,
+      run: runWebDiscoveryCapture,
+    }),
 });
 
 const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
@@ -81,6 +90,58 @@ function requiredEnv(name: string): string {
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function readWebEgress() {
+  if (process.env.CONNECTION_SERVICE_WEB_ALLOW_LOCALHOST_DEV !== "true") return undefined;
+  const ports = (process.env.CONNECTION_SERVICE_WEB_LOCALHOST_PORTS ?? "")
+    .split(",")
+    .map(Number)
+    .filter((port) => Number.isInteger(port) && port > 0 && port < 65536);
+  return { allowLocalhostDev: true, allowedLocalhostPorts: ports };
+}
+
+async function captureWithCredential(input: {
+  input: Parameters<NonNullable<Parameters<typeof createConnectionControlApp>[0]["captureWebDiscovery"]>>[0];
+  run: typeof runWebDiscoveryCapture;
+}) {
+  const result = await input.run({
+    pageUrl: input.input.pageUrl,
+    approvedOrigin: input.input.approvedOrigin,
+    executablePath: process.env.WEB_DISCOVERY_CHROME_PATH,
+    storageStatePath: process.env.WEB_DISCOVERY_STORAGE_STATE_PATH,
+    ignoreHTTPSErrors: process.env.WEB_DISCOVERY_IGNORE_HTTPS_ERRORS === "true",
+    durationMs: positiveInteger(process.env.WEB_DISCOVERY_DURATION_MS, 1_000),
+    submitObservation: input.input.submitObservation,
+    interactAfterNavigate:
+      process.env.WEB_DISCOVERY_INTERACTION === "w3-fixture"
+        ? async (page) => {
+            await page.getByTestId("username").fill("fixture-user");
+            await page.getByTestId("password").fill("fixture-password");
+            await page.getByRole("button", { name: "Log in" }).click();
+            await page.getByTestId("dashboard").waitFor();
+            await page.getByRole("button", { name: "Load items" }).click();
+            await page.getByRole("button", { name: "Load detail" }).click();
+            await page.getByRole("button", { name: "Approve item" }).click();
+          }
+        : undefined,
+    onAuthenticatedCookies: async (cookies) => {
+      const host = new URL(input.input.approvedOrigin).hostname;
+      const sameOriginCookies = cookies.filter(
+        (cookie) => cookie.domain.replace(/^\./, "").toLowerCase() === host.toLowerCase(),
+      );
+      const secret = sameOriginCookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
+      if (!secret) return;
+      const credential: ResolvedCredential = {
+        authType: "custom_credential",
+        values: { cookie: secret },
+        profile: { accountId: host, displayName: host, grantedScopes: [] },
+        metadata: {},
+      };
+      await input.input.saveCredential(credential);
+    },
+  });
+  return result;
 }
 
 function readEnablement(value: string | undefined): EnablementEntry[] {

@@ -1,3 +1,5 @@
+import type { WebObservation } from "./web-discovery.ts";
+
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { AesGcmSecretCodec } from "../server/secrets/secret-codec.ts";
@@ -115,6 +117,41 @@ describe("TenantWebDiscoveryStore", () => {
     const persisted = JSON.stringify(database.prepare("select * from web_discovery_candidates").all());
     expect(persisted).not.toContain("privateValue");
     expect(persisted).not.toContain("sample");
+  });
+
+  it("rejects sensitive query and response samples before candidate persistence", async () => {
+    const database = new DatabaseSync(":memory:");
+    const store = new TenantWebDiscoveryStore(
+      database,
+      { tenantId: "tenant-a", workspaceId: "workspace-a", subject: "user-a" },
+      new AesGcmSecretCodec("web-discovery-sensitive-samples-key"),
+    );
+    const session = await store.start({ origin: "https://app.example.com" });
+    for (const observation of [
+      {
+        requestQuerySample: { access_token: "secret" },
+        responseSample: { id: "123" },
+      },
+      {
+        requestQuerySample: { page: "1" },
+        responseSample: { password: "secret" },
+      },
+    ]) {
+      await expect(
+        store.observe(session.id, session.workerToken, {
+          url: "https://app.example.com/api/orders",
+          method: "GET",
+          requestHeaders: { accept: "application/json" },
+          responseStatus: 200,
+          responseContentType: "application/json",
+          ...observation,
+        } as unknown as WebObservation),
+      ).rejects.toMatchObject({ code: "sensitive_observation" });
+    }
+    expect(database.prepare("select count(*) as count from web_discovery_candidates").get()).toMatchObject({
+      count: 0,
+    });
+    database.close();
   });
 
   it("requires the short-lived worker token for observations", async () => {
