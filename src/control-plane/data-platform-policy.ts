@@ -1,4 +1,5 @@
 const sqlReadActions = new Set([
+  "discover_resources",
   "validate_connection",
   "list_databases",
   "list_schemas",
