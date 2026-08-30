@@ -80,7 +80,7 @@ describe("specialized adapter capability routes", () => {
     });
   });
 
-  it("validates and discovers Oracle through the real adapter routes", async () => {
+  it("requires a lease for Oracle compatibility routes", async () => {
     const serviceBody = {
       config: { host: "oracle.test", port: 1521, serviceName: "FREEPDB1" },
       user: "reader",
@@ -97,12 +97,10 @@ describe("specialized adapter capability routes", () => {
       headers: headers(),
       body: JSON.stringify(serviceBody),
     });
-    expect(validated.status).toBe(200);
-    expect(await validated.json()).toMatchObject({ result: { rows: [{ OK: 1 }] } });
-    expect(discovered.status).toBe(200);
-    expect(await discovered.json()).toMatchObject({
-      result: { schemas: ["APP"] },
-    });
+    expect(validated.status).toBe(401);
+    expect(await validated.json()).toMatchObject({ error: { code: "lease_required" } });
+    expect(discovered.status).toBe(401);
+    expect(await discovered.json()).toMatchObject({ error: { code: "lease_required" } });
   });
 
   it("registers an MCP definition without turning it into a provider", async () => {

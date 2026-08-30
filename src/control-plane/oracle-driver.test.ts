@@ -14,9 +14,10 @@ const oracle = vi.hoisted(() => {
     rollback,
     closeConnection,
     getConnection,
+    poolClose: vi.fn(),
     createPool: vi.fn(async () => ({
       getConnection,
-      close: vi.fn(),
+      close: oracle.poolClose,
     })),
   };
 });
@@ -35,6 +36,7 @@ describe("OracleThinDriver", () => {
     vi.clearAllMocks();
     oracle.rollback.mockResolvedValue(undefined);
     oracle.closeConnection.mockResolvedValue(undefined);
+    oracle.poolClose.mockResolvedValue(undefined);
     oracle.execute.mockResolvedValueOnce({}).mockResolvedValueOnce({
       rows: [{ ID: 1 }],
       metaData: [{ name: "ID", dbTypeName: "NUMBER", nullable: false }],
@@ -71,5 +73,19 @@ describe("OracleThinDriver", () => {
     );
     expect(oracle.rollback).toHaveBeenCalledOnce();
     expect(oracle.closeConnection).toHaveBeenCalledOnce();
+  });
+
+  it("uses an Oracle service-name connect string and closes the pool", async () => {
+    const driver = new OracleThinDriver(
+      { host: "db", port: 1521, serviceName: "FREEPDB1" },
+      { user: "reader", password: "secret" },
+    );
+    await driver.close();
+    expect(oracle.createPool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectString: "tcp://db:1521/FREEPDB1",
+      }),
+    );
+    expect(oracle.poolClose).toHaveBeenCalledWith(0);
   });
 });

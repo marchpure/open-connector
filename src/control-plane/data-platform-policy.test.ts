@@ -12,6 +12,8 @@ describe("data platform lease policy", () => {
     },
   );
   it("allows only canonical SQL read actions for SQL data connectors", () => {
+    expect(isAllowedDataPlatformLeaseAction("oracle_database", "oracle_database.execute_read_query")).toBe(true);
+    expect(isAllowedDataPlatformLeaseAction("oracle_database", "oracle_database.insert")).toBe(false);
     expect(isAllowedDataPlatformLeaseAction("tidb_sql", "tidb_sql.execute_read_query")).toBe(true);
     expect(isAllowedDataPlatformLeaseAction("tidb_sql", "tidb.execute_read_query")).toBe(false);
     expect(isAllowedDataPlatformLeaseAction("trino", "trino.drop_table")).toBe(false);

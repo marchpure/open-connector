@@ -1,5 +1,4 @@
 const sqlReadActions = new Set([
-  "discover_resources",
   "validate_connection",
   "list_databases",
   "list_schemas",
@@ -12,6 +11,7 @@ const sqlReadActions = new Set([
 const sqlServices = new Set([
   "postgresql",
   "mysql",
+  "oracle_database",
   "sql_server",
   "clickhouse",
   "doris",

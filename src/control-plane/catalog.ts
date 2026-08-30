@@ -1,6 +1,6 @@
 import type { CatalogStore, RuntimeProviderDefinition } from "../catalog-store.ts";
 import type { CredentialDefinition, JsonSchema, OAuth2AuthDefinition, ProviderAuthDefinition } from "../core/types.ts";
-import type { CatalogTier } from "./types.ts";
+import type { CatalogTier, ProviderCapability, StructuredDatabaseCapability } from "./types.ts";
 
 export interface EnablementEntry {
   service: string;
@@ -8,6 +8,8 @@ export interface EnablementEntry {
   connectorDefinitionVersion: string;
   owner: string;
   evidenceRef?: string;
+  capabilities?: ProviderCapability[];
+  verificationReason?: string;
 }
 
 export class CatalogEnablement {
@@ -39,6 +41,13 @@ export class CatalogEnablement {
       ...configured,
       displayName: provider.displayName,
       actionIds: provider.actions.map((action) => action.id),
+      capabilities: configured.capabilities ?? defaultCapabilities(provider, configured),
+      verified: configured.tier === "verified",
+      verificationReason:
+        configured.verificationReason ??
+        (configured.tier === "verified"
+          ? undefined
+          : "No qualifying real-environment, permission, negative-security, and regression evidence is recorded."),
       configSchema: {
         type: "object",
         properties: {},
@@ -54,7 +63,38 @@ type CatalogProviderEntry = {
   actionIds: string[];
   configSchema: JsonSchema;
   authSchema: JsonSchema;
+  verified: boolean;
+  verificationReason?: string;
 };
+
+function defaultCapabilities(
+  provider: RuntimeProviderDefinition,
+  configured: EnablementEntry,
+): ProviderCapability[] | undefined {
+  const names = new Set<StructuredDatabaseCapability>([
+    "validate_connection",
+    "list_databases",
+    "list_schemas",
+    "list_tables",
+    "describe_table",
+    "preview_table",
+    "execute_read_query",
+  ]);
+  const supported = provider.actions
+    .map((action) => action.name)
+    .filter((name): name is StructuredDatabaseCapability => names.has(name as StructuredDatabaseCapability));
+  return supported.length < 5
+    ? undefined
+    : supported.map((name) => ({
+        name,
+        status: configured.tier,
+        verified: configured.tier === "verified",
+        evidenceRef: configured.evidenceRef,
+        ...(configured.tier === "catalog"
+          ? { reason: "Provider definition is present, but no executable evidence is recorded." }
+          : {}),
+      }));
+}
 
 function providerAuthSchema(auth: readonly ProviderAuthDefinition[]): JsonSchema {
   const alternatives = auth.flatMap((definition) => {

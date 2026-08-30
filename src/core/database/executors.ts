@@ -2,6 +2,7 @@ import type {
   CredentialValidationResult,
   CredentialValidators,
   ExecutionContext,
+  ExecutionResult,
   ProviderExecutors,
 } from "../types.ts";
 import type { Page, QueryResult } from "./runtime.ts";
@@ -81,6 +82,7 @@ type DatabaseHandler = (input: Record<string, unknown>, backend: DatabaseBackend
 export function createDatabaseProviderRuntime(
   service: string,
   createBackend: DatabaseBackendFactory,
+  mapError: (error: unknown) => ExecutionResult = mapDatabaseError,
 ): { executors: ProviderExecutors; credentialValidators: CredentialValidators } {
   const handlers: Record<string, DatabaseHandler> = {
     async validate_connection(_input, backend) {
@@ -149,7 +151,7 @@ export function createDatabaseProviderRuntime(
         const credential = await requireCustomCredential(context, service);
         return createBackend(credential.values, context.signal);
       },
-      mapError: mapDatabaseError,
+      mapError,
       fallbackMessage: `${service} database request failed`,
     }),
     credentialValidators: {

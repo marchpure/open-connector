@@ -447,3 +447,93 @@ export function providerRequestError(error: unknown): ProviderRequestError {
     mapped.code === "database_authentication_failed" ? 401 : mapped.code === "database_timeout" ? 504 : 400;
   return new ProviderRequestError(status, mapped.message, { code: mapped.code });
 }
+
+export function assertDatabaseResourceScope(
+  service: string,
+  actionId: string,
+  input: unknown,
+  scope: { schemas?: string[]; tables?: string[] } | undefined,
+): void {
+  if (!scope) return;
+  const value = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const schemas = new Set((scope.schemas ?? []).map(normalizeScopeIdentifier));
+  const tables = new Set((scope.tables ?? []).map(normalizeScopeIdentifier));
+  const schema = typeof value.schema === "string" ? normalizeScopeIdentifier(value.schema) : undefined;
+  const database = typeof value.database === "string" ? normalizeScopeIdentifier(value.database) : undefined;
+  const selectedSchema =
+    schema ?? (["mysql", "clickhouse", "doris", "starrocks"].includes(service) ? database : undefined);
+  const table = typeof value.table === "string" ? normalizeScopeIdentifier(value.table) : undefined;
+
+  if (selectedSchema && schemas.size > 0 && !schemas.has(selectedSchema)) {
+    throw new DatabaseRuntimeError("database_permission_denied", "Database schema is outside the lease scope.");
+  }
+  if (table && tables.size > 0 && !scopeTableMatches(tables, selectedSchema, table)) {
+    throw new DatabaseRuntimeError("database_permission_denied", "Database table is outside the lease scope.");
+  }
+
+  if (!actionId.endsWith("execute_read_query")) return;
+  const query = typeof value.query === "string" ? value.query.trim() : "";
+  if (!query) {
+    throw new DatabaseRuntimeError("database_permission_denied", "Database query is outside the lease scope.");
+  }
+
+  const parser = new Parser();
+  let references: Array<{ schema?: string; table: string }>;
+  try {
+    const parsed = parser.astify(query, { database: service === "postgresql" ? "postgresql" : "mysql" });
+    const ctes = collectCteNames(parsed);
+    references = parser
+      .tableList(query, { database: service === "postgresql" ? "postgresql" : "mysql" })
+      .flatMap((entry) => {
+        const [, rawSchema, ...rawTable] = entry.split("::");
+        const tableName = normalizeScopeIdentifier(rawTable.join("::"));
+        const schemaName = rawSchema && rawSchema !== "null" ? normalizeScopeIdentifier(rawSchema) : undefined;
+        return !schemaName && ctes.has(tableName) ? [] : [{ schema: schemaName, table: tableName }];
+      });
+  } catch {
+    throw new DatabaseRuntimeError("database_permission_denied", "Database query is outside the lease scope.");
+  }
+  if (
+    references.length === 0 ||
+    references.some(
+      (reference) =>
+        (schemas.size > 0 && (!reference.schema || !schemas.has(reference.schema))) ||
+        (tables.size > 0 && !scopeTableMatches(tables, reference.schema, reference.table)),
+    )
+  ) {
+    throw new DatabaseRuntimeError("database_permission_denied", "Database query is outside the lease scope.");
+  }
+}
+
+function normalizeScopeIdentifier(value: string): string {
+  return value
+    .trim()
+    .replace(/^["`[]|["`]]$/g, "")
+    .toLowerCase();
+}
+
+function scopeTableMatches(tables: Set<string>, schema: string | undefined, table: string): boolean {
+  return tables.has(table) || (schema !== undefined && tables.has(`${schema}.${table}`));
+}
+
+function collectCteNames(value: unknown, output = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectCteNames(item, output));
+    return output;
+  }
+  if (!value || typeof value !== "object") return output;
+  const record = value as Record<string, unknown>;
+  if (Array.isArray(record.with)) {
+    for (const item of record.with) {
+      if (item && typeof item === "object") {
+        const name = (item as Record<string, unknown>).name;
+        if (typeof name === "string") output.add(normalizeScopeIdentifier(name));
+        else if (name && typeof name === "object" && typeof (name as Record<string, unknown>).value === "string") {
+          output.add(normalizeScopeIdentifier(String((name as Record<string, unknown>).value)));
+        }
+      }
+    }
+  }
+  Object.values(record).forEach((item) => collectCteNames(item, output));
+  return output;
+}

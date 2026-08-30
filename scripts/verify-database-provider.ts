@@ -193,8 +193,14 @@ try {
   }
 
   const emptyInput = {
-    database: service === "postgresql" || service === "sql_server" ? databaseName : "__openconnector_empty__",
-    schema: service === "postgresql" || service === "sql_server" ? "__openconnector_empty__" : undefined,
+    database:
+      service === "postgresql" || service === "sql_server" || service === "oracle_database"
+        ? databaseName
+        : "__openconnector_empty__",
+    schema:
+      service === "postgresql" || service === "sql_server" || service === "oracle_database"
+        ? "OPENCONNECTOR_EMPTY"
+        : undefined,
     pageSize: 20,
   };
   const empty = await invoke("list_tables", removeUndefined(emptyInput));
@@ -324,7 +330,7 @@ async function request(
 
 function queryFor(providerService: string): {
   sql: string;
-  id: number;
+  id: string | number;
   injectionSql: string;
   injectionColumn: string;
 } {
@@ -352,6 +358,14 @@ function queryFor(providerService: string): {
       injectionColumn: "value",
     };
   }
+  if (providerService === "oracle_database") {
+    return {
+      sql: `select * from "${(process.env.DATABASE_TEST_SCHEMA ?? "STEP3B").replaceAll('"', '""')}"."${table.replaceAll('"', '""')}" where "ORDER_ID" = :p1`,
+      id: "O-2",
+      injectionSql: "select cast(:p1 as varchar2(200)) as value from dual",
+      injectionColumn: "VALUE",
+    };
+  }
   return {
     sql: `select * from \`${table.replaceAll("`", "``")}\` where id = ?`,
     id: 1,
@@ -371,6 +385,9 @@ function timeoutQueryFor(providerService: string): string {
   }
   if (providerService === "clickhouse") {
     return "select sum(sipHash64(sipHash64(number, number+1), sipHash64(number+2, number+3), sipHash64(number+4, number+5), sipHash64(number+6, number+7))) from numbers(10000000)";
+  }
+  if (providerService === "oracle_database") {
+    return "select count(*) from all_objects a cross join all_objects b cross join all_objects c";
   }
   return "select count(*) from information_schema.columns a cross join information_schema.columns b cross join information_schema.columns c";
 }
