@@ -1026,6 +1026,31 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     const audience = requiredString(context.req.query("audience"));
     const leaseToken = context.req.header("x-connection-lease");
     if (!leaseToken) return jsonError(context, 401, "lease_required", "X-Connection-Lease is required.");
+    let preliminary: ReturnType<typeof leases.verifyRuntime>;
+    try {
+      preliminary = leases.verifyRuntime(leaseToken, {
+        connectionId,
+        actionId: "postgresql.execute_read_query",
+        invocationId,
+        audience,
+      });
+    } catch (error) {
+      return leaseError(context, error);
+    }
+    const runtime = tenantRuntime(options, preliminary.principal);
+    const connection = runtime.connections.visibleRecord(connectionId);
+    if (!connection) return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
+    try {
+      leases.verifyRuntime(leaseToken, {
+        connectionId,
+        connectionRevision: connection.revision,
+        actionId: "postgresql.execute_read_query",
+        invocationId,
+        audience,
+      });
+    } catch (error) {
+      return leaseError(context, error);
+    }
     const sessionId = crypto.randomUUID();
     let session: McpSession;
     const stream = new ReadableStream<Uint8Array>({
