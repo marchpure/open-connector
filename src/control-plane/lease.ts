@@ -150,6 +150,37 @@ export class ConnectionLeaseService {
     return claims;
   }
 
+  verifyRuntime(
+    token: string,
+    expected: {
+      connectionId: string;
+      connectionRevision?: number;
+      actionId: string;
+      audience: string;
+      invocationId: string;
+    },
+  ): { claims: ConnectionLeaseClaims; principal: TenantPrincipal } {
+    if (!token.startsWith("cl_")) {
+      throw new LeaseError("invalid_lease", "Malformed connection lease.");
+    }
+    const tokenHash = hashToken(token);
+    const row = this.database.prepare("select * from connection_leases where token_hash = ?").get(tokenHash) as
+      | Record<string, unknown>
+      | undefined;
+    if (!row || !equalHash(String(row.token_hash), tokenHash)) {
+      throw new LeaseError("invalid_lease", "Connection lease was not found.");
+    }
+    const principal: TenantPrincipal = {
+      tenantId: String(row.tenant_id),
+      workspaceId: String(row.workspace_id),
+      subject: String(row.subject),
+      audience: String(row.audience),
+      ownerId: String(row.subject),
+    };
+    const claims = this.verify(token, principal, expected);
+    return { claims, principal };
+  }
+
   revoke(jti: string, principal: TenantPrincipal): boolean {
     const result = this.database
       .prepare(

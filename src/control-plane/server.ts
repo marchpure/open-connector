@@ -125,6 +125,12 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     }
     const principal = verifyPrincipalToken(readBearer(context), options.authSecret);
     if (!principal) {
+      if (context.req.path === "/v1/runtime/mcp/sse" || context.req.path === "/v1/runtime/mcp/messages") {
+        if (context.req.header("x-connection-lease")) {
+          await next();
+          return;
+        }
+      }
       return jsonError(context, 401, "unauthorized", "A valid control-plane bearer token is required.");
     }
     context.set("principal" as never, principal);
@@ -728,6 +734,124 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       });
       return leaseError(context, error);
     }
+  });
+
+  type McpSession = {
+    controller: ReadableStreamDefaultController<Uint8Array>;
+    connectionId: string;
+    invocationId: string;
+    audience: string;
+    leaseToken: string;
+  };
+  const mcpSessions = new Map<string, McpSession>();
+  const encoder = new TextEncoder();
+
+  app.get("/v1/runtime/mcp/sse", (context) => {
+    const connectionId = requiredString(context.req.query("connectionId"));
+    const invocationId = requiredString(context.req.query("invocationId"));
+    const audience = requiredString(context.req.query("audience"));
+    const leaseToken = context.req.header("x-connection-lease");
+    if (!leaseToken) return jsonError(context, 401, "lease_required", "X-Connection-Lease is required.");
+    const sessionId = crypto.randomUUID();
+    let session: McpSession;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        session = { controller, connectionId, invocationId, audience, leaseToken };
+        mcpSessions.set(sessionId, session);
+        controller.enqueue(encoder.encode(`event: endpoint\ndata: /v1/runtime/mcp/messages?sessionId=${sessionId}\n\n`));
+      },
+      cancel() {
+        mcpSessions.delete(sessionId);
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      },
+    });
+  });
+
+  app.post("/v1/runtime/mcp/messages", async (context) => {
+    const sessionId = requiredString(context.req.query("sessionId"));
+    const session = mcpSessions.get(sessionId);
+    if (!session) return jsonError(context, 404, "mcp_session_not_found", "MCP session was not found.");
+    const leaseToken = context.req.header("x-connection-lease") ?? session.leaseToken;
+    const preliminary = leases.verifyRuntime(leaseToken, {
+      connectionId: session.connectionId,
+      actionId: "postgresql.execute_read_query",
+      invocationId: session.invocationId,
+      audience: session.audience,
+    });
+    const runtime = tenantRuntime(options, preliminary.principal);
+    const connection = runtime.connections.visibleRecord(session.connectionId);
+    if (!connection) return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
+    const message = await readJsonBody(context);
+    const id = message.id;
+    if (message.method === "notifications/initialized") return context.body(null, 202);
+    let result: Record<string, unknown>;
+    if (message.method === "initialize") {
+      result = {
+        protocolVersion: "2025-06-18",
+        capabilities: { tools: {} },
+        serverInfo: { name: "connection-runtime", version: "1.0.0" },
+      };
+    } else if (message.method === "tools/list") {
+      result = {
+        tools: [{
+          name: "execute_action",
+          description: "Execute an action granted by the invocation lease.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              actionId: { type: "string" },
+              input: { type: "object" },
+            },
+            required: ["actionId"],
+          },
+        }],
+      };
+    } else if (message.method === "tools/call") {
+      const params = recordOf(message.params);
+      const args = recordOf(params.arguments);
+      const actionId = requiredString(args.actionId);
+      const verified = leases.verifyRuntime(leaseToken, {
+        connectionId: connection.id,
+        connectionRevision: connection.revision,
+        actionId,
+        invocationId: session.invocationId,
+        audience: session.audience,
+      });
+      const executed = await runtime.actions.run({
+        actionId,
+        invocationId: session.invocationId,
+        input: args.input,
+        caller: "mcp",
+        connectionName: connection.connectionName,
+        policy: {
+          evaluate: (action: ActionDefinition) =>
+            verified.claims.allowedActions.includes(action.id)
+              ? { allowed: true, checks: [] }
+              : { allowed: false, code: "action_not_allowed", message: "Action is not granted by the connection lease.", checks: [] },
+          evaluateConnection: (id: string | undefined) =>
+            id && verified.claims.connectionIds.includes(id)
+              ? { allowed: true, checks: [] }
+              : { allowed: false, code: "connection_not_allowed", message: "Connection is not granted by the connection lease.", checks: [] },
+        } as never,
+        signal: context.req.raw.signal,
+      });
+      result = {
+        content: [{ type: "text", text: JSON.stringify(redactSecrets(executed?.result ?? {})) }],
+        isError: executed?.result.ok !== true,
+      };
+    } else {
+      result = { _error: { code: -32601, message: "Method not found." } };
+    }
+    if (id !== undefined) {
+      session.controller.enqueue(encoder.encode(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id, result })}\n\n`));
+    }
+    return context.body(null, 202);
   });
   app.get("/v1/audit", async (context) => {
     const runtime = tenantRuntime(options, principalOf(context));
