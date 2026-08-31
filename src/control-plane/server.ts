@@ -51,6 +51,8 @@ export interface ConnectionControlAppOptions {
   secretCodec: ISecretCodec;
   authSecret: string;
   publicOrigin: string;
+  shutdownSignal?: AbortSignal;
+  readinessCheck?: () => boolean;
   webEgress?: WebEgressPolicy;
   enablement: EnablementEntry[];
   transitFiles?: TransitFileWriter;
@@ -83,8 +85,20 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     webEgress: options.webEgress,
   };
   const runtimeMcpSse = new RuntimeMcpSseSessions(runtimeMcpDependencies);
+  options.shutdownSignal?.addEventListener("abort", () => void runtimeMcpSse.closeAll(), { once: true });
 
   app.get("/health", (context) => context.json({ ok: true, service: "connection-service", version: "1.0.0" }));
+  app.get("/ready", (context) => {
+    if (options.shutdownSignal?.aborted) return context.json({ ok: false, ready: false }, 503);
+    try {
+      if (options.readinessCheck && !options.readinessCheck()) {
+        return context.json({ ok: false, ready: false }, 503);
+      }
+      return context.json({ ok: true, ready: true });
+    } catch {
+      return context.json({ ok: false, ready: false }, 503);
+    }
+  });
   app.get("/web-discovery", (context) => context.html(renderWebDiscoveryPage()));
   app.get("/oauth/callback", async (context) => {
     const state = context.req.query("state");
@@ -809,8 +823,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         const action = options.catalog.actionsById.get(actionId);
         const isDiscovery = actionId === `${connection.service}.discover_resources`;
         return (
-          (!isDiscovery &&
-            (!action || action.service !== connection.service || !action.execution.locallyExecutable)) ||
+          (!isDiscovery && (!action || action.service !== connection.service || !action.execution.locallyExecutable)) ||
           !isAllowedDataPlatformLeaseAction(connection.service, actionId)
         );
       })
@@ -1039,7 +1052,8 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     }
     const runtime = tenantRuntime(options, preliminary.principal);
     const connection = runtime.connections.visibleRecord(connectionId);
-    if (!connection) return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
+    if (!connection)
+      return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
     try {
       leases.verifyRuntime(leaseToken, {
         connectionId,
@@ -1057,7 +1071,9 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       start(controller) {
         session = { controller, connectionId, invocationId, audience, leaseToken };
         mcpSessions.set(sessionId, session);
-        controller.enqueue(encoder.encode(`event: endpoint\ndata: /v1/runtime/mcp/messages?sessionId=${sessionId}\n\n`));
+        controller.enqueue(
+          encoder.encode(`event: endpoint\ndata: /v1/runtime/mcp/messages?sessionId=${sessionId}\n\n`),
+        );
       },
       cancel() {
         mcpSessions.delete(sessionId);
@@ -1085,7 +1101,8 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     });
     const runtime = tenantRuntime(options, preliminary.principal);
     const connection = runtime.connections.visibleRecord(session.connectionId);
-    if (!connection) return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
+    if (!connection)
+      return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
     const message = await readJsonBody(context);
     const id = message.id;
     if (message.method === "notifications/initialized") return context.body(null, 202);
@@ -1098,18 +1115,20 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       };
     } else if (message.method === "tools/list") {
       result = {
-        tools: [{
-          name: "execute_action",
-          description: "Execute an action granted by the invocation lease.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              actionId: { type: "string" },
-              input: { type: "object" },
+        tools: [
+          {
+            name: "execute_action",
+            description: "Execute an action granted by the invocation lease.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                actionId: { type: "string" },
+                input: { type: "object" },
+              },
+              required: ["actionId"],
             },
-            required: ["actionId"],
           },
-        }],
+        ],
       };
     } else if (message.method === "tools/call") {
       const params = recordOf(message.params);
@@ -1132,11 +1151,21 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
           evaluate: (action: ActionDefinition) =>
             verified.claims.allowedActions.includes(action.id)
               ? { allowed: true, checks: [] }
-              : { allowed: false, code: "action_not_allowed", message: "Action is not granted by the connection lease.", checks: [] },
+              : {
+                  allowed: false,
+                  code: "action_not_allowed",
+                  message: "Action is not granted by the connection lease.",
+                  checks: [],
+                },
           evaluateConnection: (id: string | undefined) =>
             id && verified.claims.connectionIds.includes(id)
               ? { allowed: true, checks: [] }
-              : { allowed: false, code: "connection_not_allowed", message: "Connection is not granted by the connection lease.", checks: [] },
+              : {
+                  allowed: false,
+                  code: "connection_not_allowed",
+                  message: "Connection is not granted by the connection lease.",
+                  checks: [],
+                },
         } as never,
         signal: context.req.raw.signal,
       });
@@ -1148,7 +1177,9 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       result = { _error: { code: -32601, message: "Method not found." } };
     }
     if (id !== undefined) {
-      session.controller.enqueue(encoder.encode(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id, result })}\n\n`));
+      session.controller.enqueue(
+        encoder.encode(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id, result })}\n\n`),
+      );
     }
     return context.body(null, 202);
   });

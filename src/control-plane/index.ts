@@ -2,11 +2,10 @@ import type { ResolvedCredential } from "../core/types.ts";
 import type { EnablementEntry } from "./catalog.ts";
 
 import { serve } from "@hono/node-server";
-import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { loadCatalog } from "../catalog-store.ts";
-import { parsePrivateNetworkAccessFlag, setPrivateNetworkAccessAllowed } from "../core/request.ts";
+import { setPrivateNetworkAccessAllowed } from "../core/request.ts";
 import { closeOraclePools } from "../providers/oracle_database/runtime.ts";
 import { ProviderLoader } from "../providers/provider-loader.ts";
 import { executorModules } from "../providers/registry.generated.ts";
@@ -15,23 +14,22 @@ import { TransitFileService } from "../server/files/transit-files.ts";
 import { createSecretCodec } from "../server/secrets/secret-codec.ts";
 import { OracleThinDriver } from "./oracle-driver.ts";
 import { createConnectionControlApp } from "./server.ts";
+import { loadConnectionServiceStartupConfig } from "./startup-config.ts";
 import { runWebDiscoveryCapture } from "./web-discovery-worker.ts";
 
-const port = positiveInteger(process.env.CONNECTION_SERVICE_PORT, 3400);
-const host = process.env.CONNECTION_SERVICE_HOST ?? "127.0.0.1";
-const dataDir = process.env.CONNECTION_SERVICE_DATA_DIR ?? join(process.cwd(), "data", "connection-service");
-const authSecret = requiredEnv("CONNECTION_SERVICE_AUTH_SECRET");
-const encryptionKey = requiredEnv("CONNECTION_SERVICE_ENCRYPTION_KEY");
+const config = await loadConnectionServiceStartupConfig();
+const { host, port, dataDir, authSecret, encryptionKey, publicOrigin } = config;
 const enablement = readEnablement(process.env.CONNECTION_SERVICE_ENABLEMENT_JSON);
-setPrivateNetworkAccessAllowed(parsePrivateNetworkAccessFlag(process.env.OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK));
+setPrivateNetworkAccessAllowed(config.allowPrivateNetwork);
 const webEgress = readWebEgress();
 
-await mkdir(dataDir, { recursive: true });
 const catalog = await loadCatalog(undefined, { executableServices: Object.keys(executorModules) });
 const database = new DatabaseSync(join(dataDir, "control.sqlite"));
+database.exec("pragma journal_mode=wal; pragma synchronous=normal; pragma foreign_keys=on");
+const shutdownController = new AbortController();
 const transitFiles = new TransitFileService({
   rootDir: join(dataDir, "transit-files"),
-  publicOrigin: process.env.CONNECTION_SERVICE_PUBLIC_ORIGIN ?? `http://${host}:${port}`,
+  publicOrigin,
   ttlSeconds: positiveInteger(process.env.CONNECTION_SERVICE_TRANSIT_TTL_SECONDS, 86_400),
   maxBytes: positiveInteger(process.env.CONNECTION_SERVICE_TRANSIT_MAX_BYTES, 100 * 1024 * 1024),
 });
@@ -42,7 +40,9 @@ const app = createConnectionControlApp({
   controlDatabase: database,
   secretCodec: createSecretCodec(encryptionKey),
   authSecret,
-  publicOrigin: process.env.CONNECTION_SERVICE_PUBLIC_ORIGIN ?? `http://${host}:${port}`,
+  publicOrigin,
+  shutdownSignal: shutdownController.signal,
+  readinessCheck: () => Boolean(database.prepare("select 1 as ready").get()),
   enablement,
   webEgress,
   transitFiles,
@@ -61,7 +61,12 @@ const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
   console.log(
     JSON.stringify({
       service: "connection-service",
-      url: `http://${info.address}:${info.port}`,
+      event: "ready",
+      listenAddress: info.address,
+      listenPort: info.port,
+      publicOrigin,
+      dataStore: "sqlite",
+      egressPolicy: process.env.CONNECTION_SERVICE_EGRESS_POLICY ?? "public-only",
       catalogProviderCount: catalog.providers.length,
       catalogActionCount: catalog.actions.length,
       enabledServices: enablement.map((entry) => entry.service),
@@ -72,20 +77,15 @@ let shuttingDown = false;
 const shutdown = async (): Promise<void> => {
   if (shuttingDown) return;
   shuttingDown = true;
+  const serverClosed = new Promise<void>((resolve) => server.close(() => resolve()));
+  shutdownController.abort();
+  await serverClosed;
   await closeOraclePools();
-  await new Promise<void>((resolve) => server.close(() => resolve()));
   database.close();
+  process.exitCode = 0;
 };
 process.once("SIGINT", () => void shutdown());
 process.once("SIGTERM", () => void shutdown());
-
-function requiredEnv(name: string): string {
-  const value = process.env[name]?.trim();
-  if (!value) {
-    throw new Error(`${name} is required.`);
-  }
-  return value;
-}
 
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);

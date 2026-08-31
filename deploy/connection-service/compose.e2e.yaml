@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:17-bookworm
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: connection_test
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set by run-container-e2e.sh}
+      POSTGRES_DB: connection_test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U connection_test -d connection_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  connection:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.connection-service
+      platforms:
+        - linux/amd64
+    platform: linux/amd64
+    depends_on:
+      postgres:
+        condition: service_healthy
+    init: true
+    read_only: true
+    user: "1000:1000"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      NODE_ENV: production
+      CONNECTION_SERVICE_HOST: 0.0.0.0
+      CONNECTION_SERVICE_PORT: "3400"
+      CONNECTION_SERVICE_DATA_DIR: /app/data/connection-service
+      CONNECTION_SERVICE_PUBLIC_ORIGIN: https://connection.test
+      CONNECTION_SERVICE_AUTH_SECRET: ${CONNECTION_SERVICE_AUTH_SECRET:?set by run-container-e2e.sh}
+      CONNECTION_SERVICE_ENCRYPTION_KEY: ${CONNECTION_SERVICE_ENCRYPTION_KEY:?set by run-container-e2e.sh}
+      CONNECTION_SERVICE_EGRESS_POLICY: private-allowlist
+      OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK: "true"
+      CONNECTION_DATABASE_EGRESS_ALLOWLIST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set by run-container-e2e.sh}
+    volumes:
+      - connection-data:/app/data/connection-service
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3400/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  connection-data:

@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: connection-service
+data:
+  CONNECTION_SERVICE_HOST: "0.0.0.0"
+  CONNECTION_SERVICE_PORT: "3400"
+  CONNECTION_SERVICE_DATA_DIR: "/app/data/connection-service"
+  CONNECTION_SERVICE_PUBLIC_ORIGIN: "https://connection.example.com"
+  CONNECTION_SERVICE_EGRESS_POLICY: "public-only"
+  OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK: "false"
+  CONNECTION_DATABASE_EGRESS_ALLOWLIST: ""

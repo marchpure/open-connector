@@ -84,6 +84,10 @@ export class RuntimeMcpSseSessions {
     }
   }
 
+  async closeAll(): Promise<void> {
+    await Promise.all([...this.sessions.keys()].map((sessionId) => this.close(sessionId)));
+  }
+
   private async close(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
