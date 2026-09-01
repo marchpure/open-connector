@@ -39,24 +39,28 @@ export function providerIconsPlugin(options: ProviderIconsPluginOptions = {}): P
 }
 
 async function loadProviderIconsModule(): Promise<string> {
-  const response = await fetch(catalogUrl);
-  if (!response.ok) {
-    throw new Error(`Could not load OOMOL provider icons: ${response.status} ${response.statusText}`);
-  }
-
-  const payload = (await response.json()) as CatalogPayload;
-  if (!Array.isArray(payload.items)) {
-    throw new Error("Could not load OOMOL provider icons: catalog.items is not an array");
-  }
-
-  const iconUrls: Record<string, string> = {};
-  for (const item of payload.items as CatalogItem[]) {
-    if (typeof item.service === "string" && typeof item.iconUrl === "string" && item.iconUrl.trim()) {
-      iconUrls[item.service] = item.iconUrl;
+  try {
+    const response = await fetch(catalogUrl);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText}`);
     }
-  }
 
-  return serializeProviderIcons(iconUrls);
+    const payload = (await response.json()) as CatalogPayload;
+    if (!Array.isArray(payload.items)) {
+      throw new Error("catalog.items is not an array");
+    }
+
+    const iconUrls: Record<string, string> = {};
+    for (const item of payload.items as CatalogItem[]) {
+      if (typeof item.service === "string" && typeof item.iconUrl === "string" && item.iconUrl.trim()) {
+        iconUrls[item.service] = item.iconUrl;
+      }
+    }
+    return serializeProviderIcons(iconUrls);
+  } catch {
+    // Provider icons are decorative; an unavailable catalog must not block a runtime build.
+    return serializeProviderIcons({});
+  }
 }
 
 function serializeProviderIcons(iconUrls: Readonly<Record<string, string>>): string {
