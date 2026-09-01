@@ -3,7 +3,7 @@ set -euo pipefail
 
 exec > >(tee -a /var/log/knowledge-dev-connection-service-bootstrap.log) 2>&1
 
-source_sha="e76e00e33652aa3cd00d935e2b5634d3f970ae38"
+source_sha="ad8c3ca2befd0e3f28e8feaa094d97b841a4e620"
 source_archive_url="${SOURCE_ARCHIVE_URL:-https://github.com/oomol-lab/open-connector/archive/$source_sha.tar.gz}"
 image_archive_url="${IMAGE_ARCHIVE_URL:-}"
 caddy_archive_url="${CADDY_ARCHIVE_URL:-}"
@@ -56,7 +56,7 @@ if [[ -n "$image_archive_url" ]]; then
     "knowledge-dev-connection-service:$source_sha"
 else
   docker build --platform linux/amd64 \
-    -f "$install_dir/Dockerfile.connection-service" \
+    -f "$install_dir/docker/Dockerfile" \
     -t "knowledge-dev-connection-service:$source_sha" \
     "$install_dir"
 fi
@@ -77,46 +77,49 @@ fi
 
 umask 077
 if [[ ! -f "$secret_file" ]]; then
-  {
-    printf 'CONNECTION_SERVICE_AUTH_SECRET=%s\n' "$(openssl rand -hex 32)"
-    printf 'CONNECTION_SERVICE_ENCRYPTION_KEY=%s\n' "$(openssl rand -hex 32)"
-  } >"$secret_file"
+  : >"$secret_file"
 fi
 sed -i \
   -e '/^NODE_ENV=/d' \
-  -e '/^CONNECTION_SERVICE_HOST=/d' \
-  -e '/^CONNECTION_SERVICE_PORT=/d' \
-  -e '/^CONNECTION_SERVICE_DATA_DIR=/d' \
-  -e '/^CONNECTION_SERVICE_PUBLIC_ORIGIN=/d' \
-  -e '/^CONNECTION_SERVICE_EGRESS_POLICY=/d' \
+  -e '/^OOMOL_CONNECT_ADMIN_TOKEN=/d' \
+  -e '/^OOMOL_CONNECT_ENCRYPTION_KEY=/d' \
+  -e '/^HOST=/d' \
+  -e '/^PORT=/d' \
+  -e '/^OOMOL_CONNECT_DATA_DIR=/d' \
+  -e '/^OOMOL_CONNECT_ORIGIN=/d' \
   -e '/^OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK=/d' \
-  -e '/^CONNECTION_DATABASE_EGRESS_ALLOWLIST=/d' \
+  -e '/^OOMOL_CONNECT_EGRESS_TRUSTED_HOSTS=/d' \
   "$secret_file"
 {
   printf 'NODE_ENV=production\n'
-  printf 'CONNECTION_SERVICE_HOST=127.0.0.1\n'
-  printf 'CONNECTION_SERVICE_PORT=3400\n'
-  printf 'CONNECTION_SERVICE_DATA_DIR=/app/data/connection-service\n'
-  printf 'CONNECTION_SERVICE_PUBLIC_ORIGIN=%s\n' "$public_origin"
-  printf 'CONNECTION_SERVICE_EGRESS_POLICY=%s\n' "$egress_policy"
+  printf 'HOST=0.0.0.0\n'
+  printf 'PORT=3000\n'
+  printf 'OOMOL_CONNECT_DATA_DIR=/app/data\n'
+  printf 'OOMOL_CONNECT_ORIGIN=%s\n' "$public_origin"
   printf 'OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK=%s\n' "$allow_private_network"
-  printf 'CONNECTION_DATABASE_EGRESS_ALLOWLIST=%s\n' "$database_egress_allowlist"
+  printf 'OOMOL_CONNECT_EGRESS_TRUSTED_HOSTS=%s\n' "$database_egress_allowlist"
 } >>"$secret_file"
+# Keep generated credentials at the end so normalization is idempotent and never
+# removes them during a repeat bootstrap.
+grep -q '^OOMOL_CONNECT_ADMIN_TOKEN=' "$secret_file" ||
+  printf 'OOMOL_CONNECT_ADMIN_TOKEN=%s\n' "$(openssl rand -hex 32)" >>"$secret_file"
+grep -q '^OOMOL_CONNECT_ENCRYPTION_KEY=' "$secret_file" ||
+  printf 'OOMOL_CONNECT_ENCRYPTION_KEY=%s\n' "$(openssl rand -hex 32)" >>"$secret_file"
 chmod 0600 "$secret_file"
 
 docker rm -f knowledge-dev-connection-service >/dev/null 2>&1 || true
 docker run -d \
   --name knowledge-dev-connection-service \
   --restart unless-stopped \
-  --network host \
-  --read-only \
+  -p 127.0.0.1:3000:3000 \
   --user 1000:1000 \
   --cap-drop ALL \
   --security-opt no-new-privileges \
   --tmpfs /tmp:rw,noexec,nosuid,size=1g \
   --env-file "$secret_file" \
-  --mount "type=bind,src=$data_dir,dst=/app/data/connection-service" \
-  --health-cmd "node -e \"fetch('http://127.0.0.1:3400/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\"" \
+  --mount "type=bind,src=$data_dir,dst=/app/data" \
+  --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
+  --health-cmd "node -e \"fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\"" \
   --health-interval 10s \
   --health-timeout 3s \
   --health-retries 6 \
@@ -126,7 +129,7 @@ mkdir -p /etc/knowledge-dev-caddy /srv/knowledge-dev-caddy
 cat >/etc/knowledge-dev-caddy/Caddyfile <<EOF
 $caddy_site_address {
   encode zstd gzip
-  reverse_proxy 127.0.0.1:3400 {
+  reverse_proxy 127.0.0.1:3000 {
     flush_interval -1
     transport http {
       read_timeout 0
