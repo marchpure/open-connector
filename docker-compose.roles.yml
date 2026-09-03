@@ -1,0 +1,69 @@
+# Optional split-role overlay. Both services run the same image and must share
+# PostgreSQL state plus S3-compatible transit-file storage.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.roles.yml up
+services:
+  connector:
+    profiles: ["disabled-default"]
+
+  control-plane:
+    image: ghcr.io/oomol-lab/open-connector:latest
+    command: ["control-plane"]
+    ports:
+      - "3000:3000"
+    environment:
+      OOMOL_CONNECT_ROLE: control-plane
+      OOMOL_CONNECT_DATABASE_URL:
+      OOMOL_CONNECT_DATABASE_POOL_MAX:
+      OOMOL_CONNECT_DATABASE_CONNECT_TIMEOUT_MS:
+      OOMOL_CONNECT_ORIGIN:
+      OOMOL_CONNECT_ENCRYPTION_KEY:
+      OOMOL_CONNECT_ADMIN_TOKEN:
+      OOMOL_CONNECT_ALLOWED_CUSTOM_OAUTH:
+      OOMOL_CONNECT_JWKS_URI:
+      OOMOL_CONNECT_JWT_ISSUER:
+      OOMOL_CONNECT_JWT_AUDIENCE:
+      OOMOL_CONNECT_ALLOWED_ACTIONS:
+      OOMOL_CONNECT_BLOCKED_ACTIONS:
+      OOMOL_CONNECT_ALLOWED_PROXIES:
+      OOMOL_CONNECT_BLOCKED_PROXIES:
+      OOMOL_CONNECT_EGRESS_TRUSTED_HOSTS:
+      OOMOL_CONNECT_TRANSIT_FILE_BACKEND: s3
+      OOMOL_CONNECT_S3_BUCKET:
+      OOMOL_CONNECT_S3_REGION:
+      OOMOL_CONNECT_S3_ENDPOINT:
+      OOMOL_CONNECT_S3_FORCE_PATH_STYLE:
+      OOMOL_CONNECT_S3_ACCESS_KEY_ID:
+      OOMOL_CONNECT_S3_SECRET_ACCESS_KEY:
+      OOMOL_CONNECT_S3_SESSION_TOKEN:
+
+  mcp-runtime:
+    image: ghcr.io/oomol-lab/open-connector:latest
+    command: ["mcp-runtime"]
+    ports:
+      - "3001:3000"
+    environment:
+      OOMOL_CONNECT_ROLE: mcp-runtime
+      OOMOL_CONNECT_DATABASE_URL:
+      OOMOL_CONNECT_DATABASE_POOL_MAX:
+      OOMOL_CONNECT_DATABASE_CONNECT_TIMEOUT_MS:
+      OOMOL_CONNECT_ORIGIN:
+      OOMOL_CONNECT_ENCRYPTION_KEY:
+      OOMOL_CONNECT_RUNTIME_TOKEN:
+      OOMOL_CONNECT_JWKS_URI:
+      OOMOL_CONNECT_JWT_ISSUER:
+      OOMOL_CONNECT_JWT_AUDIENCE:
+      OOMOL_CONNECT_ALLOWED_ACTIONS:
+      OOMOL_CONNECT_BLOCKED_ACTIONS:
+      OOMOL_CONNECT_ALLOWED_PROXIES:
+      OOMOL_CONNECT_BLOCKED_PROXIES:
+      OOMOL_CONNECT_EGRESS_TRUSTED_HOSTS:
+      OOMOL_CONNECT_TRANSIT_FILE_BACKEND: s3
+      OOMOL_CONNECT_S3_BUCKET:
+      OOMOL_CONNECT_S3_REGION:
+      OOMOL_CONNECT_S3_ENDPOINT:
+      OOMOL_CONNECT_S3_FORCE_PATH_STYLE:
+      OOMOL_CONNECT_S3_ACCESS_KEY_ID:
+      OOMOL_CONNECT_S3_SECRET_ACCESS_KEY:
+      OOMOL_CONNECT_S3_SESSION_TOKEN:

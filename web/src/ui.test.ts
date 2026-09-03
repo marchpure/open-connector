@@ -6,8 +6,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAppI18n } from "./i18n";
+import { emptyData } from "./model";
 import {
   App,
+  AppShell,
   loadRuntimeData,
   nextAuthLoadState,
   nextLogoutState,
@@ -31,6 +33,31 @@ describe("App", () => {
 
     expect(markup).not.toContain("app-shell");
     expect(markup).toContain("Loading runtime data");
+  });
+
+  it("labels the native console as the engineering console", () => {
+    const markup = renderToStaticMarkup(
+      createElement(
+        I18nProvider,
+        { i18n: createAppI18n("en") },
+        createElement(
+          MemoryRouter,
+          { initialEntries: ["/overview"] },
+          createElement(AppShell, {
+            data: emptyData,
+            showLogout: false,
+            loading: false,
+            error: null,
+            theme: "light",
+            onRefresh: () => {},
+            onThemeChange: () => {},
+            onLogout: () => {},
+          }),
+        ),
+      ),
+    );
+
+    expect(markup).toContain("ENGINEERING CONSOLE");
   });
 
   it("does not reserve empty error space before loading starts", () => {

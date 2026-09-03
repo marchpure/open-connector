@@ -12,6 +12,7 @@ import type {
 import type { IOAuthClientConfigStore, OAuthClientConfig } from "../oauth/oauth-client-config-service.ts";
 import type { IOAuthStateStore, OAuthAuthorizationState } from "../oauth/oauth-flow-service.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
+import type { McpAuthorizer } from "./api/mcp-authorizer.ts";
 import type { RuntimeActionHttpResult } from "./api/runtime-api.ts";
 import type { RuntimeJwtVerifier } from "./api/runtime-jwt.ts";
 import type { TransitFileUpload } from "./files/transit-file-store.ts";
@@ -625,13 +626,11 @@ describe("ConnectServer", () => {
         })
       ).status,
     ).toBe(200);
-    expect(
-      (
-        await app.request("/mcp/tools", {
-          headers: { authorization: "Bearer jwt-access-token" },
-        })
-      ).status,
-    ).toBe(200);
+    const userMcpTools = await app.request("/mcp/tools", {
+      headers: { authorization: "Bearer jwt-access-token" },
+    });
+    expect(userMcpTools.status).toBe(200);
+    await expect(userMcpTools.json()).resolves.toEqual({ tools: [] });
     expect(
       (
         await app.request("/api/providers/example", {
@@ -689,6 +688,23 @@ describe("ConnectServer", () => {
     await expect(provider.json()).resolves.toMatchObject({
       service: "example",
     });
+  });
+
+  it("can run only the control-plane surface from the shared server image", async () => {
+    const app = createTestServer([apiKeyProvider], { role: "control-plane" }).createApp();
+
+    expect((await app.request("/api/providers/example")).status).toBe(200);
+    expect((await app.request("/v1/health")).status).toBe(404);
+    expect((await app.request("/mcp/tools")).status).toBe(404);
+  });
+
+  it("can run only the MCP/runtime surface from the shared server image", async () => {
+    const app = createTestServer([apiKeyProvider], { role: "mcp-runtime" }).createApp();
+
+    expect((await app.request("/v1/health")).status).toBe(200);
+    expect((await app.request("/mcp/tools")).status).toBe(200);
+    expect((await app.request("/api/providers/example")).status).toBe(404);
+    expect((await app.request("/docs")).status).toBe(404);
   });
 
   it("does not serve static fallback responses for missing v1 routes", async () => {
@@ -1276,6 +1292,66 @@ describe("ConnectServer", () => {
     try {
       await client.connect(transport);
       expect(client.getProtocolEra()).toBe(expectedEra);
+      await expect(client.listTools()).resolves.toMatchObject({
+        tools: expect.arrayContaining([expect.objectContaining({ name: "execute_action" })]),
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("fails MCP protocol tool discovery closed for user bearer auth by default", async () => {
+    const app = createTestServer([apiKeyProvider], {
+      auth: {
+        verifyRuntimeJwt: async (token) => token === "jwt-access-token",
+      },
+    }).createApp();
+    const fetcher: typeof fetch = async (input, init) =>
+      app.fetch(
+        new Request(input, {
+          ...init,
+          headers: {
+            ...Object.fromEntries(new Headers(init?.headers).entries()),
+            authorization: "Bearer jwt-access-token",
+          },
+        }),
+      );
+    const transport = new StreamableHTTPClientTransport(new URL("https://connect.test/mcp"), { fetch: fetcher });
+    const client = new Client({ name: "connect-server-test", version: "0.0.0" });
+
+    try {
+      await client.connect(transport);
+      await expect(client.listTools()).resolves.toEqual({ tools: [] });
+      await expect(
+        client.callTool({ name: "execute_action", arguments: { actionId: "example.echo", input: {} } }),
+      ).rejects.toThrow("Method not found");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("keeps stored runtime tokens as MCP M2M callers separate from user bearer auth", async () => {
+    const runtimeTokens = new RuntimeTokenService(new MemoryRuntimeTokenStore());
+    const storedToken = await runtimeTokens.createToken("Agent");
+    const app = createTestServer([apiKeyProvider], {
+      runtimeTokens,
+      providerLoader: new EchoProviderLoader(),
+    }).createApp();
+    const fetcher: typeof fetch = async (input, init) =>
+      app.fetch(
+        new Request(input, {
+          ...init,
+          headers: {
+            ...Object.fromEntries(new Headers(init?.headers).entries()),
+            authorization: `Bearer ${storedToken.token}`,
+          },
+        }),
+      );
+    const transport = new StreamableHTTPClientTransport(new URL("https://connect.test/mcp"), { fetch: fetcher });
+    const client = new Client({ name: "connect-server-test", version: "0.0.0" });
+
+    try {
+      await client.connect(transport);
       await expect(client.listTools()).resolves.toMatchObject({
         tools: expect.arrayContaining([expect.objectContaining({ name: "execute_action" })]),
       });
@@ -3557,6 +3633,8 @@ interface CreateTestServerOptions {
   uploadTransitFile?: (request: Request) => Promise<TransitFileUpload>;
   secretCodec?: ISecretCodec;
   allowedCustomOAuth?: string[];
+  mcpAuthorizer?: McpAuthorizer;
+  role?: "all" | "control-plane" | "mcp-runtime";
 }
 
 function createTestServer(providers: ProviderDefinition[], options: CreateTestServerOptions = {}): ConnectServer {
@@ -3630,6 +3708,8 @@ function createTestServer(providers: ProviderDefinition[], options: CreateTestSe
     actionPolicy: options.actionPolicy,
     actionSearch: options.actionSearch,
     logger: options.logger,
+    mcpAuthorizer: options.mcpAuthorizer,
+    role: options.role,
   });
 }
 

@@ -8,6 +8,7 @@ OpenConnector is configured with environment variables.
 | ------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PORT`                                      | `3000`                    | Local HTTP server port.                                                                                                                                                     |
 | `HOST`                                      | `127.0.0.1`               | Bind address. Docker image sets `0.0.0.0`.                                                                                                                                  |
+| `OOMOL_CONNECT_ROLE`                        | `all`                     | Node server surface to expose: `all`, `control-plane`, or `mcp-runtime`.                                                                                                    |
 | `OOMOL_CONNECT_ORIGIN`                      | `http://localhost:<PORT>` | Public origin used for OAuth redirect URLs.                                                                                                                                 |
 | `OOMOL_CONNECT_DATA_DIR`                    | `./data`                  | SQLite database, local transit files, and Node upload staging. Docker uses `/app/data`.                                                                                     |
 | `OOMOL_CONNECT_DATABASE_URL`                | unset                     | PostgreSQL connection URL. When unset, the Node runtime uses SQLite under the data directory.                                                                               |
@@ -103,6 +104,21 @@ For multiple Node instances, configure the same PostgreSQL database and
 files are shared across instances. Size `OOMOL_CONNECT_DATABASE_POOL_MAX` so the total across all
 instances leaves capacity for migrations and database administration.
 
+## Runtime roles
+
+The Node Docker image and `npm start` can run the control-plane console and MCP runtime from the
+same artifact. `OOMOL_CONNECT_ROLE=all` is the default and serves every route. Use
+`OOMOL_CONNECT_ROLE=control-plane` for the web console, admin API, OpenAPI docs, connection CRUD,
+Action debugging, run inspection, OAuth setup, runtime token management, and runtime policy
+management. Use `OOMOL_CONNECT_ROLE=mcp-runtime` for `/v1/*`, `/mcp`, `/mcp/tools`, `/health`, and
+runtime file downloads under `/api/files/:fileId`.
+
+Split-role deployments must point both roles at the same PostgreSQL database and the same
+S3-compatible transit-file backend. The control plane creates and validates connections; the MCP
+runtime reads those persisted connections, executes Actions, and writes redacted run traces. Do not
+run split roles against local SQLite or local transit files unless each role is pinned to the same
+single host and disk.
+
 ## JWT access tokens
 
 The Node server can validate JWT access tokens issued by an existing identity provider for `/v1/*`
@@ -129,7 +145,11 @@ before exposing those surfaces.
 
 OpenConnector acts only as a resource server. It does not implement OIDC discovery or login, accept
 ID tokens as API credentials, or map JWT claims to action and proxy policy. JWT verification is
-currently available only on the Node server, not Cloudflare Workers.
+currently available only on the Node server, not Cloudflare Workers. JWT-authenticated MCP users are
+routed through a dedicated MCP authorizer seam. The W1 default authorizer is fail-closed for user
+bearer auth at tool discovery and tool execution; stored `oct_...` runtime tokens and
+`OOMOL_CONNECT_RUNTIME_TOKEN` remain separate M2M compatibility paths. W2 can replace the
+authorizer to map verified user identity to tool and connection grants.
 
 ## S3-compatible transit files
 

@@ -5,6 +5,7 @@ import type { ActionSearchIndexProvider } from "./core/action-search.ts";
 import type { JsonSchema, ProviderDefinition } from "./core/types.ts";
 import type { IProviderLoader } from "./providers/provider-loader.ts";
 import type { ActionRunner, ActionRunResult } from "./server/actions/action-runner.ts";
+import type { McpAuthorizationSubject, McpAuthorizer } from "./server/api/mcp-authorizer.ts";
 import type { RuntimeGrant } from "./server/storage/runtime-token-service.ts";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 
@@ -27,6 +28,8 @@ export interface IMcpServerOptions {
   actionSearch?: ActionSearchIndexProvider;
   getPolicySnapshot?(): Promise<ActionPolicySnapshot>;
   runtimeGrant?: RuntimeGrant;
+  authorizer?: McpAuthorizer;
+  authorizationSubject?: McpAuthorizationSubject;
   signal?: AbortSignal;
 }
 
@@ -99,6 +102,8 @@ export function listMcpToolSummaries(): IMcpToolSummary[] {
  * Create a stateless MCP server instance for one Streamable HTTP request.
  */
 export function createMcpServer(options: IMcpServerOptions): McpServer {
+  const authorizer = options.authorizer;
+  const subject = options.authorizationSubject ?? {};
   const server = new McpServer(
     {
       name: "oomol-connect",
@@ -109,6 +114,10 @@ export function createMcpServer(options: IMcpServerOptions): McpServer {
     },
   );
 
+  if (authorizer?.mode === "m2m_only_fail_closed" && subject.auth?.kind === "user_bearer") {
+    return server;
+  }
+
   server.registerTool(
     "list_apps",
     {
@@ -118,7 +127,10 @@ export function createMcpServer(options: IMcpServerOptions): McpServer {
         query: z.string().optional().describe("Optional case-insensitive app name, service, category, or auth filter."),
       },
     },
-    async ({ query }) => toolResult(await listApps(options, query)),
+    async ({ query }) =>
+      toolResult(
+        await authorizeToolExecution(authorizer, subject, "list_apps", undefined, () => listApps(options, query)),
+      ),
   );
 
   server.registerTool(
@@ -131,7 +143,12 @@ export function createMcpServer(options: IMcpServerOptions): McpServer {
         service: z.string().optional().describe("Optional provider service id such as github, gmail, or notion."),
       },
     },
-    async ({ service }) => toolResult(await listConnections(options, service)),
+    async ({ service }) =>
+      toolResult(
+        await authorizeToolExecution(authorizer, subject, "list_connections", undefined, () =>
+          listConnections(options, service),
+        ),
+      ),
   );
 
   server.registerTool(
@@ -152,7 +169,12 @@ export function createMcpServer(options: IMcpServerOptions): McpServer {
         limit: z.number().int().min(1).max(50).default(20).describe("Maximum number of actions to return."),
       },
     },
-    async ({ query, service, limit }) => toolResult(await searchActions(options, { query, service, limit })),
+    async ({ query, service, limit }) =>
+      toolResult(
+        await authorizeToolExecution(authorizer, subject, "search_actions", undefined, () =>
+          searchActions(options, { query, service, limit }),
+        ),
+      ),
   );
 
   server.registerTool(
@@ -165,7 +187,12 @@ export function createMcpServer(options: IMcpServerOptions): McpServer {
         connectionName: optionalConnectionNameSchema,
       },
     },
-    async ({ actionId, connectionName }) => toolResult(await getActionGuide(options, actionId, connectionName)),
+    async ({ actionId, connectionName }) =>
+      toolResult(
+        await authorizeToolExecution(authorizer, subject, "get_action_guide", actionId, () =>
+          getActionGuide(options, actionId, connectionName),
+        ),
+      ),
   );
 
   server.registerTool(
@@ -184,10 +211,45 @@ export function createMcpServer(options: IMcpServerOptions): McpServer {
       },
     },
     async ({ actionId, input, connectionName }) =>
-      toolResult(await executeAction(options, actionId, input, connectionName)),
+      toolResult(
+        await authorizeToolExecution(authorizer, subject, "execute_action", actionId, () =>
+          executeAction(options, actionId, input, connectionName),
+        ),
+      ),
   );
 
   return server;
+}
+
+export async function listAuthorizedMcpToolSummaries(
+  authorizer: McpAuthorizer | undefined,
+  subject: McpAuthorizationSubject = {},
+): Promise<IMcpToolSummary[]> {
+  if (!authorizer) {
+    return listMcpToolSummaries();
+  }
+  const decision = await authorizer.authorizeToolDiscovery(subject);
+  return decision.allowed ? listMcpToolSummaries() : [];
+}
+
+async function authorizeToolExecution(
+  authorizer: McpAuthorizer | undefined,
+  subject: McpAuthorizationSubject,
+  toolName: string,
+  actionId: string | undefined,
+  run: () => Promise<ToolPayload>,
+): Promise<ToolPayload> {
+  if (!authorizer) {
+    return run();
+  }
+  const decision = await authorizer.authorizeToolExecution({ subject, toolName, actionId });
+  if (!decision.allowed) {
+    return errorPayload(
+      decision.code ?? "authorization_failed",
+      decision.message ?? "MCP tool execution is not authorized.",
+    );
+  }
+  return run();
 }
 
 async function listConnections(options: IMcpServerOptions, service: string | undefined): Promise<ToolPayload> {

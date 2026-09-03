@@ -232,7 +232,34 @@ function memoryAssets(files: Record<string, unknown>): AssetsBinding {
 
 class UnusedD1Database implements D1DatabaseBinding {
   prepare(query: string): D1PreparedStatementBinding {
+    if (query === "select value from marketplace_config where id = 1") {
+      return new EmptyD1PreparedStatement(query);
+    }
     throw new Error(`Unexpected D1 query: ${query}`);
+  }
+}
+
+class EmptyD1PreparedStatement implements D1PreparedStatementBinding {
+  private readonly query: string;
+
+  constructor(query: string) {
+    this.query = query;
+  }
+
+  bind(): D1PreparedStatementBinding {
+    throw new Error(`Unexpected D1 bind: ${this.query}`);
+  }
+
+  async first<T = Record<string, unknown>>(): Promise<T | null> {
+    return null;
+  }
+
+  async all<T = Record<string, unknown>>(): Promise<{ results: T[] }> {
+    throw new Error(`Unexpected D1 all: ${this.query}`);
+  }
+
+  async run(): Promise<{ success: boolean; meta: { changes?: number } }> {
+    throw new Error(`Unexpected D1 run: ${this.query}`);
   }
 }
 

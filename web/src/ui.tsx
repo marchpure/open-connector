@@ -322,7 +322,7 @@ function InitialLoadingView(): ReactNode {
   );
 }
 
-function AppShell(props: {
+export function AppShell(props: {
   data: AppData;
   showLogout: boolean;
   loading: boolean;
@@ -356,6 +356,7 @@ function AppShell(props: {
           <img className="brand-mark" src={oomolConnectLogoUrl} alt="" />
           <div>
             <div className="brand-name">OOMOL Connect</div>
+            <div className="brand-kicker">ENGINEERING CONSOLE</div>
             <div className="brand-subtitle">{t("brand.subtitle")}</div>
           </div>
         </div>

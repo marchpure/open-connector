@@ -29,11 +29,22 @@ export interface LocalAuthSession {
 }
 
 type AuthScope = "admin" | "runtime";
+export type RuntimeAuthKind = "bootstrap_token" | "stored_token" | "user_bearer";
+
+export interface RuntimeAuthContext {
+  kind: RuntimeAuthKind;
+  tokenId?: string;
+}
 
 const runtimeGrants = new WeakMap<Request, RuntimeGrant>();
+const runtimeAuthContexts = new WeakMap<Request, RuntimeAuthContext>();
 
 export function readRuntimeGrant(context: Context): RuntimeGrant | undefined {
   return runtimeGrants.get(context.req.raw);
+}
+
+export function readRuntimeAuthContext(context: Context): RuntimeAuthContext | undefined {
+  return runtimeAuthContexts.get(context.req.raw);
 }
 
 export function createLocalAuthMiddleware(options: LocalAuthOptions): MiddlewareHandler {
@@ -159,6 +170,9 @@ async function hasValidToken(context: Context, options: LocalAuthOptions, scope:
   }
 
   if (await hasRequestToken(context, token)) {
+    if (scope === "runtime") {
+      runtimeAuthContexts.set(context.req.raw, { kind: "bootstrap_token" });
+    }
     return true;
   }
 
@@ -258,9 +272,15 @@ async function hasValidRuntimeToken(context: Context, options: LocalAuthOptions)
   const grant = await options.resolveRuntimeToken?.(token);
   if (grant) {
     runtimeGrants.set(context.req.raw, grant);
+    runtimeAuthContexts.set(context.req.raw, { kind: "stored_token", tokenId: grant.tokenId });
     return true;
   }
-  return await (options.verifyRuntimeJwt?.(token) ?? false);
+  const userVerified = await (options.verifyRuntimeJwt?.(token) ?? false);
+  if (userVerified) {
+    runtimeAuthContexts.set(context.req.raw, { kind: "user_bearer" });
+    return true;
+  }
+  return false;
 }
 
 function readBearerToken(context: Context): string | undefined {

@@ -1,7 +1,9 @@
 import type { CatalogStore } from "../catalog-store.ts";
 import type { ActionPolicyService } from "../core/action-policy.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
+import type { McpAuthorizer } from "./api/mcp-authorizer.ts";
 import type { RuntimeJwtVerifier } from "./api/runtime-jwt.ts";
+import type { ConnectServerRole } from "./connect-server.ts";
 import type { ITransitFileService, TransitFileUpload } from "./files/transit-file-store.ts";
 import type { Logger } from "./logger.ts";
 import type { ISecretCodec } from "./secrets/secret-codec-core.ts";
@@ -34,6 +36,8 @@ export interface ConnectAppOptions {
   logger?: Logger;
   computeRuntimeAuthConfigured?: boolean;
   compressApiResponses?: boolean;
+  mcpAuthorizer?: McpAuthorizer;
+  role?: ConnectServerRole;
 }
 
 export interface ConnectApp {
@@ -109,6 +113,8 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
       logger: options.logger,
       marketplace,
       compressApiResponses: options.compressApiResponses,
+      mcpAuthorizer: options.mcpAuthorizer,
+      role: options.role,
     }).createApp(),
     runtimeAuthConfigured:
       Boolean(options.runtimeToken) ||

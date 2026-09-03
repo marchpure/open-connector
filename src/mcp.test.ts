@@ -12,6 +12,7 @@ import { ConnectionService } from "./connection-service.ts";
 import { ActionPolicyService, emptyPolicyRules } from "./core/action-policy.ts";
 import { createMcpServer } from "./mcp.ts";
 import { ActionRunner } from "./server/actions/action-runner.ts";
+import { mcpM2mAuthorizer } from "./server/api/mcp-authorizer.ts";
 
 const echoAction: ActionDefinition = {
   id: "example.echo",
@@ -613,12 +614,62 @@ describe("MCP server", () => {
       },
     );
   });
+
+  it("fails closed for user bearer MCP discovery and execution until W2 installs an authorizer", async () => {
+    await withMcpClient(
+      async (client) => {
+        const tools = await client.listTools();
+        expect(tools.tools).toEqual([]);
+
+        await expect(
+          client.callTool({
+            name: "execute_action",
+            arguments: { actionId: "example.echo", input: { message: "hello" } },
+          }),
+        ).rejects.toThrow("Method not found");
+      },
+      {
+        authorizer: mcpM2mAuthorizer,
+        authorizationSubject: { auth: { kind: "user_bearer" } },
+      },
+    );
+  });
+
+  it("keeps runtime API key M2M MCP access separate from user bearer authorization", async () => {
+    await withMcpClient(
+      async (client) => {
+        const tools = await client.listTools();
+        expect(tools.tools.map((tool) => tool.name)).toContain("execute_action");
+
+        const result = await client.callTool({
+          name: "execute_action",
+          arguments: { actionId: "example.echo", input: { message: "hello" } },
+        });
+        expect(result.structuredContent).toMatchObject({
+          ok: true,
+          data: { message: "hello" },
+        });
+      },
+      {
+        authorizer: mcpM2mAuthorizer,
+        authorizationSubject: { auth: { kind: "stored_token", tokenId: "token-1" } },
+        runtimeGrant: {
+          tokenId: "token-1",
+          allowedActions: [],
+          blockedActions: [],
+          allowedProxies: [],
+        },
+      },
+    );
+  });
 });
 
 async function withMcpClient(
   run: (client: Client) => Promise<void>,
   policy: {
     getPolicySnapshot?(): Promise<ActionPolicySnapshot>;
+    authorizer?: Parameters<typeof createMcpServer>[0]["authorizer"];
+    authorizationSubject?: Parameters<typeof createMcpServer>[0]["authorizationSubject"];
     runtimeGrant?: {
       tokenId: string;
       allowedActions: string[];
@@ -668,6 +719,8 @@ async function withAuthenticatedMcpClient(
   runs = new MemoryRunLogStore(),
   policy: {
     getPolicySnapshot?(): Promise<ActionPolicySnapshot>;
+    authorizer?: Parameters<typeof createMcpServer>[0]["authorizer"];
+    authorizationSubject?: Parameters<typeof createMcpServer>[0]["authorizationSubject"];
     runtimeGrant?: {
       tokenId: string;
       allowedActions: string[];
