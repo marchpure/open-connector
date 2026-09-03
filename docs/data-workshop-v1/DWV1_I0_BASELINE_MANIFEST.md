@@ -26,10 +26,9 @@ canonical repository. The historical AutoSkill commit
 `b036a94cfc49a35cae855ac705904c3c9d2e443f` is audit evidence only and was not
 merged or copied.
 
-Audit manifest ref: `fork/codex/dwv1-i0-p0-baseline` at
-`7795dd5e330899c0e1edbf2686f78c63985d6345` at the time of this record. This
-ref contains this manifest and the OpenConnector code commit above; later
-manifest-only commits must not be mistaken for a product code base.
+The audit manifest is tracked on `fork/codex/dwv1-i0-p0-baseline`. The branch
+tip is verified by the final `git ls-remote` check; manifest-only commits must
+not be mistaken for a product code base.
 
 ## Capability disposition
 
@@ -81,12 +80,12 @@ manifest-only commits must not be mistaken for a product code base.
 
 ## W1–W6 handoff
 
-W1 base: OpenConnector P0 code commit `e8251a3dd96af1af6692bb2e95217acf2745641d`;
-audit ref `bc94d83f3a9dee81405e9fcf20e93b2737416048`. Modify only state,
+W1 base: OpenConnector P0 code commit `e8251a3dd96af1af6692bb2e95217acf2745641d`.
+Modify only state,
 storage, runtime-role, and infra. Do not edit the original dirty worktree.
 
-W2 base: OpenConnector P0 code commit `e8251a3dd96af1af6692bb2e95217acf2745641d`;
-audit ref `bc94d83f3a9dee81405e9fcf20e93b2737416048`. Modify only publication,
+W2 base: OpenConnector P0 code commit `e8251a3dd96af1af6692bb2e95217acf2745641d`.
+Modify only publication,
 identity, authorization, and MCP runtime. Do not implement Gateway or ABAC.
 
 W3 base: Data Studio `9766b3a5e810c12edcfbe3ba43d9a3e0419c2275`. Modify only
