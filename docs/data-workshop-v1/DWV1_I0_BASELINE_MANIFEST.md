@@ -14,7 +14,7 @@ Design authority: Data Workshop V1 implementation SPEC, document
 
 | Role | Repository / remote | Branch | Local SHA | Remote SHA | Worktree state |
 |---|---|---|---|---|---|
-| Product | `marchpure/open-connector`, `git@github.com:marchpure/open-connector.git` | `codex/dwv1-i0-p0-baseline` | `49a7d89c10bfe0cd5e8207bbddcb32516d6996e1` | same SHA verified on `fork/codex/dwv1-i0-p0-baseline` | clean independent worktree; derived from clean `496a230e8507fff50a43977c5cfaec3e9da3367e` |
+| Product | `marchpure/open-connector`, `git@github.com:marchpure/open-connector.git` | `codex/dwv1-i0-p0-baseline` | `35a54cc437248ca920f5a999484e82ad34840684` | same SHA verified on `fork/codex/dwv1-i0-p0-baseline` | clean independent worktree; code baseline is `e8251a3dd96af1af6692bb2e95217acf2745641d`, followed by manifest-only commits |
 | Product candidate retained | `marchpure/open-connector` | `feat/data-workshop-p0-connection-ecs` | `496a230e8507fff50a43977c5cfaec3e9da3367e` | `fork/feat/data-workshop-p0-connection-ecs` same SHA | clean; no unpushed commits |
 | Original user worktree | `marchpure/open-connector` | `codex/web-action-chain` | `50884f764c13a0629600dc38cae0616c1ec7c382` | branch not present on fork remote | dirty; 43 entries; preserved unchanged |
 | Product | `marchpure/veadk-data-studio`, `https://github.com/marchpure/veadk-data-studio.git` | `main` | `9766b3a5e810c12edcfbe3ba43d9a3e0419c2275` | same SHA on `veadk-data-studio/main` | clean; no unpushed commits |
@@ -76,8 +76,9 @@ merged or copied.
 
 ## W1–W6 handoff
 
-W1/W2 base: OpenConnector P0 commit
-`e8251a3dd96af1af6692bb2e95217acf2745641d`; W1 may edit only state, storage,
+W1/W2 code base: OpenConnector P0 commit
+`e8251a3dd96af1af6692bb2e95217acf2745641d`; tracked branch base including
+this manifest is `35a54cc437248ca920f5a999484e82ad34840684`. W1 may edit only state, storage,
 runtime-role, and infra; W2 may edit only publication, identity,
 authorization, and MCP runtime. Do not edit the original dirty worktree.
 
