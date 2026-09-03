@@ -25,6 +25,12 @@ Copy `.env.example` to an out-of-repository secret file on the target host.
 Every image must use `repository@sha256:digest` form. I1 promotes a build by
 changing only `OPEN_CONNECTOR_IMAGE`; tags are rejected.
 
+Before any container change, `promotion-preflight.sh` requires non-base W1/W2
+commit SHAs, the exact image digest, approved issuer/JWKS/audience/UserPool
+references, a live JWKS with signing keys, and MCP protected-resource metadata
+that points to the approved issuer. It exits `BLOCKED_UPSTREAM` without making
+changes when any handoff is incomplete.
+
 The application and migration URLs may use distinct PostgreSQL roles. The
 included PostgreSQL and MinIO containers provide the dev state and
 S3-compatible object store without creating unrelated cloud resources.
@@ -36,14 +42,17 @@ evidence.
 ```sh
 sudo install -d -m 0750 /opt/dwv1-w4
 sudo install -m 0644 compose.yaml Caddyfile contract-backend.mjs /opt/dwv1-w4/
-sudo install -m 0755 deploy.sh rollback.sh verify.sh /opt/dwv1-w4/
+sudo install -m 0755 deploy.sh rollback.sh verify.sh promotion-preflight.sh /opt/dwv1-w4/
 sudo /opt/dwv1-w4/deploy.sh /etc/dwv1-w4.env
 ```
 
-`deploy.sh` validates the frozen SHA and digest pins, migrates PostgreSQL,
-starts the inactive blue/green runtime slot, verifies its health, switches
-Caddy, verifies the public edge, and then stops the old slot. It records a
-secret-free release receipt. Docker's local log driver rotates at
+`deploy.sh` validates the frozen SHA and registry digest, migrates PostgreSQL,
+starts the protected Control Plane, writes the approved identity configuration
+through its authenticated internal API, then starts the inactive blue/green MCP
+Runtime slot. It verifies health, switches Caddy, verifies the public edge, and
+then stops the old Runtime slot. Both roles use the same immutable image,
+PostgreSQL, and object store. It records a secret-free release receipt.
+Docker's local log driver rotates at
 10 MiB with five files. Health checks and restart policies provide monitoring;
 the receipt and `docker compose ps` provide rollout state.
 

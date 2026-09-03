@@ -17,6 +17,7 @@ test "${SOURCE_SHA:?required}" = "$expected_sha"
 printf '%s' "${OPEN_CONNECTOR_IMAGE:?required}" |
   grep -Eq '^[-./a-zA-Z0-9_:]+@sha256:[a-f0-9]{64}$'
 test "${PUBLIC_ORIGIN#https://}" != "$PUBLIC_ORIGIN"
+"$root/promotion-preflight.sh" "$env_file"
 
 mkdir -p "$receipt_dir"
 previous_image=""
@@ -43,7 +44,9 @@ $compose pull
 $compose up -d postgres object-store
 $compose run --rm object-store-init
 $compose run --rm migrate
-$compose up -d --wait "runtime-$next_slot" contract
+$compose up -d --wait control-plane contract
+$compose exec -T control-plane node /app/configure-identity.mjs
+$compose up -d --wait "runtime-$next_slot"
 $compose up -d --wait caddy
 "$root/verify.sh" "$slot_env"
 if test -n "$current_slot"; then

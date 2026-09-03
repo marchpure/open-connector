@@ -23,7 +23,8 @@
 		}
 	}
 
-	handle {
+	@runtime path /mcp /mcp/* /v1 /v1/* /api/files/*
+	handle @runtime {
 		header Cache-Control "no-store"
 		reverse_proxy {$RUNTIME_UPSTREAM}:3000 {
 			flush_interval -1
@@ -32,5 +33,10 @@
 				write_timeout 0
 			}
 		}
+	}
+
+	handle {
+		header Cache-Control "no-store"
+		reverse_proxy control-plane:3000
 	}
 }

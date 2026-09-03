@@ -1,6 +1,6 @@
 {
   "status": "BLOCKED_UPSTREAM",
-  "observedAt": "2026-09-04T05:45:06+08:00",
+  "observedAt": "2026-09-04T05:50:38+08:00",
   "frozenBase": "0fa2c728dfbf957735da2843ec2b8a4f3425b105",
   "w1Branch": "feat/dwv1-rerun-20260904-w1-openconnector-core",
   "w1CommitsBeyondBase": 0,
@@ -11,7 +11,8 @@
   "containerRepository": "idv-order-discount-agent-test.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service",
   "containerRepositoryTagCount": 0,
   "identityCandidateUrl": "https://svsfar8fpgkbbo8kij8k6.apigateway-cn-beijing.volceapi.com",
-  "identityCandidateStatus": "504 on health, readiness, OIDC discovery, OAuth metadata, authorization, and JWKS probes",
-  "impact": "No merged W1/W2 commit, immutable runtime image digest, or healthy approved WorkBuddy UserPool/Client is available for promotion and OAuth verification",
+  "identityCandidateStatus": "health and OAuth metadata are online, but authorization-server metadata has no jwks_uri, /jwks serves HTML, and dynamic registration is not available",
+  "promotionPreflightStatus": "BLOCKED_UPSTREAM: authorization-server metadata does not publish the approved JWKS URI",
+  "impact": "No merged W1/W2 commit, immutable runtime image digest, or complete approved WorkBuddy OAuth issuer/client contract is available for promotion and OAuth verification",
   "e2eClaimed": false
 }

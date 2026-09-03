@@ -1,6 +1,6 @@
 name: dwv1-w4-public-edge
 
-x-runtime: &runtime
+x-open-connector: &open-connector
   image: ${OPEN_CONNECTOR_IMAGE:?digest-pinned image required}
   restart: unless-stopped
   read_only: true
@@ -24,6 +24,10 @@ x-runtime: &runtime
     OOMOL_CONNECT_DATABASE_POOL_MAX: "10"
     OOMOL_CONNECT_ADMIN_TOKEN: ${OOMOL_CONNECT_ADMIN_TOKEN:?required}
     OOMOL_CONNECT_ENCRYPTION_KEY: ${OOMOL_CONNECT_ENCRYPTION_KEY:?required}
+    OOMOL_CONNECT_JWKS_URI: ${IDENTITY_JWKS_URI:?required}
+    OOMOL_CONNECT_JWT_ISSUER: ${IDENTITY_ISSUER:?required}
+    OOMOL_CONNECT_JWT_AUDIENCE: ${IDENTITY_AUDIENCE:?required}
+    IDENTITY_USER_POOL_REF: ${IDENTITY_USER_POOL_REF:?required}
     OOMOL_CONNECT_TRANSIT_FILE_BACKEND: s3
     OOMOL_CONNECT_S3_BUCKET: open-connector-transit
     OOMOL_CONNECT_S3_REGION: cn-beijing
@@ -118,13 +122,21 @@ services:
     command: ["migrate"]
     logging: *rotated-logs
 
+  control-plane:
+    <<: *open-connector
+    command: ["control-plane"]
+    volumes:
+      - ./configure-identity.mjs:/app/configure-identity.mjs:ro
+
   runtime-blue:
     profiles: [blue]
-    <<: *runtime
+    <<: *open-connector
+    command: ["mcp-runtime"]
 
   runtime-green:
     profiles: [green]
-    <<: *runtime
+    <<: *open-connector
+    command: ["mcp-runtime"]
 
   contract:
     image: node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
@@ -156,6 +168,8 @@ services:
     image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     restart: unless-stopped
     depends_on:
+      control-plane:
+        condition: service_healthy
       contract:
         condition: service_healthy
     environment:
