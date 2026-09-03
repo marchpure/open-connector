@@ -18,6 +18,25 @@ function assert(condition, message) {
   if (!condition) failures.push(message);
 }
 
+function yamlPathBlock(document, path) {
+  const lines = document.split("\n");
+  const keys = new Set([`  ${path}:`, `  "${path}":`, `  '${path}':`]);
+  const start = lines.findIndex((line) => keys.has(line));
+  if (start < 0) return "";
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^  (?:"\/|'\/|\/)/u.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n");
+}
+
+function hasOperation(document, path, method) {
+  return new RegExp(`^    ${method}:\\s*$`, "mu").test(yamlPathBlock(document, path));
+}
+
 const manifest = readJson("baseline-manifest.json");
 const pins = readJson("REPOSITORY_PINS.json");
 const schemas = readJson("contracts/schemas.json");
@@ -106,12 +125,13 @@ for (const path of [
   "/v1/mcp/status:",
   "/mcp:",
 ]) {
-  assert(openConnectorApi.includes(`  ${path}`), `OpenConnector API missing ${path}`);
+  const normalizedPath = path.slice(0, -1);
+  assert(yamlPathBlock(openConnectorApi, normalizedPath), `OpenConnector API missing ${normalizedPath}`);
 }
-assert(/  \/v1\/connections:\n(?:.*\n)*?    patch:/u.test(openConnectorApi), "PATCH /v1/connections is not frozen");
-assert(/  \/v1\/access-grants:\n(?:.*\n)*?    patch:/u.test(openConnectorApi), "PATCH /v1/access-grants is not frozen");
-assert(/  \/mcp:\n    post:/u.test(openConnectorApi), "POST /mcp is not frozen");
-assert(!/  \/mcp:\n    get:/u.test(openConnectorApi), "GET /mcp must not be an OpenConnector API operation");
+assert(hasOperation(openConnectorApi, "/v1/connections", "patch"), "PATCH /v1/connections is not frozen");
+assert(hasOperation(openConnectorApi, "/v1/access-grants", "patch"), "PATCH /v1/access-grants is not frozen");
+assert(hasOperation(openConnectorApi, "/mcp", "post"), "POST /mcp is not frozen");
+assert(!hasOperation(openConnectorApi, "/mcp", "get"), "GET /mcp must not be an OpenConnector API operation");
 assert(
   !/publication/iu.test(openConnectorApi.replace(/Publication resources do not exist\./u, "")),
   "Publication API leaked",
@@ -133,9 +153,10 @@ for (const path of [
   "/v1/sessions/{sessionId}:",
   "/v1/artifacts/{artifactId}/download:",
 ]) {
-  assert(bffApi.includes(`  ${path}`), `BFF API missing ${path}`);
+  const normalizedPath = path.slice(0, -1);
+  assert(yamlPathBlock(bffApi, normalizedPath), `BFF API missing ${normalizedPath}`);
 }
-assert(!bffApi.includes("\n  /mcp:"), "BFF must not proxy the MCP data plane");
+assert(!yamlPathBlock(bffApi, "/mcp"), "BFF must not proxy the MCP data plane");
 
 for (const path of [
   "/home",

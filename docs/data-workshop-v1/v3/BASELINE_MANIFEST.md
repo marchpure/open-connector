@@ -84,7 +84,7 @@ fallback.
 The three source commits are additionally protected by the annotated tag
 `dwv1-i0-baseline-v3-source` in their respective repositories. The contract
 package is published from branch `docs/dwv1-i0-baseline-v3` and tagged
-`dwv1-i0-baseline-v3`.
+`dwv1-i0-baseline-v3-frozen`.
 
 ## Non-negotiable invariants
 

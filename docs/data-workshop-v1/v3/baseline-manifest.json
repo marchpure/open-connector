@@ -5,7 +5,7 @@
   "frozen_at": "2026-09-04T00:55:42+08:00",
   "artifact_repository": "marchpure/open-connector",
   "artifact_branch": "docs/dwv1-i0-baseline-v3",
-  "artifact_tag": "dwv1-i0-baseline-v3",
+  "artifact_tag": "dwv1-i0-baseline-v3-frozen",
   "business_feature_implementation_claimed": false,
   "authorities": {
     "prd": {

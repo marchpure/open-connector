@@ -3,8 +3,11 @@ info:
   title: Data Workshop V1 V3 OpenConnector API
   version: 3.0.0
   description: Canonical control-plane and unified MCP contract. Publication resources do not exist.
+  license:
+    name: Internal use only
+    identifier: LicenseRef-Internal
 servers:
-  - url: https://{openconnector-domain}
+  - url: "https://{openconnector-domain}"
     variables:
       openconnector-domain:
         default: configured.example.invalid
@@ -22,31 +25,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SuccessEnvelope"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Get Health
   /ready:
     get:
       operationId: getReadiness
       security: []
       responses:
         "200":
-          description: State store, Provider registry, Identity, and JWKS dependencies are ready.
+          description: "State store, Provider registry, Identity, and JWKS dependencies are ready."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/SuccessEnvelope"
         "503":
           $ref: "#/components/responses/Error"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Get Readiness
   /v1/providers:
     get:
       operationId: listProviders
       responses:
         "200":
           $ref: "#/components/responses/Success"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: List Providers
   /v1/connections:
     get:
       operationId: listConnections
       responses:
         "200":
           $ref: "#/components/responses/Success"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: List Connections
     post:
       operationId: createConnection
       parameters:
@@ -58,16 +73,25 @@ paths:
             schema:
               type: object
               additionalProperties: true
-              required: [provider_id, display_name, configuration]
+              required:
+                - provider_id
+                - display_name
+                - configuration
               properties:
-                provider_id: { type: string }
-                display_name: { type: string }
-                configuration: { type: object }
+                provider_id:
+                  type: string
+                display_name:
+                  type: string
+                configuration:
+                  type: object
       responses:
         "201":
           $ref: "#/components/responses/Success"
         default:
           $ref: "#/components/responses/Error"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Create Connection
     patch:
       operationId: updateConnection
       parameters:
@@ -79,16 +103,24 @@ paths:
             schema:
               type: object
               additionalProperties: true
-              required: [id, version]
+              required:
+                - id
+                - version
               properties:
-                id: { type: string }
-                version: { type: integer, minimum: 1 }
+                id:
+                  type: string
+                version:
+                  type: integer
+                  minimum: 1
       responses:
         "200":
           $ref: "#/components/responses/Success"
         default:
           $ref: "#/components/responses/Error"
-  /v1/connections/{connectionId}:
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Update Connection
+  "/v1/connections/{connectionId}":
     parameters:
       - $ref: "#/components/parameters/ConnectionId"
     get:
@@ -98,7 +130,10 @@ paths:
           $ref: "#/components/responses/Success"
         default:
           $ref: "#/components/responses/Error"
-  /v1/connections/{connectionId}:validate:
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Get Connection
+  "/v1/connections/{connectionId}:validate":
     parameters:
       - $ref: "#/components/parameters/ConnectionId"
     post:
@@ -108,7 +143,10 @@ paths:
           $ref: "#/components/responses/Success"
         default:
           $ref: "#/components/responses/Error"
-  /v1/connections/{connectionId}:discover:
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Validate Connection
+  "/v1/connections/{connectionId}:discover":
     parameters:
       - $ref: "#/components/parameters/ConnectionId"
     post:
@@ -118,18 +156,25 @@ paths:
           $ref: "#/components/responses/Success"
         default:
           $ref: "#/components/responses/Error"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Discover Connection
   /v1/actions:
     get:
       operationId: listActions
       responses:
         "200":
           $ref: "#/components/responses/Success"
-  /v1/actions/{actionId}:invoke:
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: List Actions
+  "/v1/actions/{actionId}:invoke":
     parameters:
       - name: actionId
         in: path
         required: true
-        schema: { type: string }
+        schema:
+          type: string
     post:
       operationId: invokeActionAsAdministrator
       description: Administrative debugger only; it is not the user MCP data plane.
@@ -140,34 +185,48 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [connection_id, input]
+              required:
+                - connection_id
+                - input
               properties:
-                connection_id: { type: string }
-                input: { type: object }
+                connection_id:
+                  type: string
+                input:
+                  type: object
       responses:
         "200":
           $ref: "#/components/responses/Success"
         default:
           $ref: "#/components/responses/Error"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Invoke Action As Administrator
   /v1/traces:
     get:
       operationId: listTraces
       responses:
         "200":
           $ref: "#/components/responses/Success"
-  /v1/traces/{traceId}:
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: List Traces
+  "/v1/traces/{traceId}":
     get:
       operationId: getTrace
       parameters:
         - name: traceId
           in: path
           required: true
-          schema: { type: string }
+          schema:
+            type: string
       responses:
         "200":
           $ref: "#/components/responses/Success"
         default:
           $ref: "#/components/responses/Error"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Get Trace
   /v1/identity-provider:
     get:
       operationId: getIdentityProvider
@@ -178,6 +237,9 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/IdentityProviderEnvelope"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Get Identity Provider
     put:
       operationId: putIdentityProvider
       parameters:
@@ -187,7 +249,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "./schemas.json#/$defs/IdentityProviderConfig"
+              $ref: ./schemas.json#/$defs/IdentityProviderConfig
       responses:
         "200":
           description: Saved non-sensitive Identity Provider configuration.
@@ -197,7 +259,10 @@ paths:
                 $ref: "#/components/schemas/IdentityProviderEnvelope"
         default:
           $ref: "#/components/responses/Error"
-  /v1/identity-provider:validate:
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Put Identity Provider
+  "/v1/identity-provider:validate":
     post:
       operationId: validateIdentityProvider
       responses:
@@ -205,40 +270,57 @@ paths:
           $ref: "#/components/responses/Success"
         default:
           $ref: "#/components/responses/Error"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Validate Identity Provider
   /v1/identity/subjects:
     get:
       operationId: searchIdentitySubjects
       parameters:
         - name: query
           in: query
-          schema: { type: string }
+          schema:
+            type: string
         - name: subject_type
           in: query
-          schema: { enum: [user, group] }
+          schema:
+            enum:
+              - user
+              - group
         - name: page_token
           in: query
-          schema: { type: string }
+          schema:
+            type: string
       responses:
         "200":
           $ref: "#/components/responses/Success"
         default:
           $ref: "#/components/responses/Error"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Search Identity Subjects
   /v1/access-grants:
     get:
       operationId: listAccessGrants
       parameters:
         - name: connection_id
           in: query
-          schema: { type: string }
+          schema:
+            type: string
         - name: subject_id
           in: query
-          schema: { type: string }
+          schema:
+            type: string
         - name: page_token
           in: query
-          schema: { type: string }
+          schema:
+            type: string
       responses:
         "200":
           $ref: "#/components/responses/Success"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: List Access Grants
     post:
       operationId: createAccessGrant
       parameters:
@@ -248,12 +330,15 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "./schemas.json#/$defs/AccessGrant"
+              $ref: ./schemas.json#/$defs/AccessGrant
       responses:
         "201":
           $ref: "#/components/responses/Success"
         default:
           $ref: "#/components/responses/Error"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Create Access Grant
     patch:
       operationId: updateAccessGrant
       parameters:
@@ -265,22 +350,38 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [id, version]
+              required:
+                - id
+                - version
               properties:
-                id: { type: string }
-                role_id: { enum: [reader, operator, custom] }
-                effect: { enum: [allow, deny] }
+                id:
+                  type: string
+                role_id:
+                  enum:
+                    - reader
+                    - operator
+                    - custom
+                effect:
+                  enum:
+                    - allow
+                    - deny
                 action_scope:
                   type: array
                   uniqueItems: true
-                  items: { type: string }
-                version: { type: integer, minimum: 1 }
+                  items:
+                    type: string
+                version:
+                  type: integer
+                  minimum: 1
       responses:
         "200":
           $ref: "#/components/responses/Success"
         default:
           $ref: "#/components/responses/Error"
-  /v1/access-grants/{grantId}:
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Update Access Grant
+  "/v1/access-grants/{grantId}":
     parameters:
       - $ref: "#/components/parameters/GrantId"
     get:
@@ -290,7 +391,10 @@ paths:
           $ref: "#/components/responses/Success"
         default:
           $ref: "#/components/responses/Error"
-  /v1/access-grants/{grantId}:revoke:
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Get Access Grant
+  "/v1/access-grants/{grantId}:revoke":
     post:
       operationId: revokeAccessGrant
       parameters:
@@ -303,15 +407,21 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [version]
+              required:
+                - version
               properties:
-                version: { type: integer, minimum: 1 }
+                version:
+                  type: integer
+                  minimum: 1
       responses:
         "200":
           $ref: "#/components/responses/Success"
         default:
           $ref: "#/components/responses/Error"
-  /v1/access:preview:
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Revoke Access Grant
+  "/v1/access:preview":
     post:
       operationId: previewAccess
       requestBody:
@@ -319,7 +429,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "./schemas.json#/$defs/AccessPreviewRequest"
+              $ref: ./schemas.json#/$defs/AccessPreviewRequest
       responses:
         "200":
           description: Explained effective access.
@@ -329,41 +439,59 @@ paths:
                 $ref: "#/components/schemas/AccessPreviewEnvelope"
         default:
           $ref: "#/components/responses/Error"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Preview Access
   /v1/access/audit:
     get:
       operationId: listAccessAudit
       parameters:
         - name: connection_id
           in: query
-          schema: { type: string }
+          schema:
+            type: string
         - name: subject_id
           in: query
-          schema: { type: string }
+          schema:
+            type: string
         - name: decision
           in: query
-          schema: { enum: [allow, deny] }
+          schema:
+            enum:
+              - allow
+              - deny
         - name: page_token
           in: query
-          schema: { type: string }
+          schema:
+            type: string
       responses:
         "200":
           $ref: "#/components/responses/Success"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: List Access Audit
   /v1/mcp/config:
     get:
       operationId: getMcpConfig
-      description: Returns non-sensitive endpoint, protocol, and OAuth metadata.
+      description: "Returns non-sensitive endpoint, protocol, and OAuth metadata."
       responses:
         "200":
           $ref: "#/components/responses/Success"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Get Mcp Config
   /v1/mcp/status:
     get:
       operationId: getMcpStatus
-      description: Returns endpoint, Identity, and JWKS readiness without secrets.
+      description: "Returns endpoint, Identity, and JWKS readiness without secrets."
       responses:
         "200":
           $ref: "#/components/responses/Success"
         "503":
           $ref: "#/components/responses/Error"
+        4XX:
+          $ref: "#/components/responses/Error"
+      summary: Get Mcp Status
   /mcp:
     post:
       operationId: invokeMcp
@@ -376,24 +504,32 @@ paths:
           application/json:
             schema:
               type: object
-              required: [jsonrpc, method]
+              required:
+                - jsonrpc
+                - method
               properties:
-                jsonrpc: { const: "2.0" }
+                jsonrpc:
+                  const: "2.0"
                 id: {}
-                method: { type: string }
-                params: { type: object }
+                method:
+                  type: string
+                params:
+                  type: object
       responses:
         "200":
           description: MCP JSON-RPC or streaming response.
           content:
             application/json:
-              schema: { type: object }
+              schema:
+                type: object
             text/event-stream:
-              schema: { type: string }
+              schema:
+                type: string
         "401":
           $ref: "#/components/responses/Error"
         "403":
           $ref: "#/components/responses/Error"
+      summary: Invoke Mcp
 components:
   securitySchemes:
     adminBearer:
@@ -404,8 +540,8 @@ components:
       type: oauth2
       flows:
         authorizationCode:
-          authorizationUrl: https://{agent-identity-domain}/oauth/authorize
-          tokenUrl: https://{agent-identity-domain}/oauth/token
+          authorizationUrl: "https://{agent-identity-domain}/oauth/authorize"
+          tokenUrl: "https://{agent-identity-domain}/oauth/token"
           scopes:
             openconnector.invoke: Invoke authorized Connection Actions.
   parameters:
@@ -413,17 +549,22 @@ components:
       name: connectionId
       in: path
       required: true
-      schema: { type: string }
+      schema:
+        type: string
     GrantId:
       name: grantId
       in: path
       required: true
-      schema: { type: string }
+      schema:
+        type: string
     IdempotencyKey:
       name: Idempotency-Key
       in: header
       required: true
-      schema: { type: string, minLength: 16, maxLength: 256 }
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 256
   responses:
     Success:
       description: Successful operation.
@@ -436,21 +577,21 @@ components:
       content:
         application/json:
           schema:
-            $ref: "./schemas.json#/$defs/ErrorEnvelope"
+            $ref: ./schemas.json#/$defs/ErrorEnvelope
   schemas:
     SuccessEnvelope:
-      $ref: "./schemas.json#/$defs/SuccessEnvelope"
+      $ref: ./schemas.json#/$defs/SuccessEnvelope
     IdentityProviderEnvelope:
       allOf:
-        - $ref: "./schemas.json#/$defs/SuccessEnvelope"
+        - $ref: ./schemas.json#/$defs/SuccessEnvelope
         - type: object
           properties:
             data:
-              $ref: "./schemas.json#/$defs/IdentityProviderConfig"
+              $ref: ./schemas.json#/$defs/IdentityProviderConfig
     AccessPreviewEnvelope:
       allOf:
-        - $ref: "./schemas.json#/$defs/SuccessEnvelope"
+        - $ref: ./schemas.json#/$defs/SuccessEnvelope
         - type: object
           properties:
             data:
-              $ref: "./schemas.json#/$defs/AccessPreviewResult"
+              $ref: ./schemas.json#/$defs/AccessPreviewResult
