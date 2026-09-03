@@ -98,9 +98,10 @@ it may be offered as a seed, not declared as the product base.
 - P0 OpenConnector: `npm run typecheck` passed; targeted auth/runtime/OAuth
   tests passed: 118 tests; `git diff --check` passed.
 - Data Studio: clean local/remote SHA equality verified; Python compilation and
-  `git diff --check` passed, with existing `return in finally` warnings. A
-  previously attempted test path was absent and is not counted as a pass;
-  available test inventory was rechecked before selecting any future test run.
+  `git diff --check` passed, with existing `return in finally` warnings.
+  Existing security/storage tests passed: 49 tests in
+  `tests/test_storage_config.py`, `tests/test_tool_redaction.py`, and
+  `tests/test_redaction_service.py`.
 - W5 skeleton: one skeleton test passed; no product implementation claimed.
 - The original dirty OpenConnector worktree was not edited, staged, committed,
   reset, or cleaned.
