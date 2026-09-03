@@ -1,6 +1,6 @@
 import type { ActionDefinition } from "./types.ts";
 
-export type PolicySource = "deployment" | "runtime" | "token";
+export type PolicySource = "deployment" | "runtime" | "token" | "access_grant";
 
 export type PolicyErrorCode =
   | "action_not_allowed"
@@ -13,6 +13,10 @@ export interface PolicyCheck {
   source: PolicySource;
   outcome: "allow_match" | "block_match" | "allow_miss";
   rule?: string;
+  grantId?: string;
+  role?: string;
+  reason?: string;
+  policyVersion?: number;
 }
 
 export type ActionPolicyDecision =
@@ -36,6 +40,22 @@ export interface TokenPolicy {
   blockedActions: string[];
   allowedProxies: string[];
   allowedConnections?: string[];
+}
+
+export interface AccessPolicyCheck {
+  source: "access_grant";
+  outcome: "allow_match" | "block_match" | "allow_miss";
+  rule?: string;
+  grantId?: string;
+  role?: string;
+  reason?: string;
+  policyVersion?: number;
+}
+
+export interface AccessPolicySnapshot {
+  readonly version: number;
+  evaluateConnection(connectionId?: string): ActionPolicyDecision;
+  evaluateAction(action: ActionDefinition, connectionId?: string): ActionPolicyDecision;
 }
 
 export interface RuntimePolicyState {
@@ -73,14 +93,27 @@ export class ActionPolicySnapshot {
   private readonly proxyLayers: CompiledLayer[];
   private readonly tokenProxyRules?: CompiledRule[];
   private readonly allowedConnections: readonly string[];
+  private readonly access?: AccessPolicySnapshot;
 
-  constructor(deployment: PolicyRules, runtime: PolicyRules, token?: TokenPolicy, updatedAt?: string) {
+  constructor(
+    deployment: PolicyRules,
+    runtime: PolicyRules,
+    token?: TokenPolicy,
+    updatedAt?: string,
+    access?: AccessPolicySnapshot,
+  ) {
     const deploymentRules = immutablePolicyRules(deployment);
     const runtimeRules = immutablePolicyRules(runtime);
-    this.state = Object.freeze({ deployment: deploymentRules, runtime: runtimeRules, updatedAt });
+    this.state = Object.freeze({
+      deployment: deploymentRules,
+      runtime: runtimeRules,
+      updatedAt,
+      ...(access ? { accessVersion: access.version } : {}),
+    });
     this.proxyLayers = [compileLayer("deployment", deploymentRules), compileLayer("runtime", runtimeRules)];
     this.layers = [...this.proxyLayers];
     this.allowedConnections = Object.freeze([...(token?.allowedConnections ?? [])]);
+    this.access = access;
     if (token) {
       const tokenRules = immutablePolicyRules({
         allowedActions: token.allowedActions,
@@ -125,6 +158,14 @@ export class ActionPolicySnapshot {
     }
 
     return { allowed: true, checks };
+  }
+
+  evaluateActionForConnection(action: ActionDefinition, connectionId?: string): ActionPolicyDecision {
+    const actionDecision = this.evaluate(action);
+    if (!actionDecision.allowed) {
+      return actionDecision;
+    }
+    return this.access?.evaluateAction(action, connectionId) ?? actionDecision;
   }
 
   evaluateProxy(service: string): ActionPolicyDecision {
@@ -175,14 +216,21 @@ export class ActionPolicySnapshot {
 
   evaluateConnection(connectionId?: string): ActionPolicyDecision {
     if (this.allowedConnections.length === 0) {
-      return { allowed: true, checks: [] };
+      return this.access?.evaluateConnection(connectionId) ?? { allowed: true, checks: [] };
     }
 
     if (connectionId && this.allowedConnections.includes(connectionId)) {
-      return {
+      const tokenDecision: ActionPolicyDecision = {
         allowed: true,
         checks: [{ source: "token", outcome: "allow_match", rule: connectionId }],
       };
+      const accessDecision = this.access?.evaluateConnection(connectionId);
+      if (accessDecision && !accessDecision.allowed) {
+        return accessDecision;
+      }
+      return accessDecision
+        ? { allowed: true, checks: [...tokenDecision.checks, ...accessDecision.checks] }
+        : tokenDecision;
     }
 
     return {
@@ -210,8 +258,9 @@ export class ActionPolicyService {
     runtime: PolicyRules = emptyPolicyRules(),
     token?: TokenPolicy,
     updatedAt?: string,
+    access?: AccessPolicySnapshot,
   ): ActionPolicySnapshot {
-    return new ActionPolicySnapshot(this.rules, runtime, token, updatedAt);
+    return new ActionPolicySnapshot(this.rules, runtime, token, updatedAt, access);
   }
 
   evaluate(action: ActionDefinition): ActionPolicyDecision {

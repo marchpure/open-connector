@@ -119,6 +119,13 @@ const actionIdParameter = {
   schema: jsonSchema.string({ description: "Action id, usually <service>.<name>." }),
 };
 
+const accessGrantIdParameter = {
+  name: "id",
+  in: "path",
+  required: true,
+  schema: jsonSchema.string({ description: "AccessGrant id." }),
+};
+
 const namedConnectionDescription =
   "Named connection. Same fact as MCP connectionName; HTTP alias, connectionName, and x-oo-connector-alias are equivalent. Defaults to default.";
 
@@ -318,9 +325,22 @@ export function createOpenApiDocument(
     "/api/runtime-tokens": createRuntimeTokensPath(),
     "/api/runtime-tokens/{id}": createRuntimeTokenPath(),
     "/api/runtime-policy": createRuntimePolicyPath(),
+    "/api/identity-provider": createIdentityProviderPath(),
+    "/api/access-grants": createAdminAccessGrantsPath(),
+    "/api/access-grants/{id}": createAdminAccessGrantPath(),
+    "/api/access-grants/{id}/revoke": createAdminAccessGrantRevokePath(),
+    "/api/access/preview": createAdminAccessPreviewPath(),
+    "/api/access/audit": createAdminAccessAuditPath(),
+    "/api/identity/subjects": createAdminIdentitySubjectsPath(),
     "/api/files": createTransitFilesPath(),
     "/api/files/{fileId}": createTransitFilePath(),
     "/v1/actions/{actionId}": runPath,
+    "/v1/access-grants": createRuntimeAccessGrantsPath(),
+    "/v1/access-grants/{id}": createRuntimeAccessGrantPath(),
+    "/v1/access-grants/{id}/revoke": createRuntimeAccessGrantRevokePath(),
+    "/v1/access:preview": createRuntimeAccessPreviewPath(),
+    "/v1/access/audit": createRuntimeAccessAuditPath(),
+    "/v1/identity/subjects": createRuntimeIdentitySubjectsPath(),
     "/v1/proxy/{service}": createProxyPath(),
     "/api/runs": createRunsPath(),
     "/api/runs/{id}": createRunDetailPath(),
@@ -643,6 +663,14 @@ export function createOpenApiDocument(
           },
         ),
         PolicyRules: policyRulesSchema(),
+        IdentityProviderConfig: identityProviderConfigSchema(),
+        RuntimeSubject: runtimeSubjectSchema(),
+        AccessGrantRecord: accessGrantRecordSchema(),
+        AccessGrantCreateRequest: accessGrantCreateRequestSchema(),
+        AccessGrantPatchRequest: accessGrantPatchRequestSchema(),
+        AccessPreviewRequest: accessPreviewRequestSchema(),
+        AccessPreviewResponse: accessPreviewResponseSchema(),
+        AccessAuditRecord: accessAuditRecordSchema(),
         RuntimePolicyState: jsonSchema.object(
           {
             deployment: { $ref: "#/components/schemas/PolicyRules" },
@@ -656,9 +684,13 @@ export function createOpenApiDocument(
         ),
         PolicyCheck: jsonSchema.object(
           {
-            source: { type: "string", enum: ["deployment", "runtime", "token"] },
+            source: { type: "string", enum: ["deployment", "runtime", "token", "access_grant"] },
             outcome: { type: "string", enum: ["allow_match", "block_match", "allow_miss"] },
             rule: jsonSchema.string({ description: "First matching policy rule, when one matched." }),
+            grantId: jsonSchema.string({ description: "AccessGrant id when an access grant matched." }),
+            role: jsonSchema.string({ description: "AccessGrant role used for the decision." }),
+            reason: jsonSchema.string({ description: "Operator-provided AccessGrant reason." }),
+            policyVersion: jsonSchema.number({ description: "AccessGrant policy version used for the decision." }),
           },
           {
             required: ["source", "outcome"],
@@ -961,6 +993,261 @@ function createRuntimePolicyPath(): Record<string, unknown> {
   };
 }
 
+function createIdentityProviderPath(): Record<string, unknown> {
+  return {
+    get: {
+      tags: ["Access"],
+      summary: "Read JWT identity provider configuration.",
+      responses: {
+        200: jsonResponse({
+          anyOf: [{ $ref: "#/components/schemas/IdentityProviderConfig" }, { type: "null" }],
+        }),
+      },
+    },
+    put: {
+      tags: ["Access"],
+      summary: "Replace JWT identity provider configuration.",
+      description:
+        "Configures bearer JWT verification for user and group AccessGrant evaluation. JWKS keys are loaded at verification time; the plaintext config is stored locally.",
+      requestBody: jsonRequestBody({ $ref: "#/components/schemas/IdentityProviderConfig" }),
+      responses: {
+        200: jsonResponse({ $ref: "#/components/schemas/IdentityProviderConfig" }),
+        400: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        413: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+  };
+}
+
+function createAdminAccessGrantsPath(): Record<string, unknown> {
+  return {
+    get: {
+      tags: ["Access"],
+      summary: "List AccessGrants.",
+      responses: {
+        200: jsonResponse(jsonSchema.array({ $ref: "#/components/schemas/AccessGrantRecord" })),
+      },
+    },
+    post: {
+      tags: ["Access"],
+      summary: "Create an AccessGrant.",
+      description:
+        "Grants or denies a user or group access to one stored connection. Reader and operator roles derive action coverage from action names; custom grants list exact action ids.",
+      requestBody: jsonRequestBody({ $ref: "#/components/schemas/AccessGrantCreateRequest" }),
+      responses: {
+        200: jsonResponse({ $ref: "#/components/schemas/AccessGrantRecord" }),
+        400: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        413: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+  };
+}
+
+function createAdminAccessGrantPath(): Record<string, unknown> {
+  return {
+    patch: {
+      tags: ["Access"],
+      summary: "Update mutable AccessGrant fields.",
+      parameters: [accessGrantIdParameter],
+      requestBody: jsonRequestBody({ $ref: "#/components/schemas/AccessGrantPatchRequest" }),
+      responses: {
+        200: jsonResponse({ $ref: "#/components/schemas/AccessGrantRecord" }),
+        400: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        404: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        413: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+  };
+}
+
+function createAdminAccessGrantRevokePath(): Record<string, unknown> {
+  return {
+    post: {
+      tags: ["Access"],
+      summary: "Revoke an AccessGrant.",
+      parameters: [accessGrantIdParameter],
+      responses: {
+        200: jsonResponse({ $ref: "#/components/schemas/AccessGrantRecord" }),
+        404: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+  };
+}
+
+function createAdminAccessPreviewPath(): Record<string, unknown> {
+  return {
+    post: {
+      tags: ["Access"],
+      summary: "Preview an AccessGrant decision.",
+      description:
+        "Evaluates the verified request subject, or an explicit preview subject supplied by the local admin console, against a connection and optional action.",
+      requestBody: jsonRequestBody({ $ref: "#/components/schemas/AccessPreviewRequest" }),
+      responses: {
+        200: jsonResponse({ $ref: "#/components/schemas/AccessPreviewResponse" }),
+        400: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        404: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        413: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+  };
+}
+
+function createAdminAccessAuditPath(): Record<string, unknown> {
+  return {
+    get: {
+      tags: ["Access"],
+      summary: "List AccessGrant policy audit records.",
+      parameters: [
+        queryParameter("limit", "Maximum records to return. Defaults to 200.", {
+          type: "integer",
+          minimum: 1,
+          maximum: 1000,
+          default: 200,
+        }),
+      ],
+      responses: {
+        200: jsonResponse(jsonSchema.array({ $ref: "#/components/schemas/AccessAuditRecord" })),
+      },
+    },
+  };
+}
+
+function createAdminIdentitySubjectsPath(): Record<string, unknown> {
+  return {
+    get: {
+      tags: ["Access"],
+      summary: "List verified JWT subjects seen by the runtime.",
+      responses: {
+        200: jsonResponse(jsonSchema.array({ $ref: "#/components/schemas/RuntimeSubject" })),
+      },
+    },
+  };
+}
+
+function createRuntimeAccessGrantsPath(): Record<string, unknown> {
+  return {
+    get: runtimeAccessOperation(
+      "List AccessGrants.",
+      jsonSchema.array({ $ref: "#/components/schemas/AccessGrantRecord" }),
+    ),
+    post: runtimeMutationOperation(
+      "Create an AccessGrant.",
+      { $ref: "#/components/schemas/AccessGrantCreateRequest" },
+      { $ref: "#/components/schemas/AccessGrantRecord" },
+    ),
+  };
+}
+
+function createRuntimeAccessGrantPath(): Record<string, unknown> {
+  return {
+    patch: runtimeMutationOperation(
+      "Update mutable AccessGrant fields.",
+      { $ref: "#/components/schemas/AccessGrantPatchRequest" },
+      { $ref: "#/components/schemas/AccessGrantRecord" },
+      [400, 404, 413],
+      [accessGrantIdParameter],
+    ),
+  };
+}
+
+function createRuntimeAccessGrantRevokePath(): Record<string, unknown> {
+  return {
+    post: runtimeSimpleOperation(
+      "Revoke an AccessGrant.",
+      runtimeSuccessSchema({ $ref: "#/components/schemas/AccessGrantRecord" }),
+      [404],
+      undefined,
+      [accessGrantIdParameter],
+    ),
+  };
+}
+
+function createRuntimeAccessPreviewPath(): Record<string, unknown> {
+  return {
+    post: runtimeMutationOperation(
+      "Preview an AccessGrant decision.",
+      { $ref: "#/components/schemas/AccessPreviewRequest" },
+      { $ref: "#/components/schemas/AccessPreviewResponse" },
+      [400, 404, 413],
+    ),
+  };
+}
+
+function createRuntimeAccessAuditPath(): Record<string, unknown> {
+  return {
+    get: runtimeAccessOperation(
+      "List AccessGrant policy audit records.",
+      jsonSchema.array({ $ref: "#/components/schemas/AccessAuditRecord" }),
+      [
+        queryParameter("limit", "Maximum records to return. Defaults to 200.", {
+          type: "integer",
+          minimum: 1,
+          maximum: 1000,
+          default: 200,
+        }),
+      ],
+    ),
+  };
+}
+
+function createRuntimeIdentitySubjectsPath(): Record<string, unknown> {
+  return {
+    get: runtimeAccessOperation(
+      "List verified JWT subjects seen by the runtime.",
+      jsonSchema.array({ $ref: "#/components/schemas/RuntimeSubject" }),
+    ),
+  };
+}
+
+function runtimeAccessOperation(summary: string, data: JsonSchema, parameters?: unknown[]): unknown {
+  return {
+    tags: ["Access"],
+    summary,
+    parameters,
+    responses: {
+      200: jsonResponse(runtimeSuccessSchema(data)),
+    },
+  };
+}
+
+function runtimeMutationOperation(
+  summary: string,
+  request: JsonSchema,
+  response: JsonSchema,
+  errorStatuses: Array<400 | 404 | 413 | 500> = [400, 413],
+  parameters?: unknown[],
+): unknown {
+  return runtimeSimpleOperation(
+    summary,
+    runtimeSuccessSchema(response),
+    errorStatuses,
+    jsonRequestBody(request),
+    parameters,
+  );
+}
+
+function runtimeSimpleOperation(
+  summary: string,
+  response: JsonSchema,
+  errorStatuses: Array<400 | 404 | 413 | 500>,
+  requestBody?: unknown,
+  parameters?: unknown[],
+): unknown {
+  const responses: Record<string, unknown> = {
+    200: jsonResponse(response),
+  };
+  for (const status of errorStatuses) {
+    responses[String(status)] = jsonResponse(runtimeFailureSchema());
+  }
+  return {
+    tags: ["Access"],
+    summary,
+    parameters,
+    requestBody,
+    responses,
+  };
+}
+
 function policyRulesSchema(): JsonSchema {
   return jsonSchema.object(
     {
@@ -1001,6 +1288,176 @@ function connectionIdArraySchema(description: string): JsonSchema {
     }),
     description,
   };
+}
+
+function identityProviderConfigSchema(): JsonSchema {
+  return jsonSchema.object(
+    {
+      issuer: jsonSchema.nonWhitespaceString("Expected JWT issuer."),
+      audience: jsonSchema.nonWhitespaceString("Expected JWT audience."),
+      jwksUri: jsonSchema.url("JWKS endpoint used to verify JWT signatures."),
+      userPoolRef: jsonSchema.nonWhitespaceString("Stable identifier for the configured identity provider."),
+      subjectClaim: jsonSchema.nonWhitespaceString("JWT claim used as the runtime subject id. Defaults to sub."),
+      groupsClaim: jsonSchema.nonWhitespaceString("JWT claim containing group membership. Defaults to groups."),
+      tenantClaim: jsonSchema.string({ description: "Optional JWT claim containing tenant identity." }),
+      tenant: jsonSchema.string({ description: "Optional required tenant value." }),
+    },
+    {
+      required: ["issuer", "audience", "jwksUri", "userPoolRef", "subjectClaim", "groupsClaim"],
+      description: "JWT identity provider configuration for runtime subject authentication.",
+    },
+  );
+}
+
+function runtimeSubjectSchema(): JsonSchema {
+  return jsonSchema.object(
+    {
+      issuer: jsonSchema.string({ description: "Verified JWT issuer." }),
+      audience: jsonSchema.string({ description: "Verified JWT audience." }),
+      userPoolRef: jsonSchema.string({ description: "Configured identity provider reference." }),
+      tenant: jsonSchema.string({ description: "Verified tenant value, when configured." }),
+      sub: jsonSchema.string({ description: "Verified runtime subject id." }),
+      groups: jsonSchema.array(jsonSchema.string(), { description: "Verified runtime subject groups." }),
+    },
+    {
+      required: ["issuer", "audience", "userPoolRef", "sub", "groups"],
+      description: "Verified end-user or service subject derived from a runtime JWT.",
+    },
+  );
+}
+
+function accessGrantRecordSchema(): JsonSchema {
+  return jsonSchema.object(
+    {
+      id: jsonSchema.string({ description: "AccessGrant identifier." }),
+      subjectType: accessSubjectTypeSchema(),
+      subject: jsonSchema.string({ description: "Subject id or group id this grant applies to." }),
+      connectionId: jsonSchema.string({ description: "Stable connection id granted or denied." }),
+      role: accessRoleSchema(),
+      effect: accessEffectSchema(),
+      customActions: jsonSchema.array(jsonSchema.string(), {
+        description: "Exact action ids allowed when role is custom.",
+      }),
+      reason: jsonSchema.string({ description: "Operator-provided reason for the grant." }),
+      createdAt: jsonSchema.dateTime("Creation timestamp."),
+      updatedAt: jsonSchema.dateTime("Last update timestamp."),
+      revokedAt: jsonSchema.dateTime("Revocation timestamp, when revoked."),
+    },
+    {
+      required: [
+        "id",
+        "subjectType",
+        "subject",
+        "connectionId",
+        "role",
+        "effect",
+        "customActions",
+        "createdAt",
+        "updatedAt",
+      ],
+      description: "Connection and action access rule for a JWT subject or group.",
+    },
+  );
+}
+
+function accessGrantCreateRequestSchema(): JsonSchema {
+  return jsonSchema.object(
+    {
+      subjectType: accessSubjectTypeSchema(),
+      subject: jsonSchema.nonWhitespaceString("Subject id or group id this grant applies to."),
+      connectionId: jsonSchema.nonWhitespaceString("Stable connection id to grant or deny."),
+      role: accessRoleSchema(),
+      effect: accessEffectSchema(),
+      customActions: jsonSchema.array(jsonSchema.string(), {
+        description: "Exact action ids allowed when role is custom.",
+      }),
+      reason: jsonSchema.string({ description: "Optional operator-provided reason for the grant." }),
+    },
+    {
+      required: ["subjectType", "subject", "connectionId", "role"],
+      description: "AccessGrant creation request.",
+    },
+  );
+}
+
+function accessGrantPatchRequestSchema(): JsonSchema {
+  return jsonSchema.object(
+    {
+      role: accessRoleSchema(),
+      effect: accessEffectSchema(),
+      customActions: jsonSchema.array(jsonSchema.string(), {
+        description: "Exact action ids allowed when role is custom.",
+      }),
+      reason: jsonSchema.string({ description: "Updated operator-provided reason." }),
+    },
+    {
+      description: "AccessGrant mutable field patch.",
+    },
+  );
+}
+
+function accessPreviewRequestSchema(): JsonSchema {
+  return jsonSchema.object(
+    {
+      subject: { $ref: "#/components/schemas/RuntimeSubject" },
+      connectionId: jsonSchema.string({ description: "Stable connection id to evaluate." }),
+      actionId: jsonSchema.string({ description: "Optional action id to evaluate within the connection grant." }),
+    },
+    {
+      required: ["connectionId"],
+      description:
+        "Access preview request. subject may be omitted when the request has a verified JWT runtime subject.",
+    },
+  );
+}
+
+function accessPreviewResponseSchema(): JsonSchema {
+  return jsonSchema.object(
+    {
+      subject: { $ref: "#/components/schemas/RuntimeSubject" },
+      connectionId: jsonSchema.string({ description: "Evaluated connection id." }),
+      actionId: jsonSchema.string({ description: "Evaluated action id, when supplied." }),
+      decision: { $ref: "#/components/schemas/PolicyDecision" },
+      policyVersion: jsonSchema.number({ description: "AccessGrant policy version used for the decision." }),
+    },
+    {
+      required: ["subject", "connectionId", "decision", "policyVersion"],
+      description: "AccessGrant preview decision.",
+    },
+  );
+}
+
+function accessAuditRecordSchema(): JsonSchema {
+  return jsonSchema.object(
+    {
+      id: jsonSchema.string({ description: "Audit record identifier." }),
+      subject: { $ref: "#/components/schemas/RuntimeSubject" },
+      connectionId: jsonSchema.string({ description: "Evaluated connection id, when present." }),
+      actionId: jsonSchema.string({ description: "Evaluated action id, when present." }),
+      decision: { $ref: "#/components/schemas/PolicyDecision" },
+      createdAt: jsonSchema.dateTime("Audit creation timestamp."),
+    },
+    {
+      required: ["id", "subject", "decision", "createdAt"],
+      description: "Stored access policy decision audit record. Raw bearer tokens are not persisted.",
+    },
+  );
+}
+
+function accessSubjectTypeSchema(): JsonSchema {
+  return { type: "string", enum: ["user", "group"] };
+}
+
+function accessRoleSchema(): JsonSchema {
+  return {
+    type: "string",
+    enum: ["reader", "operator", "custom"],
+    description: "reader permits read-like actions, operator also permits write-like actions, custom uses exact ids.",
+  };
+}
+
+function accessEffectSchema(): JsonSchema {
+  return { type: "string", enum: ["allow", "deny"], description: "Explicit deny takes precedence over allow." };
 }
 
 function createMcpPath(): unknown {
@@ -1413,6 +1870,17 @@ function queryParameter(name: string, description: string, schema: JsonSchema = 
     required: false,
     schema,
     description,
+  };
+}
+
+function jsonRequestBody(schema: JsonSchema): Record<string, unknown> {
+  return {
+    required: true,
+    content: {
+      "application/json": {
+        schema,
+      },
+    },
   };
 }
 

@@ -5,6 +5,7 @@ import type { ActionSearchIndexProvider, ActionSearchResult } from "../core/acti
 import type { MarketplaceConfigInput, MarketplaceService } from "../marketplace/marketplace-service.ts";
 import type { OAuthClientConfigInput } from "../oauth/oauth-client-config-service.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
+import type { AccessGrantInput, IdentityProviderConfig } from "./access/access-grants.ts";
 import type { LocalAuthOptions } from "./api/auth.ts";
 import type { RuntimeActionHttpResult } from "./api/runtime-api.ts";
 import type { ITransitFileService, TransitFileUpload } from "./files/transit-file-store.ts";
@@ -27,6 +28,7 @@ import { MarketplaceError } from "../marketplace/marketplace-service.ts";
 import { createMcpServer, listMcpToolSummaries } from "../mcp.ts";
 import { OAuthClientConfigError, OAuthClientConfigService } from "../oauth/oauth-client-config-service.ts";
 import { OAuthFlowError, OAuthFlowService } from "../oauth/oauth-flow-service.ts";
+import { AccessGrantService } from "./access/access-grants.ts";
 import {
   ActionInputDepthError,
   createIdempotencyExpiry,
@@ -36,7 +38,13 @@ import {
 } from "./actions/action-idempotency.ts";
 import { ActionRunner } from "./actions/action-runner.ts";
 import { renderActionMarkdown } from "./api/action-markdown.ts";
-import { clearLocalAuthCookie, createLocalAuthMiddleware, readLocalAuthSession, readRuntimeGrant } from "./api/auth.ts";
+import {
+  clearLocalAuthCookie,
+  createLocalAuthMiddleware,
+  readLocalAuthSession,
+  readRuntimeGrant,
+  readRuntimeSubject,
+} from "./api/auth.ts";
 import { getResponseCachePolicy } from "./api/cache-policy.ts";
 import { HttpRequestError, internalError, jsonError, notFound, readJsonBody } from "./api/http-utils.ts";
 import { renderOAuthCompletionPage } from "./api/oauth-completion-page.ts";
@@ -79,6 +87,7 @@ export interface IConnectServerOptions {
   actionPolicy?: ActionPolicyService;
   runtimePolicyStore: IRuntimePolicyStore;
   actionSearch?: ActionSearchIndexProvider;
+  accessGrants?: AccessGrantService;
   registerStaticRoutes?: (app: Hono) => void;
   logger?: Logger;
   compressApiResponses?: boolean;
@@ -153,6 +162,13 @@ export class ConnectServer {
     app.get("/v1/actions/search", (context) => this.searchRuntimeActions(context));
     app.get("/v1/actions/:actionId", (context) => this.getRuntimeAction(context, context.req.param("actionId")));
     app.post("/v1/actions/:actionId", (context) => this.createRuntimeActionRun(context, context.req.param("actionId")));
+    app.get("/v1/access-grants", (context) => this.listAccessGrants(context));
+    app.post("/v1/access-grants", (context) => this.createAccessGrant(context));
+    app.patch("/v1/access-grants/:id", (context) => this.updateAccessGrant(context, context.req.param("id")));
+    app.post("/v1/access-grants/:id/revoke", (context) => this.revokeAccessGrant(context, context.req.param("id")));
+    app.post("/v1/access:preview", (context) => this.previewAccess(context));
+    app.get("/v1/access/audit", (context) => this.listAccessAudit(context));
+    app.get("/v1/identity/subjects", (context) => this.listIdentitySubjects(context));
     app.get("/v1/apps", (context) => this.listRuntimeApps(context));
     app.get("/v1/apps/authenticated", (context) => this.listAuthenticatedRuntimeApps(context));
     app.get("/v1/apps/services/:service", (context) =>
@@ -218,6 +234,15 @@ export class ConnectServer {
     app.delete("/api/runtime-tokens/:id", (context) => this.revokeRuntimeToken(context, context.req.param("id")));
     app.get("/api/runtime-policy", (context) => this.getRuntimePolicy(context));
     app.put("/api/runtime-policy", (context) => this.updateRuntimePolicy(context));
+    app.get("/api/identity-provider", (context) => this.getIdentityProviderConfig(context));
+    app.put("/api/identity-provider", (context) => this.updateIdentityProviderConfig(context));
+    app.get("/api/access-grants", (context) => this.listAccessGrants(context));
+    app.post("/api/access-grants", (context) => this.createAccessGrant(context));
+    app.patch("/api/access-grants/:id", (context) => this.updateAccessGrant(context, context.req.param("id")));
+    app.post("/api/access-grants/:id/revoke", (context) => this.revokeAccessGrant(context, context.req.param("id")));
+    app.post("/api/access/preview", (context) => this.previewAccess(context));
+    app.get("/api/access/audit", (context) => this.listAccessAudit(context));
+    app.get("/api/identity/subjects", (context) => this.listIdentitySubjects(context));
     app.get("/api/oauth/configs", (context) => this.listOAuthConfigs(context));
     app.put("/api/oauth/configs/:service", (context) => this.upsertOAuthConfig(context, context.req.param("service")));
     app.delete("/api/oauth/configs/:service", (context) =>
@@ -388,10 +413,12 @@ export class ConnectServer {
     const index = await this.actionSearch.get();
     return context.json(
       await this.serializeSearchResults(
+        context,
         searchActions(index, query.q, {
           service: query.service,
           limit: query.limit,
         }),
+        false,
       ),
     );
   }
@@ -455,14 +482,18 @@ export class ConnectServer {
     return writeRuntimeSuccess(context, providers.map(serializeRuntimeProvider));
   }
 
-  private listRuntimeActions(context: Context): Response {
+  private async listRuntimeActions(context: Context): Promise<Response> {
     const service = optionalString(context.req.query("service"));
     if (!service) {
-      const services = [...new Set(this.options.catalog.actions.map((action) => action.service))];
+      const actions = await this.allowedRuntimeActions(context, this.options.catalog.actions);
+      const services = [...new Set(actions.map((action) => action.service))];
       return writeRuntimeSuccess(context, services.map(serializeRuntimeActionService));
     }
 
-    const actions = this.options.catalog.actions.filter((action) => action.service === service);
+    const actions = await this.allowedRuntimeActions(
+      context,
+      this.options.catalog.actions.filter((action) => action.service === service),
+    );
     return writeRuntimeSuccess(context, actions.map(serializeRuntimeAction));
   }
 
@@ -481,16 +512,33 @@ export class ConnectServer {
       service: query.service,
       limit: query.limit,
     });
-    return writeRuntimeSuccess(context, await this.serializeSearchResults(results));
+    return writeRuntimeSuccess(context, await this.serializeSearchResults(context, results));
   }
 
-  private async serializeSearchResults(results: ActionSearchResult[]): Promise<RuntimeActionSearchResult[]> {
+  private async serializeSearchResults(
+    context: Context,
+    results: ActionSearchResult[],
+    filterByAccess = true,
+  ): Promise<RuntimeActionSearchResult[]> {
     const authenticated = new Set(
       await this.options.connections.listAuthenticatedServices([...new Set(results.map((result) => result.service))]),
     );
+    const allowedActions = filterByAccess
+      ? new Set(
+          (
+            await this.allowedRuntimeActions(
+              context,
+              results.flatMap((result) => {
+                const action = this.options.catalog.actionsById.get(result.id);
+                return action ? [action] : [];
+              }),
+            )
+          ).map((action) => action.id),
+        )
+      : undefined;
     return results.flatMap((result) => {
       const action = this.options.catalog.actionsById.get(result.id);
-      if (!action) {
+      if (!action || (allowedActions && !allowedActions.has(action.id))) {
         return [];
       }
       return [serializeActionSearchResult(result, action, authenticated.has(action.service))];
@@ -527,7 +575,16 @@ export class ConnectServer {
         meta: { actionId },
       });
     }
-    if (!policy.evaluate(action).allowed) {
+    const selectedConnection = await this.resolveRuntimeConnectionForPolicy(
+      context,
+      action.service,
+      connectionName,
+      actionId,
+    );
+    if (selectedConnection instanceof Response) {
+      return selectedConnection;
+    }
+    if (!policy.evaluateActionForConnection(action, selectedConnection?.id).allowed) {
       return writeRuntimeActionHttpResult(
         context,
         await this.executeRuntimeAction(actionId, input, connectionName, policy, runtimeGrant, context.req.raw.signal),
@@ -795,6 +852,28 @@ export class ConnectServer {
     );
   }
 
+  private async allowedRuntimeActions(
+    context: Context,
+    actions: RuntimeActionDefinition[],
+  ): Promise<RuntimeActionDefinition[]> {
+    if (!readRuntimeSubject(context)) {
+      return actions;
+    }
+    const policy = await this.getPolicySnapshot(context);
+    const connectionsByService = new Map<string, ConnectionSummary[]>();
+    for (const connection of this.filterAllowedConnections(policy, await this.options.connections.listConnections())) {
+      connectionsByService.set(connection.service, [
+        ...(connectionsByService.get(connection.service) ?? []),
+        connection,
+      ]);
+    }
+    return actions.filter((action) =>
+      (connectionsByService.get(action.service) ?? []).some(
+        (connection) => policy.evaluateActionForConnection(action, connection.id).allowed,
+      ),
+    );
+  }
+
   private async handleMcp(context: Context): Promise<Response> {
     const handler = createMcpHandler(
       () =>
@@ -1009,6 +1088,99 @@ export class ConnectServer {
     return context.json({ id, revoked: true });
   }
 
+  private async getIdentityProviderConfig(context: Context): Promise<Response> {
+    const config = await this.options.accessGrants?.getIdentityProviderConfig();
+    return context.json(config ?? null);
+  }
+
+  private async updateIdentityProviderConfig(context: Context): Promise<Response> {
+    if (!this.options.accessGrants)
+      return jsonError(context, 500, "access_grants_unavailable", "Access grants are unavailable.");
+    const body = await readJsonBody(context, policyRequestMaxBytes);
+    try {
+      return context.json(
+        await this.options.accessGrants.upsertIdentityProviderConfig(readIdentityProviderConfig(body)),
+      );
+    } catch (error) {
+      return jsonError(
+        context,
+        400,
+        "invalid_input",
+        error instanceof Error ? error.message : "Invalid identity provider config.",
+      );
+    }
+  }
+
+  private async listAccessGrants(context: Context): Promise<Response> {
+    if (!this.options.accessGrants) return this.writeAccessUnavailable(context);
+    const grants = await this.options.accessGrants.listGrants();
+    return context.req.path.startsWith("/v1/") ? writeRuntimeSuccess(context, grants) : context.json(grants);
+  }
+
+  private async createAccessGrant(context: Context): Promise<Response> {
+    if (!this.options.accessGrants) return this.writeAccessUnavailable(context);
+    const body = await readJsonBody(context, policyRequestMaxBytes);
+    try {
+      const grant = await this.options.accessGrants.createGrant(readAccessGrantInput(body));
+      return context.req.path.startsWith("/v1/") ? writeRuntimeSuccess(context, grant) : context.json(grant);
+    } catch (error) {
+      return this.writeAccessInputError(context, error);
+    }
+  }
+
+  private async updateAccessGrant(context: Context, id: string): Promise<Response> {
+    if (!this.options.accessGrants) return this.writeAccessUnavailable(context);
+    const body = await readJsonBody(context, policyRequestMaxBytes);
+    try {
+      const grant = await this.options.accessGrants.updateGrant(id, readPartialAccessGrantInput(body));
+      if (!grant) return this.writeAccessNotFound(context, id);
+      return context.req.path.startsWith("/v1/") ? writeRuntimeSuccess(context, grant) : context.json(grant);
+    } catch (error) {
+      return this.writeAccessInputError(context, error);
+    }
+  }
+
+  private async revokeAccessGrant(context: Context, id: string): Promise<Response> {
+    if (!this.options.accessGrants) return this.writeAccessUnavailable(context);
+    const grant = await this.options.accessGrants.revokeGrant(id);
+    if (!grant) return this.writeAccessNotFound(context, id);
+    return context.req.path.startsWith("/v1/") ? writeRuntimeSuccess(context, grant) : context.json(grant);
+  }
+
+  private async previewAccess(context: Context): Promise<Response> {
+    if (!this.options.accessGrants) return this.writeAccessUnavailable(context);
+    const body = await readJsonBody(context, policyRequestMaxBytes);
+    const subject = readRuntimeSubject(context) ?? readPreviewSubject(body);
+    if (!subject) {
+      return this.writeAccessInputError(context, new Error("A verified JWT subject or preview subject is required."));
+    }
+    const connectionId = optionalString(body.connectionId);
+    const actionId = optionalString(body.actionId);
+    const snapshot = await this.options.accessGrants.createSnapshot(subject);
+    const action = actionId ? this.options.catalog.actionsById.get(actionId) : undefined;
+    if (actionId && !action) {
+      return context.req.path.startsWith("/v1/")
+        ? writeRuntimeFailure(context, unknownActionFailure(actionId))
+        : jsonError(context, 404, "unknown_action", `Unknown action: ${actionId}`);
+    }
+    const decision = action ? snapshot.evaluateAction(action, connectionId) : snapshot.evaluateConnection(connectionId);
+    const payload = { subject, connectionId, actionId, decision, policyVersion: snapshot.version };
+    return context.req.path.startsWith("/v1/") ? writeRuntimeSuccess(context, payload) : context.json(payload);
+  }
+
+  private async listAccessAudit(context: Context): Promise<Response> {
+    if (!this.options.accessGrants) return this.writeAccessUnavailable(context);
+    const limit = Number(context.req.query("limit") ?? 200);
+    const audit = await this.options.accessGrants.listAudit({ limit: Number.isFinite(limit) ? limit : 200 });
+    return context.req.path.startsWith("/v1/") ? writeRuntimeSuccess(context, audit) : context.json(audit);
+  }
+
+  private async listIdentitySubjects(context: Context): Promise<Response> {
+    if (!this.options.accessGrants) return this.writeAccessUnavailable(context);
+    const subjects = await this.options.accessGrants.listSubjects();
+    return context.req.path.startsWith("/v1/") ? writeRuntimeSuccess(context, subjects) : context.json(subjects);
+  }
+
   private async getRuntimePolicy(context: Context): Promise<Response> {
     return context.json((await this.getPolicySnapshot(context)).state);
   }
@@ -1187,10 +1359,14 @@ export class ConnectServer {
   private async loadPolicySnapshot(context: Context): Promise<ActionPolicySnapshot> {
     try {
       const record = await this.options.runtimePolicyStore.get();
+      const subject = readRuntimeSubject(context);
+      const access =
+        subject && this.options.accessGrants ? await this.options.accessGrants.createSnapshot(subject) : undefined;
       return this.actionPolicy.createSnapshot(
         record?.rules ?? emptyPolicyRules(),
         readRuntimeGrant(context),
         record?.updatedAt,
+        access,
       );
     } catch {
       this.options.logger?.error(
@@ -1202,6 +1378,55 @@ export class ConnectServer {
       );
       throw new Error("Runtime policy is unavailable.");
     }
+  }
+
+  private async resolveRuntimeConnectionForPolicy(
+    context: Context,
+    service: string,
+    connectionName: string | undefined,
+    actionId: string,
+  ): Promise<ConnectionSummary | undefined | Response> {
+    if (!readRuntimeSubject(context)) return undefined;
+    try {
+      return await this.options.connections.getConnectionSummary(service, connectionName);
+    } catch (error) {
+      if (error instanceof ConnectionError) {
+        return writeRuntimeFailure(context, {
+          status: mapConnectionErrorStatus(error),
+          errorCode: error.code,
+          message: error.message,
+          meta: { actionId },
+        });
+      }
+      throw error;
+    }
+  }
+
+  private writeAccessUnavailable(context: Context): Response {
+    return context.req.path.startsWith("/v1/")
+      ? writeRuntimeFailure(context, {
+          status: 501,
+          errorCode: "access_grants_unavailable",
+          message: "Access grants are unavailable.",
+        })
+      : jsonError(context, 500, "access_grants_unavailable", "Access grants are unavailable.");
+  }
+
+  private writeAccessNotFound(context: Context, id: string): Response {
+    return context.req.path.startsWith("/v1/")
+      ? writeRuntimeFailure(context, {
+          status: 404,
+          errorCode: "access_grant_not_found",
+          message: `Access grant not found: ${id}.`,
+        })
+      : jsonError(context, 404, "access_grant_not_found", `Access grant not found: ${id}.`);
+  }
+
+  private writeAccessInputError(context: Context, error: unknown): Response {
+    const message = error instanceof Error ? error.message : "Invalid access grant input.";
+    return context.req.path.startsWith("/v1/")
+      ? writeRuntimeFailure(context, { status: 400, errorCode: "invalid_input", message })
+      : jsonError(context, 400, "invalid_input", message);
   }
 }
 
@@ -1218,6 +1443,99 @@ function readOAuthClientConfigInput(body: Record<string, unknown>): OAuthClientC
     extra: optionalRecord(body.extra),
     secretExtra: optionalRecord(body.secretExtra),
   };
+}
+
+function readIdentityProviderConfig(body: Record<string, unknown>): IdentityProviderConfig {
+  return {
+    issuer: requiredString(body.issuer, "issuer", (message) => new HttpRequestError("invalid_input", `${message}.`)),
+    audience: requiredString(
+      body.audience,
+      "audience",
+      (message) => new HttpRequestError("invalid_input", `${message}.`),
+    ),
+    jwksUri: requiredString(
+      body.jwksUri ?? body.jwks_uri,
+      "jwksUri",
+      (message) => new HttpRequestError("invalid_input", `${message}.`),
+    ),
+    userPoolRef: requiredString(
+      body.userPoolRef ?? body.user_pool_ref,
+      "userPoolRef",
+      (message) => new HttpRequestError("invalid_input", `${message}.`),
+    ),
+    subjectClaim: optionalString(body.subjectClaim ?? body.subject_claim) ?? "sub",
+    groupsClaim:
+      optionalString(body.groupsClaim ?? body.groupClaim ?? body.groups_claim ?? body.group_claim) ?? "groups",
+    tenantClaim: optionalString(body.tenantClaim ?? body.tenant_claim),
+    tenant: optionalString(body.tenant),
+  };
+}
+
+function readAccessGrantInput(body: Record<string, unknown>): AccessGrantInput {
+  return {
+    subjectType: readAccessSubjectType(body.subjectType ?? body.subject_type),
+    subject: requiredString(body.subject, "subject", (message) => new HttpRequestError("invalid_input", `${message}.`)),
+    connectionId: requiredString(
+      body.connectionId ?? body.connection_id,
+      "connectionId",
+      (message) => new HttpRequestError("invalid_input", `${message}.`),
+    ),
+    role: readAccessRole(body.role),
+    effect: readAccessEffect(body.effect),
+    customActions: readOptionalStringList(body.customActions ?? body.custom_actions),
+    reason: optionalString(body.reason),
+  };
+}
+
+function readPartialAccessGrantInput(body: Record<string, unknown>): Partial<AccessGrantInput> {
+  return {
+    ...(body.role === undefined ? {} : { role: readAccessRole(body.role) }),
+    ...(body.effect === undefined ? {} : { effect: readAccessEffect(body.effect) }),
+    ...(body.customActions === undefined && body.custom_actions === undefined
+      ? {}
+      : { customActions: readOptionalStringList(body.customActions ?? body.custom_actions) }),
+    ...(body.reason === undefined ? {} : { reason: optionalString(body.reason) ?? "" }),
+  };
+}
+
+function readPreviewSubject(body: Record<string, unknown>): ReturnType<typeof readRuntimeSubject> {
+  const value = body.subject;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const sub = optionalString(record.sub);
+  const issuer = optionalString(record.issuer);
+  const audience = optionalString(record.audience);
+  const userPoolRef = optionalString(record.userPoolRef ?? record.user_pool_ref);
+  if (!sub || !issuer || !audience || !userPoolRef) return undefined;
+  return {
+    sub,
+    issuer,
+    audience,
+    userPoolRef,
+    tenant: optionalString(record.tenant),
+    groups: readOptionalStringList(record.groups),
+  };
+}
+
+function readAccessSubjectType(value: unknown): AccessGrantInput["subjectType"] {
+  if (value === "user" || value === "group") return value;
+  throw new HttpRequestError("invalid_input", "subjectType must be user or group.");
+}
+
+function readAccessRole(value: unknown): AccessGrantInput["role"] {
+  if (value === "reader" || value === "operator" || value === "custom") return value;
+  throw new HttpRequestError("invalid_input", "role must be reader, operator, or custom.");
+}
+
+function readAccessEffect(value: unknown): AccessGrantInput["effect"] {
+  if (value === undefined) return undefined;
+  if (value === "allow" || value === "deny") return value;
+  throw new HttpRequestError("invalid_input", "effect must be allow or deny.");
+}
+
+function readOptionalStringList(value: unknown): string[] {
+  if (value === undefined) return [];
+  return requiredStringArray(value, "customActions", (message) => new HttpRequestError("invalid_input", `${message}.`));
 }
 
 function readRequestedScopes(body: Record<string, unknown>): string[] | undefined {

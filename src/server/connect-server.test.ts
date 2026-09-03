@@ -12,6 +12,15 @@ import type {
 import type { IOAuthClientConfigStore, OAuthClientConfig } from "../oauth/oauth-client-config-service.ts";
 import type { IOAuthStateStore, OAuthAuthorizationState } from "../oauth/oauth-flow-service.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
+import type {
+  AccessAuditListInput,
+  AccessAuditRecord,
+  AccessGrantRecord,
+  AccessPolicyVersion,
+  IAccessGrantStore,
+  IdentityProviderConfig,
+  RuntimeSubject,
+} from "./access/access-grants.ts";
 import type { RuntimeActionHttpResult } from "./api/runtime-api.ts";
 import type { RuntimeJwtVerifier } from "./api/runtime-jwt.ts";
 import type { TransitFileUpload } from "./files/transit-file-store.ts";
@@ -38,6 +47,7 @@ import { ActionPolicyService as LocalActionPolicyService } from "../core/action-
 import { buildActionSearchIndex } from "../core/action-search.ts";
 import { OAuthClientConfigService } from "../oauth/oauth-client-config-service.ts";
 import { OAuthFlowService } from "../oauth/oauth-flow-service.ts";
+import { AccessGrantService } from "./access/access-grants.ts";
 import { actionInputMaxDepth, hashActionRequest, hashIdempotencyKey } from "./actions/action-idempotency.ts";
 import { ActionRunner } from "./actions/action-runner.ts";
 import { registerStaticRoutes } from "./api/static-routes.ts";
@@ -660,6 +670,152 @@ describe("ConnectServer", () => {
         })
       ).status,
     ).toBe(401);
+  });
+
+  it("does not require runtime auth only because an access-grant store exists", async () => {
+    const app = createTestServer([apiKeyProvider]).createApp();
+
+    expect((await app.request("/v1/actions")).status).toBe(200);
+  });
+
+  it("enforces JWT subject access grants independently from runtime token grants", async () => {
+    const accessGrantStore = new MemoryAccessGrantStore();
+    const subject: RuntimeSubject = {
+      issuer: "https://issuer.example.com",
+      audience: "runtime",
+      userPoolRef: "pool",
+      tenant: "tenant-a",
+      sub: "user-a",
+      groups: ["operators"],
+    };
+    const app = createTestServer([{ ...apiKeyProvider, actions: [echoAction] }], {
+      providerLoader: new EchoProviderLoader(),
+      accessGrantStore,
+      auth: {
+        verifyRuntimeJwt: async (token) => (token === "jwt-user-a" ? subject : undefined),
+      },
+    }).createApp();
+    const connection = await app.request("/api/connections/example", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authType: "api_key", values: { apiKey: "key" } }),
+    });
+    const connectionBody = (await connection.json()) as { id: string };
+
+    const denied = await app.request("/v1/actions/example.echo", {
+      method: "POST",
+      headers: { authorization: "Bearer jwt-user-a", "content-type": "application/json" },
+      body: JSON.stringify({ input: { ok: true } }),
+    });
+    expect(denied.status).toBe(403);
+
+    const grant = await app.request("/api/access-grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        subjectType: "group",
+        subject: "operators",
+        connectionId: connectionBody.id,
+        role: "custom",
+        customActions: ["example.echo"],
+      }),
+    });
+    expect(grant.status).toBe(200);
+    const grantBody = (await grant.json()) as { id: string };
+
+    const allowed = await app.request("/v1/actions/example.echo", {
+      method: "POST",
+      headers: { authorization: "Bearer jwt-user-a", "content-type": "application/json" },
+      body: JSON.stringify({ input: { ok: true } }),
+    });
+    expect(allowed.status).toBe(200);
+
+    const revoke = await app.request(`/api/access-grants/${grantBody.id}/revoke`, { method: "POST" });
+    expect(revoke.status).toBe(200);
+    const deniedAfterRevoke = await app.request("/v1/actions/example.echo", {
+      method: "POST",
+      headers: { authorization: "Bearer jwt-user-a", "content-type": "application/json" },
+      body: JSON.stringify({ input: { ok: true } }),
+    });
+    expect(deniedAfterRevoke.status).toBe(403);
+
+    const tokenService = new RuntimeTokenService(new MemoryRuntimeTokenStore());
+    const tokenServer = createTestServer([{ ...apiKeyProvider, actions: [echoAction] }], {
+      providerLoader: new EchoProviderLoader(),
+      runtimeTokens: tokenService,
+    }).createApp();
+    await tokenServer.request("/api/connections/example", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authType: "api_key", values: { apiKey: "key" } }),
+    });
+    const token = await tokenServer.request("/api/runtime-tokens", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "m2m",
+        allowedActions: ["example.echo"],
+        blockedActions: [],
+        allowedProxies: [],
+        allowedConnections: [],
+      }),
+    });
+    const tokenBody = (await token.json()) as { token: string };
+    expect(
+      (
+        await tokenServer.request("/v1/actions/example.echo", {
+          method: "POST",
+          headers: { authorization: `Bearer ${tokenBody.token}`, "content-type": "application/json" },
+          body: JSON.stringify({ input: { ok: true } }),
+        })
+      ).status,
+    ).toBe(200);
+  });
+
+  it("applies explicit AccessGrant deny before allow and exposes preview/audit", async () => {
+    const subject: RuntimeSubject = {
+      issuer: "https://issuer.example.com",
+      audience: "runtime",
+      userPoolRef: "pool",
+      sub: "user-b",
+      groups: ["readers"],
+    };
+    const app = createTestServer([{ ...apiKeyProvider, actions: [echoAction] }], {
+      providerLoader: new EchoProviderLoader(),
+      auth: { verifyRuntimeJwt: async () => subject },
+    }).createApp();
+    const connection = await app.request("/api/connections/example", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authType: "api_key", values: { apiKey: "key" } }),
+    });
+    const { id: connectionId } = (await connection.json()) as { id: string };
+    await app.request("/api/access-grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subjectType: "group", subject: "readers", connectionId, role: "operator" }),
+    });
+    await app.request("/api/access-grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subjectType: "user", subject: "user-b", connectionId, role: "operator", effect: "deny" }),
+    });
+
+    const preview = await app.request("/v1/access:preview", {
+      method: "POST",
+      headers: { authorization: "Bearer jwt", "content-type": "application/json" },
+      body: JSON.stringify({ connectionId, actionId: "example.echo" }),
+    });
+    expect(preview.status).toBe(200);
+    const previewBody = (await preview.json()) as {
+      data: { decision: { allowed: boolean; checks: Array<{ outcome: string }> } };
+    };
+    expect(previewBody.data.decision.allowed).toBe(false);
+    expect(previewBody.data.decision.checks[0]?.outcome).toBe("block_match");
+
+    const audit = await app.request("/v1/access/audit", { headers: { authorization: "Bearer jwt" } });
+    const auditBody = (await audit.json()) as { data: AccessAuditRecord[] };
+    expect(auditBody.data.some((item) => item.subject.sub === "user-b" && item.actionId === "example.echo")).toBe(true);
   });
 
   it("requires authentication when JWT is the only configured runtime credential", async () => {
@@ -3551,6 +3707,7 @@ interface CreateTestServerOptions {
   idempotency?: IIdempotencyStore;
   runtimeTokens?: RuntimeTokenService;
   runtimePolicyStore?: IRuntimePolicyStore;
+  accessGrantStore?: IAccessGrantStore;
   runs?: MemoryRunLogStore;
   staticRoot?: string | false;
   transitFiles?: TransitFileService;
@@ -3620,6 +3777,7 @@ function createTestServer(providers: ProviderDefinition[], options: CreateTestSe
     uploadTransitFile: options.uploadTransitFile,
     runtimeTokens,
     runtimePolicyStore: options.runtimePolicyStore ?? new MemoryRuntimePolicyStore(),
+    accessGrants: new AccessGrantService(options.accessGrantStore ?? new MemoryAccessGrantStore()),
     registerStaticRoutes: staticRoot ? (app) => registerStaticRoutes(app, staticRoot) : undefined,
     auth: {
       ...options.auth,
@@ -3949,6 +4107,84 @@ class MemoryRuntimePolicyStore implements IRuntimePolicyStore {
     this.writes += 1;
     this.record = record;
   }
+}
+
+class MemoryAccessGrantStore implements IAccessGrantStore {
+  private identityConfig?: IdentityProviderConfig;
+  private grants = new Map<string, AccessGrantRecord>();
+  private subjects = new Map<string, RuntimeSubject>();
+  private audit: AccessAuditRecord[] = [];
+  private version = 1;
+  private updatedAt = new Date(0).toISOString();
+
+  async getIdentityProviderConfig(): Promise<IdentityProviderConfig | undefined> {
+    return this.identityConfig;
+  }
+
+  async setIdentityProviderConfig(config: IdentityProviderConfig): Promise<void> {
+    this.identityConfig = config;
+  }
+
+  async listGrants(): Promise<AccessGrantRecord[]> {
+    return [...this.grants.values()].sort((left, right) =>
+      right.createdAt === left.createdAt
+        ? right.id.localeCompare(left.id)
+        : right.createdAt.localeCompare(left.createdAt),
+    );
+  }
+
+  async addGrant(grant: AccessGrantRecord): Promise<void> {
+    this.grants.set(grant.id, grant);
+  }
+
+  async updateGrant(
+    id: string,
+    patch: Partial<Pick<AccessGrantRecord, "role" | "effect" | "customActions" | "reason" | "updatedAt">>,
+  ): Promise<AccessGrantRecord | undefined> {
+    const grant = this.grants.get(id);
+    if (!grant) return undefined;
+    const updated = { ...grant, ...patch };
+    this.grants.set(id, updated);
+    return updated;
+  }
+
+  async revokeGrant(id: string, revokedAt: string): Promise<AccessGrantRecord | undefined> {
+    const grant = this.grants.get(id);
+    if (!grant) return undefined;
+    const updated = { ...grant, revokedAt, updatedAt: revokedAt };
+    this.grants.set(id, updated);
+    return updated;
+  }
+
+  async getPolicyVersion(): Promise<AccessPolicyVersion> {
+    return { version: this.version, updatedAt: this.updatedAt };
+  }
+
+  async bumpPolicyVersion(updatedAt: string): Promise<AccessPolicyVersion> {
+    this.version += 1;
+    this.updatedAt = updatedAt;
+    return this.getPolicyVersion();
+  }
+
+  async recordSubject(subject: RuntimeSubject): Promise<void> {
+    this.subjects.set(memorySubjectKey(subject), subject);
+  }
+
+  async listSubjects(): Promise<RuntimeSubject[]> {
+    return [...this.subjects.values()];
+  }
+
+  async addAudit(record: AccessAuditRecord): Promise<void> {
+    this.audit.unshift(record);
+  }
+
+  async listAudit(input: AccessAuditListInput = {}): Promise<AccessAuditRecord[]> {
+    return this.audit.slice(0, input.limit ?? 200);
+  }
+}
+
+function memorySubjectKey(subject: RuntimeSubject): string {
+  return [subject.issuer, subject.audience, subject.userPoolRef, subject.tenant ?? "", subject.sub].join(":");
 }
 
 type MemoryIdempotencyRecord =

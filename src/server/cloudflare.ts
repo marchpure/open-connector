@@ -15,6 +15,7 @@ import {
 import { ProviderLoader } from "../providers/provider-loader.ts";
 import { executorModules } from "../providers/registry.cloudflare.generated.ts";
 import { isConsoleShellPath } from "./api/console-paths.ts";
+import { createRuntimeJwtVerifier } from "./api/runtime-jwt.ts";
 import { loadCatalogFromAssets } from "./cloudflare/catalog-assets.ts";
 import { readPositiveInteger, resolvePublicOrigin } from "./cloudflare/cloudflare-env.ts";
 import { IsolatePromiseCache } from "./cloudflare/isolate-promise-cache.ts";
@@ -82,6 +83,16 @@ async function createCloudflareApp(env: CloudflareEnv, publicOrigin: string): Pr
     secretCodec,
     adminToken: env.OOMOL_CONNECT_ADMIN_TOKEN,
     runtimeToken: env.OOMOL_CONNECT_RUNTIME_TOKEN,
+    verifyRuntimeJwt: createRuntimeJwtVerifier({
+      jwksUri: env.OOMOL_CONNECT_JWKS_URI,
+      issuer: env.OOMOL_CONNECT_JWT_ISSUER,
+      audience: env.OOMOL_CONNECT_JWT_AUDIENCE,
+      userPoolRef: env.OOMOL_CONNECT_JWT_USER_POOL_REF,
+      subjectClaim: env.OOMOL_CONNECT_JWT_SUBJECT_CLAIM,
+      groupsClaim: env.OOMOL_CONNECT_JWT_GROUPS_CLAIM,
+      tenantClaim: env.OOMOL_CONNECT_JWT_TENANT_CLAIM,
+      tenant: env.OOMOL_CONNECT_JWT_TENANT,
+    }),
     actionPolicy: new ActionPolicyService({
       allowedActions: parseActionPolicyList(env.OOMOL_CONNECT_ALLOWED_ACTIONS),
       blockedActions: parseActionPolicyList(env.OOMOL_CONNECT_BLOCKED_ACTIONS),
@@ -140,6 +151,14 @@ function createCacheKey(env: CloudflareEnv, publicOrigin: string): string {
     publicOrigin,
     adminToken: env.OOMOL_CONNECT_ADMIN_TOKEN ?? "",
     runtimeToken: env.OOMOL_CONNECT_RUNTIME_TOKEN ?? "",
+    jwtIssuer: env.OOMOL_CONNECT_JWT_ISSUER ?? "",
+    jwtAudience: env.OOMOL_CONNECT_JWT_AUDIENCE ?? "",
+    jwksUri: env.OOMOL_CONNECT_JWKS_URI ?? "",
+    jwtUserPoolRef: env.OOMOL_CONNECT_JWT_USER_POOL_REF ?? "",
+    jwtSubjectClaim: env.OOMOL_CONNECT_JWT_SUBJECT_CLAIM ?? "",
+    jwtGroupsClaim: env.OOMOL_CONNECT_JWT_GROUPS_CLAIM ?? "",
+    jwtTenantClaim: env.OOMOL_CONNECT_JWT_TENANT_CLAIM ?? "",
+    jwtTenant: env.OOMOL_CONNECT_JWT_TENANT ?? "",
     encryptionKey: env.OOMOL_CONNECT_ENCRYPTION_KEY ?? "",
     allowedActions: env.OOMOL_CONNECT_ALLOWED_ACTIONS ?? "",
     blockedActions: env.OOMOL_CONNECT_BLOCKED_ACTIONS ?? "",

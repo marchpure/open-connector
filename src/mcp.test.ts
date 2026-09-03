@@ -613,6 +613,89 @@ describe("MCP server", () => {
       },
     );
   });
+
+  it("keeps access-grant search and execute authorization consistent after revocation", async () => {
+    let revoked = false;
+    const policy = new ActionPolicyService().createSnapshot(emptyPolicyRules(), undefined, undefined, {
+      version: 1,
+      evaluateConnection(connectionId) {
+        return !revoked && connectionId === "connection-default"
+          ? {
+              allowed: true,
+              checks: [
+                {
+                  source: "access_grant",
+                  outcome: "allow_match",
+                  grantId: "grant-1",
+                  role: "custom",
+                  rule: "connection-default",
+                  policyVersion: 1,
+                },
+              ],
+            }
+          : {
+              allowed: false,
+              code: "connection_not_allowed",
+              message: "connection is not granted",
+              checks: [{ source: "access_grant", outcome: "allow_miss", policyVersion: 1 }],
+            };
+      },
+      evaluateAction(action, connectionId) {
+        return !revoked && connectionId === "connection-default" && action.id === "example_auth.get_account"
+          ? {
+              allowed: true,
+              checks: [
+                {
+                  source: "access_grant",
+                  outcome: "allow_match",
+                  grantId: "grant-1",
+                  role: "custom",
+                  rule: "connection-default",
+                  policyVersion: 1,
+                },
+              ],
+            }
+          : {
+              allowed: false,
+              code: "action_not_allowed",
+              message: "action is not granted",
+              checks: [{ source: "access_grant", outcome: "allow_miss", policyVersion: 1 }],
+            };
+      },
+    });
+    await withAuthenticatedMcpClient(
+      async (client) => {
+        const search = await client.callTool({
+          name: "search_actions",
+          arguments: { query: "account", limit: 10 },
+        });
+        expect(search.structuredContent).toMatchObject({
+          ok: true,
+          data: [{ id: "example_auth.get_account" }],
+        });
+
+        revoked = true;
+        const searchAfterRevoke = await client.callTool({
+          name: "search_actions",
+          arguments: { query: "account", limit: 10 },
+        });
+        expect(searchAfterRevoke.structuredContent).toMatchObject({ ok: true, data: [] });
+
+        const execution = await client.callTool({
+          name: "execute_action",
+          arguments: { actionId: "example_auth.get_account", input: {}, connectionName: "default" },
+        });
+        expect(execution.structuredContent).toMatchObject({
+          ok: false,
+          error: { code: "connection_not_allowed" },
+        });
+      },
+      new MemoryRunLogStore(),
+      {
+        getPolicySnapshot: async () => policy,
+      },
+    );
+  });
 });
 
 async function withMcpClient(

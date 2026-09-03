@@ -219,12 +219,8 @@ async function listApps(options: IMcpServerOptions, query: string | undefined): 
     return errorPayload("internal_error", "Runtime policy is unavailable.");
   }
   const normalized = query?.trim().toLowerCase();
-  const connections = (await options.connections.listConnections()).filter(
-    (connection) => connection.authType === "no_auth" || policy.evaluateConnection(connection.id).allowed,
-  );
-  const defaultConnections = new Map(
-    connections.filter((connection) => connection.default).map((connection) => [connection.service, connection]),
-  );
+  const connections = await allowedConnections(options, policy);
+  const connectionsByService = groupConnectionsByService(connections);
   return successPayload(
     options.catalog.providers
       .filter((provider) => {
@@ -242,9 +238,19 @@ async function listApps(options: IMcpServerOptions, query: string | undefined): 
         displayName: provider.displayName,
         categories: provider.categories,
         authTypes: provider.authTypes,
-        actionCount: provider.actions.length,
-        executableActionCount: provider.actions.filter((action) => action.execution.locallyExecutable).length,
-        connection: defaultConnections.get(provider.service),
+        actionCount: provider.actions.filter((action) =>
+          (connectionsByService.get(provider.service) ?? []).some(
+            (connection) => policy.evaluateActionForConnection(action, connection.id).allowed,
+          ),
+        ).length,
+        executableActionCount: provider.actions.filter(
+          (action) =>
+            action.execution.locallyExecutable &&
+            (connectionsByService.get(provider.service) ?? []).some(
+              (connection) => policy.evaluateActionForConnection(action, connection.id).allowed,
+            ),
+        ).length,
+        connection: (connectionsByService.get(provider.service) ?? []).find((connection) => connection.default),
       })),
   );
 }
@@ -268,16 +274,23 @@ async function searchActions(
     : options.catalog.actions
         .filter((action) => !input.service || action.service === input.service)
         .slice(0, input.limit);
-  const actions = rankedActions.map(async (action) => ({
-    id: action.id,
-    service: action.service,
-    name: action.name,
-    description: action.description,
-    capability: await describeActionCapability(options, action, undefined, policy),
-    inputSummary: summarizeInputSchema(action.inputSchema),
-  }));
+  const connectionsByService = groupConnectionsByService(await allowedConnections(options, policy));
+  const actions = rankedActions
+    .filter((action) =>
+      (connectionsByService.get(action.service) ?? []).some(
+        (connection) => policy.evaluateActionForConnection(action, connection.id).allowed,
+      ),
+    )
+    .map(async (action) => ({
+      id: action.id,
+      service: action.service,
+      name: action.name,
+      description: action.description,
+      capability: await describeActionCapability(options, action, undefined, policy),
+      inputSummary: summarizeInputSchema(action.inputSchema),
+    }));
 
-  return successPayload(await Promise.all(actions));
+  return successPayload((await Promise.all(actions)).slice(0, input.limit));
 }
 
 async function getActionGuide(
@@ -410,7 +423,7 @@ async function describeActionCapability(
     authTypes: provider?.authTypes ?? [],
     requiredScopes: action.requiredScopes,
     providerPermissions: action.providerPermissions,
-    policy: snapshot.evaluate(action),
+    policy: snapshot.evaluateActionForConnection(action, connection?.id),
     connection: evaluateConnectionGrant(snapshot, connection).allowed ? connection : undefined,
   };
 }
@@ -426,7 +439,10 @@ async function describeActionMarkdownContext(
   return {
     connection: evaluateConnectionGrant(snapshot, connection).allowed ? connection : undefined,
     providerPermissions: action.providerPermissions,
-    policy: snapshot.evaluate(action),
+    policy: snapshot.evaluateActionForConnection(
+      action,
+      evaluateConnectionGrant(snapshot, connection).allowed ? connection?.id : undefined,
+    ),
   };
 }
 
@@ -454,6 +470,23 @@ function evaluateConnectionGrant(
   connection: ConnectionSummary | undefined,
 ): ActionPolicyDecision {
   return connection?.authType === "no_auth" ? { allowed: true, checks: [] } : policy.evaluateConnection(connection?.id);
+}
+
+async function allowedConnections(
+  options: IMcpServerOptions,
+  policy: ActionPolicySnapshot,
+): Promise<ConnectionSummary[]> {
+  return (await options.connections.listConnections()).filter(
+    (connection) => connection.authType === "no_auth" || policy.evaluateConnection(connection.id).allowed,
+  );
+}
+
+function groupConnectionsByService(connections: ConnectionSummary[]): Map<string, ConnectionSummary[]> {
+  const byService = new Map<string, ConnectionSummary[]>();
+  for (const connection of connections) {
+    byService.set(connection.service, [...(byService.get(connection.service) ?? []), connection]);
+  }
+  return byService;
 }
 
 function describeSchemaType(schema: JsonSchema | undefined): string {

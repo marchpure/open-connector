@@ -1,3 +1,4 @@
+import type { RuntimeSubject } from "../access/access-grants.ts";
 import type { RuntimeGrant } from "../storage/runtime-token-service.ts";
 import type { RuntimeJwtVerifier } from "./runtime-jwt.ts";
 import type { Context, MiddlewareHandler } from "hono";
@@ -19,6 +20,7 @@ export interface LocalAuthOptions {
   adminToken?: string;
   runtimeToken?: string;
   hasRuntimeTokens?(): Promise<boolean>;
+  hasRuntimeJwtConfig?(): Promise<boolean>;
   resolveRuntimeToken?(token: string): Promise<RuntimeGrant | undefined>;
   verifyRuntimeJwt?: RuntimeJwtVerifier;
 }
@@ -31,9 +33,14 @@ export interface LocalAuthSession {
 type AuthScope = "admin" | "runtime";
 
 const runtimeGrants = new WeakMap<Request, RuntimeGrant>();
+const runtimeSubjects = new WeakMap<Request, RuntimeSubject>();
 
 export function readRuntimeGrant(context: Context): RuntimeGrant | undefined {
   return runtimeGrants.get(context.req.raw);
+}
+
+export function readRuntimeSubject(context: Context): RuntimeSubject | undefined {
+  return runtimeSubjects.get(context.req.raw);
 }
 
 export function createLocalAuthMiddleware(options: LocalAuthOptions): MiddlewareHandler {
@@ -152,7 +159,10 @@ async function hasValidToken(context: Context, options: LocalAuthOptions, scope:
     const hasRuntimeTokens = options.hasRuntimeTokens
       ? await options.hasRuntimeTokens()
       : options.resolveRuntimeToken !== undefined;
-    if (!hasRuntimeTokens && !options.verifyRuntimeJwt) {
+    const hasRuntimeJwtConfig = options.hasRuntimeJwtConfig
+      ? await options.hasRuntimeJwtConfig()
+      : options.verifyRuntimeJwt !== undefined;
+    if (!hasRuntimeTokens && !hasRuntimeJwtConfig) {
       return true;
     }
     return hasValidRuntimeToken(context, options);
@@ -260,7 +270,12 @@ async function hasValidRuntimeToken(context: Context, options: LocalAuthOptions)
     runtimeGrants.set(context.req.raw, grant);
     return true;
   }
-  return await (options.verifyRuntimeJwt?.(token) ?? false);
+  const subject = await options.verifyRuntimeJwt?.(token);
+  if (subject && typeof subject === "object") {
+    runtimeSubjects.set(context.req.raw, subject);
+    return true;
+  }
+  return subject === true;
 }
 
 function readBearerToken(context: Context): string | undefined {

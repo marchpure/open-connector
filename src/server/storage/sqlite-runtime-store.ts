@@ -8,6 +8,15 @@ import type {
 } from "../../marketplace/marketplace-service.ts";
 import type { IOAuthClientConfigStore, OAuthClientConfig } from "../../oauth/oauth-client-config-service.ts";
 import type { IOAuthStateStore, OAuthAuthorizationState } from "../../oauth/oauth-flow-service.ts";
+import type {
+  AccessAuditListInput,
+  AccessAuditRecord,
+  AccessGrantRecord,
+  AccessPolicyVersion,
+  IAccessGrantStore,
+  IdentityProviderConfig,
+  RuntimeSubject,
+} from "../access/access-grants.ts";
 import type { ISecretCodec } from "../secrets/secret-codec-core.ts";
 import type {
   CompleteIdempotencyInput,
@@ -72,6 +81,7 @@ interface RotatedStateSecret {
  * Shared SQLite connection for local runtime state.
  */
 export class SqliteRuntimeDatabase implements RuntimeDatabase {
+  readonly accessGrantStore: SqliteAccessGrantStore;
   readonly connectionStore: SqliteConnectionStore;
   readonly oauthClientConfigStore: SqliteOAuthClientConfigStore;
   readonly oauthStateStore: SqliteOAuthStateStore;
@@ -88,6 +98,7 @@ export class SqliteRuntimeDatabase implements RuntimeDatabase {
     this.database = new DatabaseSync(filename);
     this.secretCodec = options.secretCodec ?? new PlainTextSecretCodec();
     this.initialize(options.logger);
+    this.accessGrantStore = new SqliteAccessGrantStore(this.database);
     this.connectionStore = new SqliteConnectionStore(this.database, this.secretCodec);
     this.oauthClientConfigStore = new SqliteOAuthClientConfigStore(this.database, this.secretCodec);
     this.oauthStateStore = new SqliteOAuthStateStore(this.database, this.secretCodec);
@@ -137,6 +148,11 @@ export class SqliteRuntimeDatabase implements RuntimeDatabase {
   resetRuntimeData(): void {
     this.database.exec(`
       delete from connections;
+      delete from identity_provider_config;
+      delete from access_grants;
+      delete from identity_subjects;
+      delete from access_audit;
+      update access_policy_version set version = 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') where id = 1;
       delete from oauth_client_configs;
       delete from oauth_states;
       delete from runtime_tokens;
@@ -151,6 +167,161 @@ export class SqliteRuntimeDatabase implements RuntimeDatabase {
   private initialize(logger?: RuntimeLogger): void {
     this.database.exec("pragma journal_mode = wal;");
     runSqliteMigrations(this.database, logger);
+  }
+}
+
+export class SqliteAccessGrantStore implements IAccessGrantStore {
+  private readonly database: DatabaseSync;
+
+  constructor(database: DatabaseSync) {
+    this.database = database;
+  }
+
+  async getIdentityProviderConfig(): Promise<IdentityProviderConfig | undefined> {
+    const row = this.database.prepare("select value from identity_provider_config where id = 1").get();
+    return row ? parseJson<IdentityProviderConfig>(readString(row, "value")) : undefined;
+  }
+
+  async setIdentityProviderConfig(config: IdentityProviderConfig): Promise<void> {
+    this.database
+      .prepare(
+        `
+        insert into identity_provider_config (id, value, updated_at)
+        values (1, ?, ?)
+        on conflict(id) do update set value = excluded.value, updated_at = excluded.updated_at
+      `,
+      )
+      .run(JSON.stringify(config), new Date().toISOString());
+  }
+
+  async listGrants(): Promise<AccessGrantRecord[]> {
+    return this.database
+      .prepare(
+        `
+        select id, subject_type, subject, connection_id, role, effect, custom_actions, reason, created_at, updated_at, revoked_at
+        from access_grants
+        order by created_at desc, id desc
+      `,
+      )
+      .all()
+      .map(readAccessGrantRow);
+  }
+
+  async addGrant(grant: AccessGrantRecord): Promise<void> {
+    this.database
+      .prepare(
+        `
+        insert into access_grants (
+          id, subject_type, subject, connection_id, role, effect, custom_actions, reason, created_at, updated_at, revoked_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      )
+      .run(
+        grant.id,
+        grant.subjectType,
+        grant.subject,
+        grant.connectionId,
+        grant.role,
+        grant.effect,
+        JSON.stringify(grant.customActions),
+        grant.reason ?? null,
+        grant.createdAt,
+        grant.updatedAt,
+        grant.revokedAt ?? null,
+      );
+  }
+
+  async updateGrant(
+    id: string,
+    patch: Partial<Pick<AccessGrantRecord, "role" | "effect" | "customActions" | "reason" | "updatedAt">>,
+  ): Promise<AccessGrantRecord | undefined> {
+    const current = this.database.prepare("select * from access_grants where id = ?").get(id);
+    if (!current) return undefined;
+    const existing = readAccessGrantRow(current);
+    const next = { ...existing, ...patch };
+    this.database
+      .prepare(
+        `
+        update access_grants
+        set role = ?, effect = ?, custom_actions = ?, reason = ?, updated_at = ?
+        where id = ?
+      `,
+      )
+      .run(next.role, next.effect, JSON.stringify(next.customActions), next.reason ?? null, next.updatedAt, id);
+    return next;
+  }
+
+  async revokeGrant(id: string, revokedAt: string): Promise<AccessGrantRecord | undefined> {
+    const row = this.database.prepare("select * from access_grants where id = ?").get(id);
+    if (!row) return undefined;
+    this.database
+      .prepare("update access_grants set revoked_at = ?, updated_at = ? where id = ?")
+      .run(revokedAt, revokedAt, id);
+    return { ...readAccessGrantRow(row), revokedAt, updatedAt: revokedAt };
+  }
+
+  async getPolicyVersion(): Promise<AccessPolicyVersion> {
+    const row = this.database.prepare("select version, updated_at from access_policy_version where id = 1").get();
+    if (!row) return { version: 1, updatedAt: new Date(0).toISOString() };
+    return { version: readNumber(row, "version"), updatedAt: readString(row, "updated_at") };
+  }
+
+  async bumpPolicyVersion(updatedAt: string): Promise<AccessPolicyVersion> {
+    this.database
+      .prepare(
+        `
+        insert into access_policy_version (id, version, updated_at)
+        values (1, 2, ?)
+        on conflict(id) do update set version = version + 1, updated_at = excluded.updated_at
+      `,
+      )
+      .run(updatedAt);
+    return this.getPolicyVersion();
+  }
+
+  async recordSubject(subject: RuntimeSubject, seenAt: string): Promise<void> {
+    this.database
+      .prepare(
+        `
+        insert into identity_subjects (subject_key, value, seen_at)
+        values (?, ?, ?)
+        on conflict(subject_key) do update set value = excluded.value, seen_at = excluded.seen_at
+      `,
+      )
+      .run(subjectKey(subject), JSON.stringify(subject), seenAt);
+  }
+
+  async listSubjects(): Promise<RuntimeSubject[]> {
+    return this.database
+      .prepare("select value from identity_subjects order by seen_at desc, subject_key")
+      .all()
+      .map((row) => parseJson<RuntimeSubject>(readString(row, "value")));
+  }
+
+  async addAudit(record: AccessAuditRecord): Promise<void> {
+    this.database
+      .prepare(
+        `
+        insert into access_audit (id, subject_key, connection_id, action_id, value, created_at)
+        values (?, ?, ?, ?, ?, ?)
+      `,
+      )
+      .run(
+        record.id,
+        subjectKey(record.subject),
+        record.connectionId ?? null,
+        record.actionId ?? null,
+        JSON.stringify(record),
+        record.createdAt,
+      );
+  }
+
+  async listAudit(input: AccessAuditListInput = {}): Promise<AccessAuditRecord[]> {
+    const limit = Math.max(1, Math.min(input.limit ?? 200, 1000));
+    return this.database
+      .prepare("select value from access_audit order by created_at desc, id desc limit ?")
+      .all(limit)
+      .map((row) => parseJson<AccessAuditRecord>(readString(row, "value")));
   }
 }
 
@@ -887,6 +1058,19 @@ function readString(row: unknown, key: string): string {
   return value;
 }
 
+function readNumber(row: unknown, key: string): number {
+  if (typeof row !== "object" || row == null) {
+    throw new Error(`Expected SQLite row for ${key}.`);
+  }
+
+  const value = (row as Record<string, unknown>)[key];
+  if (typeof value !== "number") {
+    throw new Error(`Expected SQLite column ${key} to be a number.`);
+  }
+
+  return value;
+}
+
 function readOptionalString(row: unknown, key: string): string | undefined {
   if (typeof row !== "object" || row == null) {
     throw new Error(`Expected SQLite row for ${key}.`);
@@ -905,4 +1089,24 @@ function readOptionalString(row: unknown, key: string): string | undefined {
 
 function parseJson<T>(value: string): T {
   return JSON.parse(value) as T;
+}
+
+function readAccessGrantRow(row: unknown): AccessGrantRecord {
+  return {
+    id: readString(row, "id"),
+    subjectType: readString(row, "subject_type") as AccessGrantRecord["subjectType"],
+    subject: readString(row, "subject"),
+    connectionId: readString(row, "connection_id"),
+    role: readString(row, "role") as AccessGrantRecord["role"],
+    effect: readString(row, "effect") as AccessGrantRecord["effect"],
+    customActions: parseJson<string[]>(readString(row, "custom_actions")),
+    reason: readOptionalString(row, "reason"),
+    createdAt: readString(row, "created_at"),
+    updatedAt: readString(row, "updated_at"),
+    revokedAt: readOptionalString(row, "revoked_at"),
+  };
+}
+
+function subjectKey(subject: RuntimeSubject): string {
+  return [subject.issuer, subject.audience, subject.userPoolRef, subject.tenant ?? "", subject.sub].join("\u001f");
 }
