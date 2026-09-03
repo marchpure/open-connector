@@ -38,8 +38,8 @@ not be mistaken for a product code base.
 | DRC/APIG | no product code added; route contract is recorded below | W4 only; proxy performs routing/stream passthrough, not authorization |
 | Connection Provider | OpenConnector `src/providers/`, catalog, connection service | retained from clean OpenConnector base |
 | OpenViking | Data Studio main has an existing knowledge provider, but no confirmed `adapters/openviking` path on this base | W6 adapter remains future owned work; no self-hosting |
-| Native veADK Agent | only local W5 skeleton exists; canonical product repo missing | blocked; no AutoSkill code copied |
-| ZIP validator | only historical AutoSkill evidence exists | blocked with W5; no validator claimed as product baseline |
+| Native veADK Agent | W5 canonical skeleton contains `agentkit.yaml` and explicit contract-only entrypoint | W5 canonical repository; business implementation remains W5-owned |
+| ZIP validator | No validator implementation copied into the skeleton; AutoSkill remains historical evidence only | W5 future-owned capability; not claimed as implemented |
 
 ## Frozen shared contract
 
