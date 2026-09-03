@@ -24,10 +24,10 @@ export class OracleThinDriver implements OracleQueryDriver {
       poolMax: credentials.poolMax ?? 4,
       poolIncrement: credentials.poolIncrement ?? 1,
       homogeneous: true,
+      ...(config.tls ? { sslServerDNMatch: config.tls.rejectUnauthorized } : {}),
       ...(config.tls?.walletPath
         ? {
             walletLocation: config.tls.walletPath,
-            sslServerDNMatch: config.tls.rejectUnauthorized,
           }
         : {}),
     };
@@ -37,17 +37,22 @@ export class OracleThinDriver implements OracleQueryDriver {
   async query(
     sql: string,
     binds: Record<string, unknown>,
-    options: { maxRows: number; timeoutMs: number },
+    options: { maxRows: number; timeoutMs: number; clientId?: string; clientInfo?: string },
   ): Promise<OracleQueryResult> {
     const pool = await this.poolPromise;
     let connection: Connection | undefined;
+    let previousCallTimeout: number | undefined;
     try {
       connection = await pool.getConnection();
+      if (options.clientId) connection.clientId = options.clientId;
+      if (options.clientInfo) connection.clientInfo = options.clientInfo;
+      previousCallTimeout = connection.callTimeout;
+      connection.callTimeout = options.timeoutMs;
       await connection.execute("SET TRANSACTION READ ONLY");
-      const result = await withTimeout(
-        connection.execute(sql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT, maxRows: options.maxRows }),
-        options.timeoutMs,
-      );
+      const result = await connection.execute(sql, binds, {
+        outFormat: oracledb.OUT_FORMAT_OBJECT,
+        maxRows: options.maxRows,
+      });
       const rows = (result.rows ?? []) as unknown[];
       return {
         rows,
@@ -59,8 +64,13 @@ export class OracleThinDriver implements OracleQueryDriver {
         bytes: Buffer.byteLength(JSON.stringify(rows)),
       };
     } finally {
-      await connection?.rollback().catch(() => undefined);
-      await connection?.close().catch(() => undefined);
+      if (connection) {
+        if (previousCallTimeout !== undefined) connection.callTimeout = previousCallTimeout;
+        connection.clientId = "";
+        connection.clientInfo = "";
+        await connection.rollback().catch(() => undefined);
+        await connection.close().catch(() => undefined);
+      }
     }
   }
 
@@ -73,19 +83,6 @@ export class OracleThinDriver implements OracleQueryDriver {
 function buildConnectString(config: OracleConnectionConfig): string {
   const service = config.serviceName ?? config.sid;
   if (!service) throw new Error("Oracle service_name or SID is required.");
-  return `${config.host}:${config.port}/${service}`;
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("Oracle query timed out.")), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
+  const protocol = config.tls ? "tcps" : "tcp";
+  return `${protocol}://${config.host}:${config.port}/${service}`;
 }

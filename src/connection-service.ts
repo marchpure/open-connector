@@ -263,6 +263,14 @@ export class ConnectionService {
       stored.credential.authType === "oauth2"
         ? await this.resolveOAuthCredential(stored, stored.credential)
         : stored.credential;
+    await this.validateResolvedCredential(service, credential, signal);
+  }
+
+  async validateResolvedCredential(
+    service: string,
+    credential: ResolvedCredential,
+    signal?: AbortSignal,
+  ): Promise<void> {
     if (credential.authType === "api_key") {
       await this.validateApiKeyCredential(service, { apiKey: credential.apiKey, values: credential.values }, signal);
     } else if (credential.authType === "custom_credential") {
@@ -365,6 +373,31 @@ export class ConnectionService {
     this.assertNotCancelled(input.signal);
     const stored = await this.store.set(service, connectionName, credential);
 
+    return this.createStoredConnectionSummary(provider, stored.id, connectionName, credential);
+  }
+
+  async storeCustomCredentialUnverified(
+    service: string,
+    input: ConnectWithCredentialInput,
+  ): Promise<ConnectionSummary> {
+    const provider = this.getAvailableProvider(service);
+    if (!this.supportsAuth(provider, "custom_credential")) {
+      throw new ConnectionError("unsupported_auth_type", `${service} does not support custom_credential.`);
+    }
+    const auth = this.getCustomCredentialDefinition(provider);
+    const values = normalizeCredentialValues({
+      fields: auth.fields,
+      values: input.values ?? {},
+      createError: (message) => new ConnectionError("invalid_input", message),
+    });
+    const credential: ResolvedCredential = {
+      authType: "custom_credential",
+      values,
+      ...this.buildCredentialRuntimeData(provider, "custom_credential", auth.fields, values, {}),
+    };
+    const connectionName = normalizeConnectionName(input.connectionName);
+    this.assertNotCancelled(input.signal);
+    const stored = await this.store.set(service, connectionName, credential);
     return this.createStoredConnectionSummary(provider, stored.id, connectionName, credential);
   }
 

@@ -1,0 +1,190 @@
+<title>ArkClaw 通过 OpenConnector 完成 Oracle 应用注册与调用实现说明</title>
+
+<h1>结论</h1>
+<p>结论分两层。<b>仅按 Wiki 中的 ArkClaw、Application Center MCP Proxy、API Key 和 TIP 流程，不能独立完成 Oracle 应用注册。</b>这套流程解决的是“请求是否来自可信的 ArkClaw、请求对应哪个用户和 Agent、业务 MCP 是否接受该请求”。它没有替 OpenConnector 创建 Oracle 连接、托管或解析 Oracle 凭据，也不能替客户完成 Oracle 网络出口和白名单配置。</p>
+<p><b>在本仓库当前实现的基础上，可以完成 Oracle 应用注册和调用闭环，但不是由 OpenConnector 单体自动完成全部注册。</b>闭环由 Oracle Connection、AppResource、MCP 入口认证、TIP 校验、用户/组/Agent ACL、Credential Broker、只读 SQL 约束和固定出口网络共同组成。当前 Oracle Provider 标记为 beta；代码测试闭环已通过，但真实客户 Oracle、真实 Identity Broker、Application Center Proxy 和生产 APIG 仍需联调。</p>
+
+<h1>Wiki 流程与 Oracle 注册的边界</h1>
+<table>
+  <thead><tr><th>环节</th><th>Wiki 已定义的职责</th><th>Oracle 应用还需要的职责</th></tr></thead>
+  <tbody>
+    <tr><td>ArkClaw / Application Center</td><td>保存业务 MCP 的 API Key，调用时透传 TIP；或通过 OAuth Proxy 注入 OAuth Access Token。</td><td>选择 OpenConnector 返回的 mcpUrl，并配置请求头或 OAuth Proxy 资源。</td></tr>
+    <tr><td>OpenConnector MCP 入口</td><td>Wiki 要求业务侧验证 API Key 和 TIP，并解析用户信息。</td><td>校验资源 ID、API Key、TIP、租户、用户、userpool 分组和 Agent ACL；只暴露被授权的 Oracle tools。</td></tr>
+    <tr><td>Identity / Credential Broker</td><td>负责凭据托管和按用户取得凭据的能力。</td><td>OpenConnector 通过 credentialRef 请求 Broker；不把 Oracle 密码放进 MCP 请求或响应。</td></tr>
+    <tr><td>Oracle 数据库</td><td>Wiki 不负责数据库连接和数据库权限。</td><td>提供只读数据库用户、配置 VPD/RLS（如需要）、允许 OpenConnector 固定出口 IP，并验证 Oracle 审计身份。</td></tr>
+  </tbody>
+</table>
+<p>因此，“端到端完成”需要把 Wiki 的信任入口、OpenConnector 的 Oracle Connection/AppResource 控制面和 Application Center/MSE 接起来。当前实现已增加 Application Center 注册适配层：创建 AppResource 时自动调用 MSE <code>CreateResource</code>，轮询 <code>GetResource</code> 直到资源进入可用状态，保存 MSE Resource ID 与 <code>NetworkConfig.GatewayUrl</code>；删除 AppResource 时同步调用 <code>DeleteResource</code>。APIG 仍只是入口代理，不应被当作 Oracle 凭据的唯一存储位置；Oracle 凭据由 Identity/Credential Broker 或受控的本地加密存储明确承担。</p>
+
+<h1>Application Center/MSE 集成实现</h1>
+<p><b>资源注册。</b><code>POST /v1/app-resources</code> 在 OpenConnector 本地校验 Oracle Connection、允许的 actions、Schema/Table 范围和 ACL 后，构造 MSE 请求：<code>Type=Mcp</code>、<code>McpConfig.Source=Standard</code>、<code>McpConfig.Protocol=http</code>、<code>McpConfig.McpUrl=https://&lt;openconnector-origin&gt;/mcp/apps/&lt;resourceId&gt;</code>、<code>SpaceId</code> 和主路径下的 <code>AuthConfig</code> Provider 引用。默认 <code>APPLICATION_CENTER_RESOURCE_MODE=enterprise</code>，因此不会发送 <code>clawId</code> 或 <code>UserPoolUserUid</code>，MSE 会创建共享企业 <code>AiResource</code>；只有显式选择 user 模式才发送 <code>clawId</code>，进入个人 <code>UserResource</code> 分支。请求使用 Volcengine V4 HMAC-SHA256 签名，Top 参数通过 <code>X-Top-*</code> 请求头传递。</p>
+<p><b>异步状态。</b>根据 <code>mse-server</code> 的真实模型，<code>CreateResource</code> 只返回 <code>Result.Id</code>；OpenConnector 随后调用 <code>GetResource</code>，从 <code>Result.Resource.Status</code> 和 <code>Result.Resource.NetworkConfig.GatewayUrl</code> 读取状态及网关地址。只有状态为 <code>Running</code>/<code>Ready</code> 才认为注册完成，<code>Failed</code> 或超时都返回失败，不会把半成品资源暴露给调用面。</p>
+<p><b>凭据 Provider。</b>这里有两个不同的控制面路径。Wiki 的主路径是先在 ArkClaw「凭据管理」中创建并托管 Provider，再在注册 MCP 时通过 <code>AuthConfig</code> 引用已有 Provider：API Key 使用 <code>Type=KEY_AUTH</code> 和 <code>ApikeyConfig[].CredentialProviderName</code>，OAuth 使用 <code>Type=OAUTH</code>、<code>OAuthConfig[].CredentialProviderName</code>，用户委托场景还应带 <code>Flow=USER_FEDERATION</code>。只有在明确的管理员 provisioning 模式下才使用 <code>CredentialAuthConfig</code>，由 MSE 创建 Provider；生产默认应关闭该入口，避免把原始 API Key、Client Secret 通过注册接口重复传递。无论哪种路径，这个 Provider 都是 Application Center Proxy 访问业务 MCP 的凭据，不是 Oracle 数据库凭据；Oracle 凭据仍通过 Connection 的 <code>credentialRef</code> 由 Credential Broker 按 TIP 主体解析。</p>
+<p><b>失败回滚。</b>如果 MSE 已返回 Resource ID，但 OpenConnector 本地 AppResource 落库失败，适配层会调用 MSE <code>DeleteResource</code> 清理外部资源；清理失败时保留本地错误并要求运维按 Resource ID 对账。这样避免 MSE 资源和本地控制面长期分叉。</p>
+
+<h1>关键代码证据与结论边界</h1>
+<p><b>MSE 的资源分支是决定性证据。</b>在 <code>internal/service/apiservice/ai_registry/volc/resource.go</code> 中，<code>isUserResource(clawId)</code> 仅通过 <code>clawId != ""</code> 判断资源类型。传入 <code>clawId</code> 后直接进入 <code>createUserResource</code>，要求用户身份字段，并把 <code>CredentialAuthConfig</code> 保存为用户资源凭据；不传 <code>clawId</code> 才会创建共享 <code>AiResource</code>，随后执行 <code>processMcpResourceCreation</code>，把 Standard MCP URL 和 <code>AuthConfig</code> 持久化。故企业 MCP 流程不能无条件携带个人 Claw 字段。</p>
+<p><b>Provider 引用不是原始凭据。</b>MSE 的 <code>AuthConfig</code> 只保存 <code>CredentialProviderName</code> 等引用；在共享网关 reconcile 中，<code>ResolveSharedGatewayUpstreamIdentityProvider</code> 解析该引用并创建 route 级 upstream identity plugin binding。原始 API Key、OAuth Client Secret 和用户 Access Token 不应进入 OpenConnector 的 MCP tool 参数，也不应由 OpenConnector 返回。</p>
+<p><b>TIP 与上游业务凭据是两条独立链路。</b><code>X-Ve-TIP-Token</code> 证明当前调用主体及其 userpool/Agent 上下文；MSE Provider 注入的是 Application Center 到 OpenConnector 的业务认证凭据。Oracle 数据库凭据如果采用本仓库的 managed connection，则由 OpenConnector 的 Credential Broker 按 TIP 主体解析。不能因为 MSE 已注入业务 API Key，就推导出 MSE 已经托管或解析了 Oracle 数据库密码。</p>
+<p><b>现在同时提供 Oracle 专用 MCP 和通用 MCP 反向代理。</b><code>/mcp/apps/:resourceId</code> 仍由 <code>arkclaw-mcp.ts</code> 动态注册 <code>list_tables</code>、<code>describe_table</code>、<code>preview_table</code>、<code>execute_read_query</code> 等 Oracle 工具；新增的 <code>/mcp/custom/:resourceId</code> 由 <code>custom-mcp-proxy.ts</code> 在 HTTP 层原样透传上游 MCP，不重建 MCP Server，因此保留 Streamable HTTP/SSE 的 JSON-RPC、<code>Mcp-Session-Id</code>、<code>Last-Event-ID</code> 和流式响应语义。仓库里的 <code>mcp-adapter.ts</code> 仍是 OpenConnector 作为 MCP 客户端调用别的 MCP 的适配器，与这个对外反向代理是两条不同路径。</p>
+<p><b>企业授权现在按双层策略落地。</b>创建通用企业 MCP 资源时，OpenConnector 本地保存并执行 <code>allowedSubjects</code>、<code>allowedGroups</code>、<code>allowedAgentIds</code>；同时将用户和组转换为 MSE <code>AuthorizedSubjects</code>，将 team 映射为 <code>Visible</code>（无显式 ACL）或 <code>PartiallyVisible</code>（有显式 ACL），personal 资源只授权 owner。调用时仍需同时通过 MSE 网关授权和 OpenConnector 本地 TIP/ACL 校验，不能只信任 <code>X-App-ResourceId</code>。</p>
+
+<h1>当前代码实现</h1>
+<p><b>控制面。</b><a href="https://github.com/oomol-lab/open-connector">OpenConnector</a> 新增 Oracle Connection 注册和 AppResource 注册。Oracle Connection 记录数据库地址、Service Name 或 SID、TLS、Schema/Table 白名单以及 credentialRef；当 credentialRef 存在时，Connection 的 credentialMode 为 managed，数据库只保存加密后的非完整凭据占位结构，不能提交 username/password。AppResource 必须引用 Connection 所绑定的 credentialRef，不能替换成另一个凭据。</p>
+<p><b>运行面。</b>MCP 入口支持 <code>/mcp/apps/:resourceId</code>，同时保留 <code>/mcp/arkclaw</code> 和 <code>X-App-ResourceId</code> 兼容方式。AppResource 的 allowedActions 动态注册为原生 MCP tools；Oracle 典型工具包括 <code>list_tables</code>、<code>describe_table</code>、<code>preview_table</code> 和 <code>execute_read_query</code>。兼容工具 <code>execute_action</code> 仍保留。</p>
+<p><b>身份面。</b>TIP 校验后读取 human user、<code>act.sub</code> Agent、tenant、userpool groups 和 group IDs。AppResource 可以同时限制 allowedSubjects、allowedGroups 和 allowedAgentIds。OAuth 模式还会校验 Access Token 的用户绑定、scope、client ID，并支持 JWT JWKS 或 RFC 7662 opaque token introspection。</p>
+<p><b>凭据面。</b>每次 MCP action、连接 validate 或资源 discover 都可按当前 TIP 主体调用 Credential Broker。Broker 返回 authorization_required 时，调用方得到 HTTPS 授权地址；授权完成后再次调用才会取得临时 Oracle username/password。Broker 只允许覆盖 Oracle 的 username/password，Host、Port、Service Name、SID、Schema/Table 白名单仍以 Connection 注册值为准；即使 Broker 返回了其他字段，MCP 运行时也会丢弃这些字段。</p>
+<p><b>数据库执行面。</b>Oracle 只允许参数化的只读 SELECT/WITH 查询，结果受行数、字节数和超时预算限制；Schema/Table 白名单在执行前检查。Oracle 连接 checkout 时写入 <code>CLIENT_IDENTIFIER</code> 和 <code>CLIENT_INFO</code>，分别携带 TIP user 和 Agent/subject 信息，归还连接池前清除，供客户 VPD/RLS 和审计使用。</p>
+
+<h1>Oracle 注册顺序</h1>
+<ol>
+  <li seq="auto">准备网络。部署 OpenConnector Connection Service，并为其配置稳定的公网出口或 NAT EIP。客户将该出口 IP 加入 Oracle 防火墙、安全组、监听器或数据库白名单。仅配置 MCP URL 不能解决 Oracle 入站网络问题。</li>
+  <li seq="auto">准备 Oracle 账号。创建最小权限只读账号，至少允许目标 Schema 的元数据读取和业务表 SELECT；禁止 DDL、DML、PL/SQL 写操作。需要按用户隔离时，在客户 Oracle 中基于 <code>SYS_CONTEXT('USERENV','CLIENT_IDENTIFIER')</code> 配置 VPD/RLS。</li>
+  <li seq="auto">在 Identity 中登记凭据 provider。credentialRef 例如 <code>identity://oracle/anta-prod</code>，Provider 负责按 tenant、user、Agent 和 group 判断是否授权，并返回 Oracle username/password 或授权 URL。</li>
+  <li seq="auto">创建 Oracle Connection。调用 <code>POST /v1/connections</code>，authType 使用 <code>custom_credential</code>，传入 credentialRef 和数据库连接边界；不要传 username/password。</li>
+  <li seq="auto">创建 AppResource。调用 <code>POST /v1/app-resources</code>，绑定 Connection，选择 allowedActions，设置 Schema/Table、用户/组/Agent ACL，并选择 API Key 或 OAuth2 入口认证。</li>
+  <li seq="auto">执行连接验证和发现。调用 <code>POST /v1/connections/:connectionId/validate</code>；managed credential 首次未授权时 job 会失败为 authorization_required 并带 HTTPS authorizationUrl。用户授权后重新验证。资源发现需要带 connection lease；对于 Oracle，实际 MCP 直接调用 list_tables/describe_table 即可完成运行时发现。</li>
+  <li seq="auto">创建 AppResource 时由 OpenConnector 自动调用 Application Center/MSE <code>CreateResource</code>。按 Wiki 主路径，API Key 使用 <code>AuthConfig={Type:KEY_AUTH,ApikeyConfig:[{CredentialProviderName:...}]}</code>；OAuth 使用 <code>AuthConfig={Type:OAUTH,OAuthConfig:[{CredentialProviderName:...,Flow:USER_FEDERATION}]}</code>。这一步只引用已经托管的 Provider，不把 Provider secret 放入 MCP 注册请求。<code>CredentialAuthConfig</code> 仅作为显式管理员 provisioning 兼容路径，并由配置开关控制。两种模式都继续透传并校验 <code>X-Ve-TIP-Token</code>，用于 Agent、用户池和租户治理。</li>
+  <li seq="auto">OpenConnector 轮询 MSE <code>GetResource</code> 获取 <code>NetworkConfig.GatewayUrl</code>。ArkClaw 连接器使用该 Gateway URL 和 MSE Resource ID；先调用 MCP <code>initialize</code>、<code>tools/list</code>，再调用 Oracle 工具。</li>
+  <li seq="auto">从 ArkClaw 调试，先调用 MCP initialize 和 tools/list，再调用 list_tables、describe_table、preview_table，最后执行带参数的 execute_read_query。</li>
+</ol>
+
+<h1>闭环判定</h1>
+<table>
+  <thead><tr><th>能力</th><th>当前状态</th><th>是否足以完成 Wiki 步骤</th></tr></thead>
+  <tbody>
+    <tr><td>Oracle 连接注册、托管凭据引用、Connection 校验</td><td>OpenConnector 已实现</td><td>可以</td></tr>
+    <tr><td>AppResource、用户/组/Agent ACL、Schema/Table 范围</td><td>OpenConnector 已实现</td><td>可以</td></tr>
+    <tr><td>API Key、TIP JWT、OAuth Access Token 校验</td><td>OpenConnector 已实现</td><td>可以</td></tr>
+    <tr><td>MCP initialize、tools/list、tools/call</td><td>OpenConnector 已实现并有协议测试</td><td>可以</td></tr>
+    <tr><td>Application Center Proxy 注册、GetResource 和 ListResources</td><td>OpenConnector 已实现 CreateResource/GetResource/DeleteResource 适配；ListResources 客户端也已实现；默认走共享企业 AiResource</td><td>代码路径可以完成，仍需真实 MSE IAM、Space、Provider 和网络配置</td></tr>
+    <tr><td>客户 Oracle 网络白名单、数据库账号和 VPD/RLS</td><td>代码无法代替，需客户环境配置</td><td>需要客户配合</td></tr>
+  </tbody>
+</table>
+<p>因此，若“端到端”定义为“创建 Oracle Connection/AppResource 后，OpenConnector 自动创建 MSE 共享企业资源、引用已托管的 Credential Provider、等待 Gateway URL 可用，再由 ArkClaw 通过 Proxy 调用 Oracle MCP”，当前代码路径可以完成。这里的“引用”是 Wiki 主路径：Provider 在凭据管理中提前创建，MSE 注册时只接收 CredentialProviderName；只有显式开启管理员 provisioning 开关时，才由 MSE 根据 CredentialAuthConfig 创建 Provider。若还要求自动在 ArkClaw 控制台创建 Agent、上传 Skill、绑定连接器并发布 Agent，则这部分仍属于 ArkClaw 控制台或其未公开编排 API，不能由当前仓库宣称已经自动化。</p>
+
+<h1>注册请求示例</h1>
+<p>以下示例中的控制面 Bearer 是 OpenConnector 控制面管理令牌；它与 MCP 入口的业务 API Key、TIP Token、Oracle 密码是四种不同凭据。</p>
+<pre lang="http" caption="创建 managed Oracle Connection"><code>POST /v1/connections
+Authorization: Bearer &lt;control-plane-token&gt;
+Content-Type: application/json
+
+{
+  "service": "oracle_database",
+  "authType": "custom_credential",
+  "connectionName": "anta-prod",
+  "credentialRef": "identity://oracle/anta-prod",
+  "values": {
+    "host": "oracle.internal.example",
+    "port": 1521,
+    "serviceName": "ANTA",
+    "tls": "verify-full",
+    "allowedSchemas": "APP",
+    "allowedTables": "APP.ORDERS,APP.CUSTOMERS"
+  }
+}</code></pre>
+<pre lang="http" caption="创建 API Key 模式 AppResource"><code>POST /v1/app-resources
+Authorization: Bearer &lt;control-plane-token&gt;
+Content-Type: application/json
+
+{
+  "resourceId": "anta-oracle-read",
+  "displayName": "Anta Oracle Read",
+  "connectionId": "&lt;connection-id&gt;",
+  "allowedActions": [
+    "oracle_database.list_tables",
+    "oracle_database.describe_table",
+    "oracle_database.preview_table",
+    "oracle_database.execute_read_query"
+  ],
+  "allowedResources": {
+    "schemas": ["APP"],
+    "tables": ["APP.ORDERS", "APP.CUSTOMERS"]
+  },
+  "allowedGroups": ["anta-oracle-readers"],
+  "allowedAgentIds": ["&lt;agent-id&gt;"],
+  "ingressApiKeyHashes": ["&lt;sha256-of-business-mcp-api-key&gt;"],
+  "ingressAuth": "api_key"
+}</code></pre>
+<p>创建响应同时包含本地调试地址 <code>mcpUrl</code> 和 Application Center 返回的 <code>gateway</code>。生产 ArkClaw 应使用 <code>gateway.url=NetworkConfig.GatewayUrl</code>，并设置 <code>X-App-ResourceId</code> 为 MSE 返回的 <code>Resource.Id</code>，不能误用 OpenConnector 本地 <code>resourceId</code>；TIP 通过运行环境注入 <code>X-Ve-TIP-Token</code>。API 返回只展示 API Key hash 的 redacted 形式，不返回原始 API Key 或 Provider secret。</p>
+
+<h1>通用企业 MCP 注册接口</h1>
+<p>对 DBW、Viking、知识中心或客户自建 MCP，不应强行创建 Oracle Connection。使用独立的 <code>POST /v1/custom-mcp-resources</code>，它的 <code>upstreamUrl</code> 是客户业务 MCP 地址，<code>proxyCredential</code> 只填写已经在 Application Center/Identity 中托管的 Provider 名称。企业模式默认不发送 <code>clawId</code>，因此对应 MSE 共享 <code>AiResource</code>。</p>
+<pre lang="http" caption="创建通用企业 MCP 资源"><code>POST /v1/custom-mcp-resources
+Authorization: Bearer &lt;control-plane-token&gt;
+Content-Type: application/json
+
+{
+  "resourceId": "knowledge-center",
+  "displayName": "Knowledge Center",
+  "upstreamUrl": "https://customer.example.com/mcp",
+  "protocol": "streamable_http",
+  "proxyCredential": {
+    "mode": "reference",
+    "type": "api_key",
+    "credentialProviderName": "knowledge-center-api-key"
+  },
+  "visibility": "partial",
+  "allowedGroups": ["anta-knowledge-readers"],
+  "allowedAgentIds": ["&lt;agent-id&gt;"],
+  "ingressApiKeyHashes": ["&lt;sha256-of-ingress-key&gt;"],
+  "forwardAuthorization": true,
+  "forwardTipToken": true
+}</code></pre>
+<p>成功响应包含本地 <code>mcpUrl</code>、MSE <code>mseResourceId</code> 和 <code>gateway</code>。MSE Gateway 调用 <code>mcpUrl</code> 时带上 <code>X-App-ResourceId=mseResourceId</code> 和 <code>X-Ve-TIP-Token</code>。OpenConnector 验证 TIP、租户、用户/组/Agent ACL 后，才将上游 MCP 的 JSON-RPC 请求转发到 <code>upstreamUrl</code>；当配置了 Provider 引用时，网关注入的业务 <code>Authorization</code> 才会被转发。客户端自行传入的原始密码不会被读取或写入资源记录。</p>
+
+<h1>一次 MCP 调用的实际链路</h1>
+<pre lang="text" caption="API Key + TIP"><code>ArkClaw
+  -> Application Center MCP Proxy
+       Authorization: Bearer &lt;business-mcp-api-key&gt;
+       X-Ve-TIP-Token: &lt;TIP-JWT&gt;
+  -> OpenConnector /mcp/apps/anta-oracle-read
+       verify API Key hash
+       verify TIP issuer/signature/audience/exp
+       extract human user + act.sub Agent + userpool groups
+       enforce AppResource ACL
+       Credential Broker.resolve(credentialRef, user, agent, groups)
+       obtain Oracle username/password only in process memory
+  -> Oracle
+       TLS connection from fixed egress IP
+       CLIENT_IDENTIFIER = TIP user
+       CLIENT_INFO = Agent and TIP subject
+       execute bounded read-only SQL</code></pre>
+<p>密码不会经过 ArkClaw Skill 参数、MCP tool arguments、MCP structuredContent、HTTP error response 或运行日志。唯一例外是首次授权时返回的授权 URL；该 URL 必须是 HTTPS，并不包含 Oracle 密码。</p>
+
+<h1>安全边界与不能省略的条件</h1>
+<table>
+  <thead><tr><th>风险</th><th>当前控制</th><th>客户侧必须完成的配置</th></tr></thead>
+  <tbody>
+    <tr><td>伪造业务 MCP 请求</td><td>API Key hash 校验；资源级 hash 可覆盖全局 hash。</td><td>API Key 只交给 Application Center 或受控代理，不写入 Skill。</td></tr>
+    <tr><td>TIP 被伪造或跨租户使用</td><td>OIDC issuer allowlist、JWKS 签名、audience、时间校验、tenant ACL。</td><td>配置正确的 TIP issuer、audience 和 discovery/JWKS 地址。</td></tr>
+    <tr><td>Agent 越权调用</td><td>同时校验 human/group ACL 和 allowedAgentIds。</td><td>为共享 Agent 明确配置 Agent ID，不能只依赖 group。</td></tr>
+    <tr><td>Oracle 密码泄露</td><td>credentialRef + Broker 按请求解析；Connection 只保存加密占位值；输出和日志脱敏。</td><td>Broker 不得向 OpenConnector 返回无关秘密；生产环境必须启用加密密钥和 HTTPS。</td></tr>
+    <tr><td>SQL 越权或数据外带</td><td>只读语法、参数绑定、Schema/Table allowlist、结果预算。</td><td>Oracle 数据库账号本身也必须是最小权限，不能把应用安全完全交给 MCP 层。</td></tr>
+    <tr><td>绕过数据库网络边界</td><td>Oracle 驱动只允许配置的目标连接，并执行 egress 检查。</td><td>固定出口 IP、DNS、Oracle listener、防火墙和安全组必须联通。</td></tr>
+  </tbody>
+</table>
+
+<h1>代码位置与验证结果</h1>
+<p>关键实现位于 <code>src/control-plane/server.ts</code>（注册 API、MSE 编排、TIP/ACL 和 MCP 路由）、<code>src/control-plane/custom-mcp-resource-store.ts</code>（通用企业 MCP 资源与租户隔离）、<code>src/control-plane/custom-mcp-proxy.ts</code>（Streamable HTTP/SSE 原样代理、请求限制和安全头转发）、<code>src/control-plane/arkclaw-mcp.ts</code>（原生 Oracle tools、资源范围和执行）、<code>src/control-plane/app-resource-store.ts</code>（Oracle AppResource ACL 和状态）、<code>src/identity/credential-broker.ts</code>（Oracle Broker 协议）、<code>src/identity/tip-verifier.ts</code>（TIP OIDC/JWKS）、<code>src/identity/oauth-introspection-verifier.ts</code>（RFC 7662）以及 <code>src/providers/oracle_database/runtime.ts</code>（Oracle 只读运行时和会话身份）。</p>
+<p>定向验证命令：</p>
+<pre lang="bash" caption="Oracle / ArkClaw 定向测试"><code>npm exec -- vitest run \
+  src/control-plane/arkclaw-mcp.test.ts \
+  src/control-plane/oracle-driver.test.ts \
+  src/providers/oracle_database/runtime.test.ts \
+  src/identity/oauth-introspection-verifier.test.ts \
+  --reporter=dot</code></pre>
+<p>本轮定向回归为 6 个测试文件、25 个测试全部通过，覆盖 Application Center CreateResource/GetResource/DeleteResource、异步状态轮询、V4 签名、企业资源不携带 <code>clawId</code>、通用企业 MCP 的 Provider 引用和 MSE 授权主体映射、MCP 资源 URL、API Key/TIP、group/Agent ACL、原生 Oracle tools、Broker 首次授权和 OAuth 校验。新增通用代理路径为 HTTP 层透传；真实 SSE 长连接、真实 MSE Gateway Provider 注入、客户 MCP 和客户 Oracle 仍需环境联调。</p>
+<p>lint、format 检查和 diff 检查通过。全仓库 typecheck 仍有 7 个与本次 Oracle/ArkClaw 改造无关的既有错误，集中在 Hologres、OceanBase 和 TiDB provider；本轮未重新宣称全量测试零错误，因此当前状态适合继续做 Oracle 联调，但不能宣称仓库全量构建零错误。</p>
+
+<h1>最终验收标准</h1>
+<checkbox done="false">客户 Oracle 只读账号已创建，目标 Schema/Table 权限和 VPD/RLS 策略已确认。</checkbox>
+<checkbox done="false">OpenConnector 生产出口 IP 已加入客户 Oracle 网络白名单，并完成 TCP/TLS 连通性验证。</checkbox>
+<checkbox done="false">Identity Credential Broker 已登记 credentialRef，按 TIP user、Agent 和 userpool group 返回凭据或授权 URL。</checkbox>
+<checkbox done="false">OpenConnector 已配置加密密钥、TIP issuer/audience、API Key hash 和 Credential Broker HTTPS endpoint。</checkbox>
+<checkbox done="false">Connection validate 成功，且数据库中没有出现原始 Oracle password。</checkbox>
+<checkbox done="false">AppResource 的 tools/list 只出现允许的 Oracle tools，越权 Schema/Table、用户、组和 Agent 均被拒绝。</checkbox>
+<checkbox done="false">ArkClaw 调试成功执行 list_tables、preview_table 和带参数的 execute_read_query，Oracle 审计中能看到对应 CLIENT_IDENTIFIER。</checkbox>
+
+<h1>结论性判断</h1>
+<p>所以，对“看下 Wiki 这个流程，是不是可以完成端到端的 Oracle 应用注册”的准确回答是：<b>可以完成 Oracle 专用 MCP 应用的端到端注册与调用路径，但当前不能宣称已经完成生产级真实环境闭环。</b>必须采用“Wiki + OpenConnector + Application Center/APIG + Identity Broker + 客户 Oracle 环境”的组合方案，并在企业模式下不发送 <code>clawId</code>。OpenConnector 当前已覆盖 Oracle Connection、AppResource、MCP 运行面和安全执行面；Application Center 的真实 Provider 注入、应用授权同步、客户 Oracle 的固定出口白名单、只读账号和 VPD/RLS 仍必须完成联调。缺少任意一个关键外部条件，ArkClaw 可能能看到 MCP，却不能真正安全地查询 Oracle。</p>

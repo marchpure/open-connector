@@ -38,6 +38,7 @@ export class ConnectionLeaseService {
         connection_ids_json text not null,
         connection_revisions_json text,
         allowed_actions_json text not null,
+        allowed_resources_json text,
         issued_at text not null,
         expires_at text not null,
         revoked_at text
@@ -63,6 +64,7 @@ export class ConnectionLeaseService {
       connectionIds: string[];
       connectionRevisions?: Record<string, number>;
       allowedActions: string[];
+      allowedResources?: { schemas?: string[]; tables?: string[] };
       invocationId: string;
       audience: string;
       ttlSeconds?: number;
@@ -70,6 +72,7 @@ export class ConnectionLeaseService {
   ): { token: string; claims: ConnectionLeaseClaims } {
     const connectionIds = uniqueNonEmpty(input.connectionIds);
     const allowedActions = uniqueNonEmpty(input.allowedActions);
+    const allowedResources = normalizeAllowedResources(input.allowedResources);
     if (connectionIds.length === 0 || allowedActions.length === 0) {
       throw new LeaseError("invalid_lease", "connection_ids and allowed_actions must both be non-empty.");
     }
@@ -93,6 +96,7 @@ export class ConnectionLeaseService {
       connectionIds,
       connectionRevisions,
       allowedActions,
+      allowedResources,
       issuedAt: issued.toISOString(),
       expiresAt: expires.toISOString(),
       jti: randomUUID(),
@@ -103,8 +107,9 @@ export class ConnectionLeaseService {
       .prepare(
         `insert into connection_leases
           (token_hash, jti, tenant_id, workspace_id, subject, invocation_id, audience,
-           owner_id, connection_ids_json, connection_revisions_json, allowed_actions_json, issued_at, expires_at)
-         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           owner_id, connection_ids_json, connection_revisions_json, allowed_actions_json, allowed_resources_json,
+           issued_at, expires_at)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         hashToken(token),
@@ -118,6 +123,7 @@ export class ConnectionLeaseService {
         JSON.stringify(claims.connectionIds),
         claims.connectionRevisions ? JSON.stringify(claims.connectionRevisions) : null,
         JSON.stringify(claims.allowedActions),
+        claims.allowedResources ? JSON.stringify(claims.allowedResources) : null,
         claims.issuedAt,
         claims.expiresAt,
       );
@@ -234,6 +240,9 @@ function ensureOwnerIdColumn(database: DatabaseSync): void {
   if (!columns.some((column) => column.name === "owner_id")) {
     database.exec("alter table connection_leases add column owner_id text");
   }
+  if (!columns.some((column) => column.name === "allowed_resources_json")) {
+    database.exec("alter table connection_leases add column allowed_resources_json text");
+  }
 }
 
 function uniqueNonEmpty(values: string[]): string[] {
@@ -279,6 +288,13 @@ function readSignedLease(token: string, signingKey: string): ConnectionLeaseClai
     ) {
       return undefined;
     }
+    if (claims.allowedResources !== undefined) {
+      try {
+        normalizeAllowedResources(claims.allowedResources);
+      } catch {
+        return undefined;
+      }
+    }
     return claims as ConnectionLeaseClaims;
   } catch {
     return undefined;
@@ -299,9 +315,29 @@ function rowToClaims(row: Record<string, unknown>): ConnectionLeaseClaims {
     connectionIds: JSON.parse(String(row.connection_ids_json)) as string[],
     connectionRevisions,
     allowedActions: JSON.parse(String(row.allowed_actions_json)) as string[],
+    allowedResources: row.allowed_resources_json
+      ? (JSON.parse(String(row.allowed_resources_json)) as ConnectionLeaseClaims["allowedResources"])
+      : undefined,
     issuedAt: String(row.issued_at),
     expiresAt: String(row.expires_at),
     jti: String(row.jti),
+  };
+}
+
+function normalizeAllowedResources(
+  value: ConnectionLeaseClaims["allowedResources"],
+): ConnectionLeaseClaims["allowedResources"] | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object")
+    throw new LeaseError("invalid_lease", "allowed_resources must be an object.");
+  const schemas = uniqueNonEmpty(value.schemas ?? []);
+  const tables = uniqueNonEmpty(value.tables ?? []);
+  if (schemas.length === 0 && tables.length === 0) {
+    throw new LeaseError("invalid_lease", "allowed_resources must contain schemas or tables.");
+  }
+  return {
+    ...(schemas.length > 0 ? { schemas } : {}),
+    ...(tables.length > 0 ? { tables } : {}),
   };
 }
 

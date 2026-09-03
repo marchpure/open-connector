@@ -10,7 +10,10 @@ export function createMysqlBackend(values: Record<string, string>, signal?: Abor
       engine: "MySQL",
       defaultPort: 3306,
       defaultDatabase: "mysql",
-      versionMatches: (version) => !/(doris|starrocks|mariadb|tidb|oceanbase)/i.test(version),
+      // MariaDB speaks the MySQL wire protocol and is commonly exposed by
+      // managed "MySQL" instances. Keep rejecting analytical/other engines,
+      // but accept MariaDB as a compatible MySQL endpoint.
+      versionMatches: (version) => !/(doris|starrocks|tidb|oceanbase)/i.test(version),
     },
     signal,
   );

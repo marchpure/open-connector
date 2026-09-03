@@ -1,6 +1,7 @@
 import type { CatalogStore } from "../catalog-store.ts";
 import type { ActionPolicySnapshot } from "../core/action-policy.ts";
 import type { TransitFileWriter } from "../core/types.ts";
+import type { CredentialBroker } from "../identity/credential-broker.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
 import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
 import type { ConnectionLeaseClaims, TenantPrincipal } from "./types.ts";
@@ -29,6 +30,7 @@ export interface ControlPlaneDependencies {
   secretCodec: ISecretCodec;
   publicOrigin: string;
   transitFiles?: TransitFileWriter;
+  credentialBroker?: CredentialBroker;
 }
 
 export interface TenantRuntime {
@@ -42,6 +44,7 @@ export interface TenantRuntime {
   oauthFlow: OAuthFlowService;
   oauthClientConfigs: OAuthClientConfigService;
   resources: TenantResourceStore;
+  credentialBroker?: CredentialBroker;
 }
 
 export function createTenantRuntime(deps: ControlPlaneDependencies, principal: TenantPrincipal): TenantRuntime {
@@ -86,6 +89,7 @@ export function createTenantRuntime(deps: ControlPlaneDependencies, principal: T
     records: () => connections.listRecords(),
     oauthClientConfigs,
     resources,
+    credentialBroker: deps.credentialBroker,
   };
 }
 

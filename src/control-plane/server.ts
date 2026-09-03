@@ -1,32 +1,50 @@
 import type { CatalogStore } from "../catalog-store.ts";
-import type { TransitFileWriter } from "../core/types.ts";
-import type { ActionDefinition } from "../core/types.ts";
+import type { ActionDefinition, ResolvedCredential, TransitFileWriter } from "../core/types.ts";
+import type { CredentialBroker } from "../identity/credential-broker.ts";
+import type { OAuthAccessTokenVerifier, VerifiedOAuthAccessToken } from "../identity/oauth-jwt-verifier.ts";
+import type { TipVerifier } from "../identity/tip-types.ts";
 import type { IProviderLoader, ProviderResourceCandidate } from "../providers/provider-loader.ts";
 import type { ITransitFileService } from "../server/files/transit-file-store.ts";
 import type { StagedTransitFile } from "../server/files/transit-file-store.ts";
 import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
 import type { IRunLogStore, RunLog } from "../server/storage/runtime-store.ts";
 import type { AdapterResourceKind } from "./adapter-resource-store.ts";
+import type { AppResourceRecord } from "./app-resource-store.ts";
+import type {
+  ApplicationCenterAuthConfig,
+  ApplicationCenterRegistry,
+  CredentialAuthConfig,
+} from "./application-center-client.ts";
 import type { EnablementEntry } from "./catalog.ts";
+import type { CustomMcpVisibility } from "./custom-mcp-resource-store.ts";
+import type { McpAuthorizer } from "./mcp-authorizer.ts";
 import type { OracleConnectionConfig, OracleQueryDriver } from "./oracle-adapter.ts";
 import type { OracleDriverOptions } from "./oracle-driver.ts";
-import type { ResourceRef, TenantPrincipal } from "./types.ts";
+import type { ConnectionRecord, ResourceRef, TenantPrincipal } from "./types.ts";
 import type { Context } from "hono";
 import type { DatabaseSync } from "node:sqlite";
 
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { Hono } from "hono";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { ConnectionError } from "../connection-service.ts";
+import { CredentialAuthorizationRequiredError } from "../identity/credential-broker.ts";
+import { mergeManagedCredential } from "../identity/managed-credential.ts";
 import { readJsonBody, jsonError } from "../server/api/http-utils.ts";
 import { renderOAuthCompletionPage, renderOAuthErrorPage } from "../server/api/oauth-completion-page.ts";
 import { TenantAdapterResourceStore } from "./adapter-resource-store.ts";
+import { AppResourceStore as TenantAppResourceStore } from "./app-resource-store.ts";
+import { createArkClawMcpServer } from "./arkclaw-mcp.ts";
 import { verifyPrincipalToken } from "./auth.ts";
 import { CatalogEnablement } from "./catalog.ts";
+import { proxyCustomMcp } from "./custom-mcp-proxy.ts";
+import { CustomMcpResourceStore } from "./custom-mcp-resource-store.ts";
 import { isAllowedDataPlatformLeaseAction, isDataPlatformService } from "./data-platform-policy.ts";
 import { TenantFileAdapter } from "./file-adapter.ts";
 import { ConnectionJobStore } from "./job-store.ts";
 import { ConnectionLeaseService, LeaseError } from "./lease.ts";
 import { ControlledMcpAdapter, TenantMcpDefinitionStore } from "./mcp-adapter.ts";
+import { authorizeMcp } from "./mcp-authorizer.ts";
 import { OracleDatabaseAdapter } from "./oracle-adapter.ts";
 import { redactSecrets, safeConnectionProfile } from "./redaction.ts";
 import { RestIdempotencyStore, RestOpenApiAdapter } from "./rest-adapter.ts";
@@ -52,6 +70,28 @@ export interface ConnectionControlAppOptions {
   fileStore?: ITransitFileService;
   stageFileUpload?: <T>(request: Request, consume: (file: StagedTransitFile) => Promise<T>) => Promise<T>;
   oracleDriverFactory?: (config: OracleConnectionConfig, credentials: OracleDriverOptions) => OracleQueryDriver;
+  arkclaw?: {
+    apiKeyHashes: string[];
+    verifyTip: TipVerifier;
+    authorizer?: McpAuthorizer;
+    credentialBroker?: CredentialBroker;
+    verifyOAuthToken?: OAuthAccessTokenVerifier;
+  };
+  applicationCenter?: {
+    registry: ApplicationCenterRegistry;
+    spaceId: string;
+    /** enterprise uses shared AiResource; user uses personal UserResource. */
+    resourceMode?: "enterprise" | "user";
+    clawId?: string;
+    userPoolUserUid?: string;
+    allowRawCredentialProvisioning?: boolean;
+  };
+  customMcp?: {
+    allowPrivateNetwork?: boolean;
+    proxyTimeoutMs?: number;
+    fetcher?: typeof fetch;
+    skipDnsValidation?: boolean;
+  };
 }
 
 export function createConnectionControlApp(options: ConnectionControlAppOptions): Hono {
@@ -336,6 +376,374 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       ? context.json({ resource: { ...resource, definition: undefined } })
       : jsonError(context, 404, "adapter_resource_not_found", "Adapter resource was not found.");
   });
+  app.post("/v1/app-resources", async (context) => {
+    const body = await readJsonBody(context);
+    const principal = principalOf(context);
+    const runtime = tenantRuntime(options, principal);
+    const connectionId = requiredString(body.connectionId);
+    const connection = runtime.connections.ownerRecord(connectionId);
+    if (!connection)
+      return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
+    if (connection.service !== "oracle_database") {
+      return jsonError(context, 400, "unsupported_resource", "Only Oracle Database resources are supported here.");
+    }
+    const actions = requiredStringArray(body.allowedActions);
+    const invalidActions = actions.filter((actionId) => {
+      const action = options.catalog.actionsById.get(actionId);
+      return !action || action.service !== connection.service || !action.execution.locallyExecutable;
+    });
+    if (invalidActions.length > 0) {
+      return jsonError(
+        context,
+        400,
+        "invalid_action",
+        "Every app resource action must belong to the Oracle connection.",
+      );
+    }
+    try {
+      const requestedCredentialRef = optionalString(body.credentialRef);
+      if (requestedCredentialRef && requestedCredentialRef !== connection.credentialRef) {
+        return jsonError(
+          context,
+          400,
+          "credential_ref_mismatch",
+          "App resources must use the credential reference bound to the connection.",
+        );
+      }
+      if (connection.credentialMode === "local" && requestedCredentialRef) {
+        return jsonError(
+          context,
+          400,
+          "credential_ref_mismatch",
+          "A local-credential connection cannot use a managed credential reference.",
+        );
+      }
+      const resources = new TenantAppResourceStore(options.controlDatabase);
+      const resourceId = optionalString(body.resourceId) ?? crypto.randomUUID();
+      if (resources.hasResourceId(resourceId)) {
+        return jsonError(context, 409, "app_resource_exists", "An app resource with this resourceId already exists.");
+      }
+      if (resources.getByName(requiredString(body.displayName), principal)) {
+        return jsonError(context, 409, "app_resource_name_exists", "An app resource with this name already exists.");
+      }
+      const proxyCredentialAuthConfig = parseCredentialAuthConfig(body.credentialAuthConfig);
+      const proxyCredential = parseProxyCredential(body.proxyCredential);
+      if (proxyCredentialAuthConfig && proxyCredential) {
+        return jsonError(
+          context,
+          400,
+          "credential_config_conflict",
+          "Use either proxyCredential or credentialAuthConfig, not both.",
+        );
+      }
+      if (
+        proxyCredentialAuthConfig &&
+        options.applicationCenter &&
+        !options.applicationCenter.allowRawCredentialProvisioning
+      ) {
+        return jsonError(
+          context,
+          403,
+          "raw_credential_provisioning_disabled",
+          "Raw CredentialAuthConfig provisioning is disabled; create a credential provider first and reference it.",
+        );
+      }
+      const proxyAuthConfig = proxyCredential?.authConfig;
+      const proxyApiKeyHashes =
+        proxyCredentialAuthConfig?.Type === "api_key"
+          ? proxyCredentialAuthConfig.ApikeyConfig!.map((config) => sha256(config.ApiKey))
+          : [];
+      const ingressAuth =
+        optionalIngressAuth(body.ingressAuth) ??
+        proxyCredential?.ingressAuth ??
+        (proxyCredentialAuthConfig ? proxyCredentialAuthConfig.Type : undefined);
+      if (body.ingressAuth !== undefined && proxyCredential && body.ingressAuth !== ingressAuth) {
+        return jsonError(context, 400, "ingress_auth_mismatch", "ingressAuth must match proxyCredential type.");
+      }
+      const ingressApiKeyHashes = stringArrayOptional(body.ingressApiKeyHashes) ?? [];
+      if (proxyCredential?.ingressAuth === "api_key" && ingressApiKeyHashes.length === 0) {
+        return jsonError(
+          context,
+          400,
+          "ingress_api_key_required",
+          "API Key provider reference requires ingressApiKeyHashes for local ingress verification.",
+        );
+      }
+      const applicationCenterMode = options.applicationCenter?.resourceMode ?? "enterprise";
+      if (applicationCenterMode === "user" && !options.applicationCenter?.clawId) {
+        return jsonError(context, 500, "application_center_config_error", "User resource mode requires a Claw ID.");
+      }
+      const applicationCenterInput = options.applicationCenter
+        ? {
+            spaceId: options.applicationCenter.spaceId,
+            name: requiredString(body.displayName),
+            description: optionalString(body.description),
+            mcpUrl: new URL(`/mcp/apps/${encodeURIComponent(resourceId)}`, options.publicOrigin).toString(),
+            ...(applicationCenterMode === "user" ? { clawId: options.applicationCenter.clawId } : {}),
+            ...(applicationCenterMode === "user" &&
+            (principal.userPoolUserUid ?? options.applicationCenter.userPoolUserUid)
+              ? { userPoolUserUid: principal.userPoolUserUid ?? options.applicationCenter.userPoolUserUid }
+              : {}),
+            authConfig: proxyAuthConfig,
+            credentialAuthConfig: proxyCredentialAuthConfig,
+          }
+        : undefined;
+      const registered = applicationCenterInput
+        ? await options.applicationCenter!.registry.createResource(applicationCenterInput, context.req.raw.signal)
+        : undefined;
+      let resource;
+      try {
+        resource = resources.save({
+          resourceId,
+          principal,
+          displayName: requiredString(body.displayName),
+          connectionId,
+          allowedActions: actions,
+          allowedResources: recordOf(body.allowedResources) as { schemas?: string[]; tables?: string[] },
+          allowedSubjects: stringArrayOptional(body.allowedSubjects),
+          allowedGroups: stringArrayOptional(body.allowedGroups),
+          allowedAgentIds: stringArrayOptional(body.allowedAgentIds),
+          credentialRef: connection.credentialMode === "managed" ? connection.credentialRef : undefined,
+          ingressApiKeyHashes: [...ingressApiKeyHashes, ...proxyApiKeyHashes],
+          requiredOAuthScopes: stringArrayOptional(body.requiredOAuthScopes),
+          allowedOAuthClientIds: stringArrayOptional(body.allowedOAuthClientIds),
+          oauthIdentityClaims: stringArrayOptional(body.oauthIdentityClaims),
+          ingressAuth,
+          visibility: optionalVisibility(body.visibility),
+          mseResourceId: registered?.Id,
+          mseGatewayUrl: registered?.NetworkConfig?.GatewayUrl,
+          mseGatewayUrlType: registered?.NetworkConfig?.GatewayUrlType,
+          mseStatus: registered?.Status,
+          registrationStatus: applicationCenterInput ? "ready" : "local",
+          credentialProviderNames: [
+            ...credentialProviderNames(proxyCredentialAuthConfig),
+            ...(proxyCredential?.providerNames ?? []),
+          ],
+        });
+      } catch (error) {
+        if (applicationCenterInput && registered?.Id) {
+          try {
+            await options.applicationCenter!.registry.deleteResource(
+              registered.Id,
+              applicationCenterInput,
+              context.req.raw.signal,
+            );
+          } catch {
+            // Preserve the persistence error; an operator can reconcile the external resource by ID.
+          }
+        }
+        throw error;
+      }
+      return context.json({ resource: appResourceResponse(resource, options.publicOrigin) }, 201);
+    } catch (error) {
+      return jsonError(
+        context,
+        400,
+        "app_resource_error",
+        error instanceof Error ? error.message : "App resource could not be saved.",
+      );
+    }
+  });
+  app.get("/v1/custom-mcp-resources", (context) => {
+    const resources = new CustomMcpResourceStore(options.controlDatabase);
+    return context.json({
+      items: resources
+        .listForPrincipal(principalOf(context))
+        .map((resource) => customMcpResourceResponse(resource, options.publicOrigin)),
+    });
+  });
+  app.get("/v1/custom-mcp-resources/:resourceId", (context) => {
+    const resources = new CustomMcpResourceStore(options.controlDatabase);
+    const resource = resources.getForPrincipal(context.req.param("resourceId"), principalOf(context));
+    return resource
+      ? context.json({ resource: customMcpResourceResponse(resource, options.publicOrigin) })
+      : jsonError(context, 404, "custom_mcp_not_found", "Custom MCP resource was not found.");
+  });
+  app.post("/v1/custom-mcp-resources", async (context) => {
+    try {
+      const body = await readJsonBody(context);
+      const principal = principalOf(context);
+      const resources = new CustomMcpResourceStore(options.controlDatabase);
+      const resourceId = optionalString(body.resourceId) ?? crypto.randomUUID();
+      const displayName = requiredString(body.displayName);
+      if (resources.getByName(displayName, principal)) {
+        return jsonError(
+          context,
+          409,
+          "custom_mcp_name_exists",
+          "A custom MCP resource with this name already exists.",
+        );
+      }
+      const upstreamUrl = requiredString(body.upstreamUrl);
+      assertCustomMcpUrl(upstreamUrl);
+      const protocol = parseCustomMcpProtocol(body.protocol);
+      const credential = parseCustomMcpCredential(body.proxyCredential);
+      const ingressAuth = optionalIngressAuth(body.ingressAuth) ?? credential?.type ?? "api_key";
+      if (credential && credential.type !== ingressAuth) {
+        return jsonError(context, 400, "custom_mcp_auth_mismatch", "ingressAuth must match proxyCredential type.");
+      }
+      const ingressApiKeyHashes = stringArrayOptional(body.ingressApiKeyHashes) ?? [];
+      if (ingressAuth === "api_key" && ingressApiKeyHashes.length === 0 && !credential) {
+        return jsonError(
+          context,
+          400,
+          "custom_mcp_api_key_required",
+          "Direct API key ingress requires SHA-256 ingressApiKeyHashes or an Application Center provider reference.",
+        );
+      }
+      const visibility = parseCustomMcpVisibility(body.visibility);
+      const allowedSubjects = stringArrayOptional(body.allowedSubjects) ?? [];
+      const allowedGroups = stringArrayOptional(body.allowedGroups) ?? [];
+      const allowedAgentIds = stringArrayOptional(body.allowedAgentIds) ?? [];
+      if (visibility === "partial" && allowedSubjects.length === 0 && allowedGroups.length === 0) {
+        return jsonError(
+          context,
+          400,
+          "custom_mcp_acl_required",
+          "Partial visibility requires an authorized user or group.",
+        );
+      }
+      const applicationCenterMode = options.applicationCenter?.resourceMode ?? "enterprise";
+      if (applicationCenterMode === "user" && !options.applicationCenter?.clawId) {
+        return jsonError(context, 500, "application_center_config_error", "User resource mode requires a Claw ID.");
+      }
+      const authorizedSubjects = [
+        ...allowedSubjects.map((SubjectId) => ({ SubjectId, SubjectType: "USER" })),
+        ...allowedGroups.map((SubjectId) => ({ SubjectId, SubjectType: "GROUP" })),
+      ];
+      if (visibility === "personal") authorizedSubjects.push({ SubjectId: principal.ownerId, SubjectType: "USER" });
+      const mseVisibility = visibility === "team" && authorizedSubjects.length === 0 ? "Visible" : "PartiallyVisible";
+      const applicationCenterInput = options.applicationCenter
+        ? {
+            spaceId: options.applicationCenter.spaceId,
+            name: displayName,
+            description: optionalString(body.description),
+            mcpUrl: new URL(`/mcp/custom/${encodeURIComponent(resourceId)}`, options.publicOrigin).toString(),
+            ...(applicationCenterMode === "user" ? { clawId: options.applicationCenter.clawId } : {}),
+            ...(applicationCenterMode === "user" &&
+            (principal.userPoolUserUid ?? options.applicationCenter.userPoolUserUid)
+              ? { userPoolUserUid: principal.userPoolUserUid ?? options.applicationCenter.userPoolUserUid }
+              : {}),
+            ...(credential ? { authConfig: credential.authConfig } : {}),
+            visibility: mseVisibility,
+            ...(authorizedSubjects.length ? { authorizedSubjects } : {}),
+          }
+        : undefined;
+      const registered = applicationCenterInput
+        ? await options.applicationCenter!.registry.createResource(applicationCenterInput, context.req.raw.signal)
+        : undefined;
+      let resource;
+      try {
+        resource = resources.save({
+          resourceId,
+          principal,
+          displayName,
+          upstreamUrl,
+          protocol,
+          ...(credential
+            ? { credentialProviderName: credential.providerName, credentialProviderType: credential.type }
+            : {}),
+          ingressAuth,
+          ingressApiKeyHashes,
+          requiredOAuthScopes: stringArrayOptional(body.requiredOAuthScopes),
+          allowedOAuthClientIds: stringArrayOptional(body.allowedOAuthClientIds),
+          oauthIdentityClaims: stringArrayOptional(body.oauthIdentityClaims),
+          allowedSubjects,
+          allowedGroups,
+          allowedAgentIds,
+          visibility,
+          allowPrivateNetwork: body.allowPrivateNetwork === true,
+          // An ingress bearer is not an upstream credential. Only an
+          // Application Center provider reference may enable its forwarding.
+          forwardAuthorization: Boolean(credential),
+          forwardTipToken: body.forwardTipToken !== false,
+          mseResourceId: registered?.Id,
+          mseGatewayUrl: registered?.NetworkConfig?.GatewayUrl,
+          mseGatewayUrlType: registered?.NetworkConfig?.GatewayUrlType,
+          mseStatus: registered?.Status,
+          registrationStatus: applicationCenterInput ? "ready" : "local",
+        });
+      } catch (error) {
+        if (applicationCenterInput && registered?.Id) {
+          await Promise.resolve(
+            options.applicationCenter!.registry.deleteResource(
+              registered.Id,
+              applicationCenterInput,
+              context.req.raw.signal,
+            ),
+          ).catch(() => undefined);
+        }
+        throw error;
+      }
+      return context.json({ resource: customMcpResourceResponse(resource, options.publicOrigin) }, 201);
+    } catch (error) {
+      return jsonError(
+        context,
+        400,
+        "custom_mcp_resource_error",
+        error instanceof Error ? error.message : "Custom MCP resource could not be created.",
+      );
+    }
+  });
+  app.delete("/v1/custom-mcp-resources/:resourceId", async (context) => {
+    const principal = principalOf(context);
+    const resources = new CustomMcpResourceStore(options.controlDatabase);
+    const resource = resources.getForPrincipal(context.req.param("resourceId"), principal);
+    if (!resource || resource.ownerId !== principal.ownerId)
+      return jsonError(context, 404, "custom_mcp_not_found", "Custom MCP resource was not found.");
+    if (options.applicationCenter && resource.mseResourceId) {
+      await options.applicationCenter.registry.deleteResource(
+        resource.mseResourceId,
+        {
+          spaceId: options.applicationCenter.spaceId,
+          ...(options.applicationCenter.resourceMode === "user" && options.applicationCenter.clawId
+            ? { clawId: options.applicationCenter.clawId }
+            : {}),
+          ...(options.applicationCenter.resourceMode === "user" &&
+          (principal.userPoolUserUid ?? options.applicationCenter.userPoolUserUid)
+            ? { userPoolUserUid: principal.userPoolUserUid ?? options.applicationCenter.userPoolUserUid }
+            : {}),
+        },
+        context.req.raw.signal,
+      );
+    }
+    return resources.revoke(resource.resourceId, principal)
+      ? new Response(null, { status: 204 })
+      : jsonError(context, 404, "custom_mcp_not_found", "Custom MCP resource was not found.");
+  });
+  app.get("/v1/app-resources", (context) => {
+    const resources = new TenantAppResourceStore(options.controlDatabase);
+    return context.json({
+      items: resources
+        .listForPrincipal(principalOf(context))
+        .map((resource) => appResourceResponse(resource, options.publicOrigin)),
+    });
+  });
+  app.delete("/v1/app-resources/:resourceId", async (context) => {
+    const resources = new TenantAppResourceStore(options.controlDatabase);
+    const principal = principalOf(context);
+    const existing = resources.getForPrincipal(context.req.param("resourceId"), principal);
+    if (!existing) return jsonError(context, 404, "app_resource_not_found", "App resource was not found.");
+    if (options.applicationCenter && existing.mseResourceId) {
+      await options.applicationCenter.registry.deleteResource(
+        existing.mseResourceId,
+        {
+          spaceId: options.applicationCenter.spaceId,
+          ...(options.applicationCenter.resourceMode === "user" && options.applicationCenter.clawId
+            ? { clawId: options.applicationCenter.clawId }
+            : {}),
+          ...(options.applicationCenter.resourceMode === "user" &&
+          (principal.userPoolUserUid ?? options.applicationCenter.userPoolUserUid)
+            ? { userPoolUserUid: principal.userPoolUserUid ?? options.applicationCenter.userPoolUserUid }
+            : {}),
+        },
+        context.req.raw.signal,
+      );
+    }
+    return resources.revoke(context.req.param("resourceId"), principal)
+      ? new Response(null, { status: 204 })
+      : jsonError(context, 404, "app_resource_not_found", "App resource was not found.");
+  });
   app.get("/v1/files", async (context) => {
     if (!options.fileStore) return context.json({ items: [] });
     const files = tenantFileAdapter(options, principalOf(context)).list();
@@ -415,6 +823,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     if (!runtime.connections.revokeRecord(connectionId)) {
       return jsonError(context, 404, "connection_not_found", "Connection is not visible to this tenant.");
     }
+    new TenantAppResourceStore(options.controlDatabase).revokeByConnection(connectionId, principal);
     leases.revokeForConnection(connectionId, principal);
     return new Response(null, { status: 204 });
   });
@@ -435,7 +844,8 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     return context.json({ acl });
   });
   app.post("/v1/connections/:connectionId/validate", async (context) => {
-    const runtime = tenantRuntime(options, principalOf(context));
+    const principal = principalOf(context);
+    const runtime = tenantRuntime(options, principal);
     const connectionId = context.req.param("connectionId");
     const connection = runtime.connections.visibleRecord(connectionId);
     if (!connection) {
@@ -446,17 +856,36 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     jobs.start(job.id);
     runtime.connections.setStatus(connectionId, "validating");
     try {
-      await runtime.connectionService.validateStoredConnection(
-        connection.service,
-        connection.connectionName,
-        context.req.raw.signal,
-      );
+      if (connection.credentialMode === "managed") {
+        const credential = await resolveManagedConnectionCredential(
+          runtime,
+          connection,
+          principal,
+          connectionId,
+          context.req.raw.signal,
+        );
+        await runtime.connectionService.validateResolvedCredential(
+          connection.service,
+          credential,
+          context.req.raw.signal,
+        );
+      } else {
+        await runtime.connectionService.validateStoredConnection(
+          connection.service,
+          connection.connectionName,
+          context.req.raw.signal,
+        );
+      }
       jobs.succeed(job.id, { validated: true });
       runtime.connections.setStatus(connectionId, "ready");
     } catch (error) {
       jobs.fail(job.id, {
-        code: error instanceof ConnectionError ? error.code : "validation_failed",
+        code:
+          error instanceof ConnectionError || error instanceof CredentialAuthorizationRequiredError
+            ? error.code
+            : "validation_failed",
         message: error instanceof Error ? error.message : "Connection validation failed.",
+        ...(error instanceof CredentialAuthorizationRequiredError ? { authorizationUrl: error.authorizationUrl } : {}),
       });
       runtime.connections.setStatus(connectionId, "error");
     }
@@ -512,6 +941,22 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
           connection.service,
           connection.connectionName,
         );
+        const managedCredential =
+          connection.credentialMode === "managed"
+            ? await resolveManagedConnectionCredential(
+                runtime,
+                connection,
+                principalOf(context),
+                connectionId,
+                context.req.raw.signal,
+              )
+            : undefined;
+        const getCredential = managedCredential
+          ? async (service: string) =>
+              service === connection.service
+                ? mergeResolvedCredential(await execution.getCredential(service), managedCredential)
+                : undefined
+          : execution.getCredential;
         const currentConnection = runtime.connections.visibleRecord(connectionId);
         if (!currentConnection) {
           throw new ConnectionError(
@@ -529,7 +974,7 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
         const candidates = options.providerLoader.discoverResources
           ? await options.providerLoader.discoverResources(
               connection.service,
-              { getCredential: execution.getCredential, signal: context.req.raw.signal },
+              { getCredential, signal: context.req.raw.signal },
               context.req.raw.signal,
             )
           : [];
@@ -562,10 +1007,16 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
           })),
         });
       } catch (error) {
-        const code = error instanceof ConnectionError ? error.code : "discovery_failed";
+        const code =
+          error instanceof ConnectionError || error instanceof CredentialAuthorizationRequiredError
+            ? error.code
+            : "discovery_failed";
         jobs.fail(job.id, {
           code,
           message: error instanceof Error ? error.message : "Connection resource discovery failed.",
+          ...(error instanceof CredentialAuthorizationRequiredError
+            ? { authorizationUrl: error.authorizationUrl }
+            : {}),
         });
         await recordControlPlaneFailure(runtime.runs, {
           service: connection.service,
@@ -600,7 +1051,20 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
     }
     try {
       let profile;
-      if (authType === "api_key") {
+      const credentialRef = optionalString(body.credentialRef);
+      if (credentialRef) {
+        if (service !== "oracle_database" || authType !== "custom_credential") {
+          return jsonError(
+            context,
+            400,
+            "unsupported_credential_ref",
+            "Credential references currently support Oracle custom credentials.",
+          );
+        }
+        const values = oracleReferenceValues(recordOf(body.values));
+        const stored = await runtime.connections.setCredentialReference(service, connectionName, credentialRef, values);
+        profile = await runtime.connectionService.getConnectionSummary(service, stored.connectionName);
+      } else if (authType === "api_key") {
         profile = await runtime.connectionService.connectWithApiKey(service, {
           connectionName,
           values: recordOf(body.values),
@@ -1198,7 +1662,445 @@ export function createConnectionControlApp(options: ConnectionControlAppOptions)
       );
     }
   });
+  app.post("/mcp/apps/:resourceId", async (context) =>
+    handleArkClawMcp(context, options, context.req.param("resourceId")),
+  );
+  app.get("/mcp/apps/:resourceId", (context) => rejectMcpMethod(context));
+  app.delete("/mcp/apps/:resourceId", (context) => rejectMcpMethod(context));
+  app.post("/mcp/arkclaw", async (context) => handleArkClawMcp(context, options));
+  app.get("/mcp/arkclaw", (context) => rejectMcpMethod(context));
+  app.delete("/mcp/arkclaw", (context) => rejectMcpMethod(context));
+  app.all("/mcp/custom/:resourceId", async (context) =>
+    handleCustomMcpProxy(context, options, context.req.param("resourceId")),
+  );
   return app;
+}
+
+async function handleArkClawMcp(
+  context: Context,
+  options: ConnectionControlAppOptions,
+  pathResourceId?: string,
+): Promise<Response> {
+  if (!options.arkclaw) return jsonError(context, 404, "arkclaw_not_configured", "ArkClaw MCP is not configured.");
+  const arkclaw = options.arkclaw;
+  const headerResourceId = context.req.header("x-app-resourceid") ?? context.req.header("x-app-resource-id");
+  const resourceId = pathResourceId ?? headerResourceId;
+  if (!resourceId) return jsonError(context, 400, "resource_required", "X-App-ResourceId is required.");
+  const resources = new TenantAppResourceStore(options.controlDatabase);
+  const candidate = pathResourceId
+    ? resources.getById(pathResourceId)
+    : headerResourceId
+      ? (resources.getById(headerResourceId) ?? resources.getByMseResourceId(headerResourceId))
+      : undefined;
+  if (pathResourceId && headerResourceId && candidate) {
+    const expectedGatewayResourceId = candidate.mseResourceId ?? candidate.resourceId;
+    if (headerResourceId !== expectedGatewayResourceId) {
+      return jsonError(context, 400, "resource_mismatch", "X-App-ResourceId does not match this MCP resource.");
+    }
+  }
+  const apiKey = readBearer(context);
+  const oauthToken =
+    candidate?.ingressAuth === "oauth2"
+      ? apiKey && arkclaw.verifyOAuthToken
+        ? await arkclaw.verifyOAuthToken(apiKey, context.req.raw.signal)
+        : undefined
+      : undefined;
+  const authenticated =
+    candidate?.ingressAuth === "oauth2"
+      ? Boolean(oauthToken)
+      : verifyApiKey(
+          apiKey,
+          candidate?.ingressApiKeyHashes.length ? candidate.ingressApiKeyHashes : arkclaw.apiKeyHashes,
+        );
+  if (!authenticated) {
+    return jsonError(context, 401, "unauthorized", "Valid ArkClaw ingress authentication is required.");
+  }
+  if (!candidate)
+    return jsonError(context, 403, "resource_forbidden", "The app resource is not available to this user.");
+  const localResourceId = candidate.resourceId;
+  const tip = context.req.header("x-ve-tip-token") ?? context.req.header("x-arkclaw-jwt");
+  if (!tip) return jsonError(context, 401, "tip_required", "X-Ve-TIP-Token is required.");
+  let verified;
+  try {
+    verified = await arkclaw.verifyTip(tip, context.req.raw.signal);
+  } catch {
+    return jsonError(context, 401, "tip_invalid", "TIP token is invalid.");
+  }
+  if (!candidate || candidate.tenantId !== verified.principal.tenantId) {
+    return jsonError(context, 403, "resource_forbidden", "The app resource is not available to this user.");
+  }
+  const tipPrincipal = {
+    ...verified.principal,
+    tenantId: candidate.tenantId,
+    workspaceId: candidate.workspaceId,
+  };
+  if (oauthToken && !oauthTokenMatchesTip(oauthToken, tipPrincipal, candidate.oauthIdentityClaims)) {
+    return jsonError(context, 403, "oauth_tip_mismatch", "OAuth access token and TIP identify different users.");
+  }
+  if (oauthToken && !hasRequiredOAuthScopes(oauthToken, candidate.requiredOAuthScopes)) {
+    return jsonError(context, 403, "oauth_scope_denied", "OAuth access token does not grant the required scopes.");
+  }
+  if (
+    oauthToken &&
+    candidate.allowedOAuthClientIds.length > 0 &&
+    (!oauthToken.clientId || !candidate.allowedOAuthClientIds.includes(oauthToken.clientId))
+  ) {
+    return jsonError(
+      context,
+      403,
+      "oauth_client_denied",
+      "OAuth client is not allowed to access this application resource.",
+    );
+  }
+  const resource = resources.getForPrincipal(localResourceId, tipPrincipal);
+  if (!resource)
+    return jsonError(context, 403, "resource_forbidden", "The app resource is not available to this user.");
+  const executionPrincipal = { ...tipPrincipal, ownerId: resource.ownerId };
+  const runtime = tenantRuntime(options, executionPrincipal);
+  if (!runtime.connections.visibleRecord(resource.connectionId)) {
+    return jsonError(
+      context,
+      403,
+      "connection_forbidden",
+      "The app resource connection is not available to this user.",
+    );
+  }
+  const authorization = await authorizeMcpRequest(context, options, resource, tipPrincipal, {
+    authentication: candidate?.ingressAuth === "oauth2" ? "bearer_user" : "api_key_m2m",
+  });
+  if (!authorization.allowed) {
+    return jsonError(
+      context,
+      403,
+      "mcp_authorization_denied",
+      authorization.reason ?? "MCP request is not authorized.",
+    );
+  }
+  const handler = createMcpHandler(
+    () =>
+      createArkClawMcpServer(
+        {
+          catalog: options.catalog,
+          providerLoader: options.providerLoader,
+          controlDatabase: options.controlDatabase,
+          secretCodec: options.secretCodec,
+          publicOrigin: options.publicOrigin,
+          transitFiles: options.transitFiles,
+          credentialBroker: arkclaw.credentialBroker,
+        },
+        {
+          resource,
+          principal: executionPrincipal,
+          actorPrincipal: tipPrincipal,
+          signal: context.req.raw.signal,
+          authentication: candidate?.ingressAuth === "oauth2" ? "bearer_user" : "api_key_m2m",
+          authorizer: arkclaw.authorizer,
+        },
+      ),
+    { legacy: "stateless", responseMode: "json" },
+  );
+  try {
+    return await handler.fetch(context.req.raw);
+  } finally {
+    await handler.close();
+  }
+}
+
+async function authorizeMcpRequest(
+  context: Context,
+  options: ConnectionControlAppOptions,
+  resource: AppResourceRecord,
+  principal: TenantPrincipal,
+  input: { authentication: "api_key_m2m" | "bearer_user" },
+): Promise<{ allowed: boolean; reason?: string }> {
+  const body = (await context.req.raw
+    .clone()
+    .json()
+    .catch(() => undefined)) as { method?: unknown; params?: { name?: unknown; arguments?: unknown } } | undefined;
+  const method = typeof body?.method === "string" ? body.method : undefined;
+  if (method !== "tools/list" && method !== "tools/call") return { allowed: true };
+  const phase = method === "tools/call" ? "execution" : "discovery";
+  let actionId: string | undefined;
+  if (phase === "execution" && typeof body?.params?.name === "string") {
+    actionId = options.catalog.actions.find(
+      (action) => action.name === body.params?.name || action.id === body.params?.name,
+    )?.id;
+    actionId ??= resource.allowedActions.find((candidate) => {
+      const action = options.catalog.actionsById.get(candidate);
+      return action?.name === body.params?.name || action?.id === body.params?.name;
+    });
+  }
+  const authorizer = options.arkclaw?.authorizer;
+  return authorizerDecision(
+    await authorizeMcp(authorizer, {
+      phase,
+      principal,
+      resource,
+      actionId,
+      authentication: input.authentication,
+      request: context.req.raw,
+    }),
+  );
+}
+
+function authorizerDecision(decision: { allowed: boolean; reason?: string }): {
+  allowed: boolean;
+  reason?: string;
+} {
+  return decision;
+}
+
+async function handleCustomMcpProxy(
+  context: Context,
+  options: ConnectionControlAppOptions,
+  pathResourceId: string,
+): Promise<Response> {
+  if (!options.arkclaw) return jsonError(context, 404, "arkclaw_not_configured", "ArkClaw MCP is not configured.");
+  const arkclaw = options.arkclaw;
+  const headerResourceId = context.req.header("x-app-resourceid") ?? context.req.header("x-app-resource-id");
+  const resources = new CustomMcpResourceStore(options.controlDatabase);
+  const candidate = resources.getById(pathResourceId) ?? resources.getByMseResourceId(pathResourceId);
+  if (!candidate) return jsonError(context, 403, "resource_forbidden", "The MCP resource is not available.");
+  if (headerResourceId && headerResourceId !== candidate.resourceId && headerResourceId !== candidate.mseResourceId) {
+    return jsonError(context, 400, "resource_mismatch", "X-App-ResourceId does not match this MCP resource.");
+  }
+  const bearer = readBearer(context);
+  let oauthToken: VerifiedOAuthAccessToken | undefined;
+  if (candidate.ingressAuth === "oauth2" && bearer && arkclaw.verifyOAuthToken) {
+    oauthToken = await arkclaw.verifyOAuthToken(bearer, context.req.raw.signal).catch(() => undefined);
+  }
+  const hasResourceIngressKey = candidate.ingressApiKeyHashes.length > 0;
+  const gatewayResourceMatch = Boolean(candidate.mseResourceId && headerResourceId === candidate.mseResourceId);
+  const authenticated =
+    candidate.ingressAuth === "oauth2"
+      ? Boolean(oauthToken) || (Boolean(candidate.credentialProviderName) && gatewayResourceMatch)
+      : hasResourceIngressKey
+        ? verifyApiKey(bearer, candidate.ingressApiKeyHashes)
+        : (Boolean(candidate.credentialProviderName) && gatewayResourceMatch) ||
+          verifyApiKey(bearer, arkclaw.apiKeyHashes);
+  if (!authenticated) return jsonError(context, 401, "unauthorized", "Valid MCP ingress authentication is required.");
+  const tip = context.req.header("x-ve-tip-token") ?? context.req.header("x-arkclaw-jwt");
+  if (!tip) return jsonError(context, 401, "tip_required", "X-Ve-TIP-Token is required.");
+  let verified;
+  try {
+    verified = await arkclaw.verifyTip(tip, context.req.raw.signal);
+  } catch {
+    return jsonError(context, 401, "tip_invalid", "TIP token is invalid.");
+  }
+  if (candidate.tenantId !== verified.principal.tenantId)
+    return jsonError(context, 403, "resource_forbidden", "The MCP resource is not available.");
+  const principal = { ...verified.principal, tenantId: candidate.tenantId, workspaceId: candidate.workspaceId };
+  if (oauthToken && !oauthTokenMatchesTip(oauthToken, principal, candidate.oauthIdentityClaims))
+    return jsonError(context, 403, "oauth_tip_mismatch", "OAuth access token and TIP identify different users.");
+  if (oauthToken && !hasRequiredOAuthScopes(oauthToken, candidate.requiredOAuthScopes))
+    return jsonError(context, 403, "oauth_scope_denied", "OAuth access token does not grant the required scopes.");
+  if (
+    oauthToken &&
+    candidate.allowedOAuthClientIds.length > 0 &&
+    (!oauthToken.clientId || !candidate.allowedOAuthClientIds.includes(oauthToken.clientId))
+  )
+    return jsonError(context, 403, "oauth_client_denied", "OAuth client is not allowed to access this MCP resource.");
+  if (!resources.getForPrincipal(candidate.resourceId, principal))
+    return jsonError(context, 403, "resource_forbidden", "The MCP resource is not available to this user.");
+  return proxyCustomMcp(context, candidate, {
+    allowPrivateNetwork: candidate.allowPrivateNetwork && options.customMcp?.allowPrivateNetwork === true,
+    timeoutMs: options.customMcp?.proxyTimeoutMs,
+    fetcher: options.customMcp?.fetcher,
+    skipDnsValidation: options.customMcp?.skipDnsValidation,
+  });
+}
+
+function oauthTokenMatchesTip(
+  token: VerifiedOAuthAccessToken,
+  principal: TenantPrincipal,
+  identityClaims: readonly string[],
+): boolean {
+  const identities = new Set([principal.ownerId, principal.subject]);
+  return identityClaims.some((claim) => {
+    const value = readClaimPath(token.claims, claim);
+    return typeof value === "string" && identities.has(value);
+  });
+}
+
+function hasRequiredOAuthScopes(token: VerifiedOAuthAccessToken, required: readonly string[]): boolean {
+  const granted = new Set(token.scopes);
+  return required.every((scope) => granted.has(scope));
+}
+
+function readClaimPath(claims: Record<string, unknown>, path: string): unknown {
+  return path
+    .split(".")
+    .reduce<unknown>(
+      (value, segment) =>
+        value && typeof value === "object" ? (value as Record<string, unknown>)[segment] : undefined,
+      claims,
+    );
+}
+
+function appResourceResponse(resource: import("./app-resource-store.ts").AppResourceRecord, publicOrigin: string) {
+  return {
+    ...resource,
+    ingressApiKeyHashes: resource.ingressApiKeyHashes.map(() => "[redacted]"),
+    mcpUrl: new URL(`/mcp/apps/${encodeURIComponent(resource.resourceId)}`, publicOrigin).toString(),
+    ...(resource.mseGatewayUrl && resource.mseResourceId
+      ? {
+          gateway: {
+            url: resource.mseGatewayUrl,
+            headers: {
+              "X-App-ResourceId": resource.mseResourceId,
+              "X-Ve-TIP-Token": "${VE_TIP_TOKEN}",
+            },
+          },
+        }
+      : {}),
+  };
+}
+
+function customMcpResourceResponse(
+  resource: import("./custom-mcp-resource-store.ts").CustomMcpResourceRecord,
+  publicOrigin: string,
+) {
+  return {
+    ...resource,
+    ingressApiKeyHashes: resource.ingressApiKeyHashes.map(() => "[redacted]"),
+    mcpUrl: new URL(`/mcp/custom/${encodeURIComponent(resource.resourceId)}`, publicOrigin).toString(),
+    ...(resource.mseGatewayUrl
+      ? {
+          gateway: {
+            url: resource.mseGatewayUrl,
+            urlType: resource.mseGatewayUrlType,
+            headers: {
+              "X-App-ResourceId": resource.mseResourceId ?? resource.resourceId,
+              "X-Ve-TIP-Token": "${VE_TIP_TOKEN}",
+            },
+          },
+        }
+      : {}),
+  };
+}
+
+function parseProxyCredential(
+  value: unknown,
+): { ingressAuth: "api_key" | "oauth2"; authConfig: ApplicationCenterAuthConfig; providerNames: string[] } | undefined {
+  if (value === undefined) return undefined;
+  const input = recordOf(value);
+  const mode = input.mode;
+  if (mode !== "reference") {
+    throw new Error("proxyCredential.mode must be reference.");
+  }
+  const type = input.type;
+  const providerName = input.credentialProviderName;
+  if ((type !== "api_key" && type !== "oauth2") || !requiredNonEmpty(providerName)) {
+    throw new Error("proxyCredential requires type api_key/oauth2 and credentialProviderName.");
+  }
+  if (type === "api_key") {
+    return {
+      ingressAuth: "api_key",
+      authConfig: { Type: "KEY_AUTH", ApikeyConfig: [{ CredentialProviderName: providerName.trim() }] },
+      providerNames: [providerName.trim()],
+    };
+  }
+  const flow = input.flow === undefined ? "USER_FEDERATION" : input.flow;
+  if (!requiredNonEmpty(flow)) throw new Error("proxyCredential.flow must be a non-empty string.");
+  return {
+    ingressAuth: "oauth2",
+    authConfig: { Type: "OAUTH", OAuthConfig: [{ CredentialProviderName: providerName.trim(), Flow: flow }] },
+    providerNames: [providerName.trim()],
+  };
+}
+
+function parseCredentialAuthConfig(value: unknown): CredentialAuthConfig | undefined {
+  if (value === undefined) return undefined;
+  const input = recordOf(value);
+  const type = input.Type === "oauth2" || input.Type === "api_key" ? input.Type : undefined;
+  if (!type) throw new Error("credentialAuthConfig.Type must be api_key or oauth2.");
+  if (type === "oauth2") {
+    const configs = input.OAuthConfig;
+    if (!Array.isArray(configs) || configs.length === 0) {
+      throw new Error("OAuth credentialAuthConfig requires a non-empty OAuthConfig array.");
+    }
+    for (const item of configs) {
+      const config = recordOf(item);
+      const provider = recordOf(config.Oauth2ProviderConfig);
+      if (!requiredNonEmpty(config.Vendor) || !requiredNonEmpty(config.Name) || !requiredNonEmpty(provider.ClientId)) {
+        throw new Error("Each OAuth credential requires Vendor, Name, and Oauth2ProviderConfig.ClientId.");
+      }
+      const discovery = recordOf(provider.Oauth2Discovery);
+      if (discovery.DiscoveryUrl !== undefined) {
+        assertHttpsUrl(discovery.DiscoveryUrl, "Oauth2Discovery.DiscoveryUrl");
+      }
+      if (provider.ClientSecret !== undefined && typeof provider.ClientSecret !== "string") {
+        throw new Error("Oauth2ProviderConfig.ClientSecret must be a string.");
+      }
+      if (provider.Scopes !== undefined) stringArray(provider.Scopes);
+    }
+  } else {
+    const configs = input.ApikeyConfig;
+    if (!Array.isArray(configs) || configs.length === 0) {
+      throw new Error("API key credentialAuthConfig requires a non-empty ApikeyConfig array.");
+    }
+    for (const item of configs) {
+      const config = recordOf(item);
+      if (!requiredNonEmpty(config.Name) || !requiredNonEmpty(config.ApiKey)) {
+        throw new Error("Each API key credential requires Name and ApiKey.");
+      }
+      if (config.ApiKeyMetadata !== undefined) {
+        if (!Array.isArray(config.ApiKeyMetadata) || config.ApiKeyMetadata.length === 0) {
+          throw new Error("ApiKeyMetadata must be a non-empty array when provided.");
+        }
+        for (const metadata of config.ApiKeyMetadata) {
+          const itemMetadata = recordOf(metadata);
+          if (!requiredNonEmpty(itemMetadata.Location) || !requiredNonEmpty(itemMetadata.ParameterName)) {
+            throw new Error("Each API key metadata item requires Location and ParameterName.");
+          }
+          if (itemMetadata.Prefix !== undefined && typeof itemMetadata.Prefix !== "string") {
+            throw new Error("API key metadata Prefix must be a string.");
+          }
+        }
+      }
+    }
+  }
+  return input as unknown as CredentialAuthConfig;
+}
+
+function requiredNonEmpty(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function assertHttpsUrl(value: unknown, field: string): void {
+  if (typeof value !== "string") throw new Error(`${field} must be an HTTPS URL.`);
+  try {
+    if (new URL(value).protocol !== "https:") throw new Error();
+  } catch {
+    throw new Error(`${field} must be an HTTPS URL.`);
+  }
+}
+
+function credentialProviderNames(value: unknown): string[] {
+  const config = parseCredentialAuthConfig(value);
+  return [
+    ...(config?.OAuthConfig ?? []).map((item) => item.Name),
+    ...(config?.ApikeyConfig ?? []).map((item) => item.Name),
+  ].filter((name): name is string => typeof name === "string" && Boolean(name.trim()));
+}
+
+function rejectMcpMethod(context: Context): Response {
+  return context.json({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed." }, id: null }, 405);
+}
+
+function verifyApiKey(value: string | undefined, hashes: readonly string[]): boolean {
+  if (!value) return false;
+  const actual = Buffer.from(sha256(value), "hex");
+  return hashes
+    .filter((hash) => /^[a-f0-9]{64}$/iu.test(hash.trim()))
+    .some((hash) => {
+      const expected = Buffer.from(hash.trim(), "hex");
+      return expected.length === actual.length && timingSafeEqual(actual, expected);
+    });
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function tenantRuntime(options: ConnectionControlAppOptions, principal: TenantPrincipal) {
@@ -1210,6 +2112,7 @@ function tenantRuntime(options: ConnectionControlAppOptions, principal: TenantPr
       secretCodec: options.secretCodec,
       publicOrigin: options.publicOrigin,
       transitFiles: options.transitFiles,
+      credentialBroker: options.arkclaw?.credentialBroker,
     },
     principal,
   );
@@ -1289,7 +2192,8 @@ function toResourceRef(
 
 function readBearer(context: Context): string | undefined {
   const value = context.req.header("authorization");
-  return value?.startsWith("Bearer ") ? value.slice(7) : undefined;
+  const match = value?.match(/^Bearer\s+(\S+)$/iu);
+  return match?.[1];
 }
 
 function requiredString(value: unknown): string {
@@ -1357,6 +2261,67 @@ function stringArray(value: unknown): string[] {
     throw new Error("A string array is required.");
   }
   return value.map((item) => String(item).trim());
+}
+
+function stringArrayOptional(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  return stringArray(value);
+}
+
+function optionalIngressAuth(value: unknown): "api_key" | "oauth2" | undefined {
+  if (value === undefined) return undefined;
+  if (value === "api_key" || value === "oauth2") return value;
+  throw new Error("ingressAuth must be api_key or oauth2.");
+}
+
+function assertCustomMcpUrl(value: string): void {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error();
+    if (url.username || url.password || url.hash) throw new Error();
+  } catch {
+    throw new Error("upstreamUrl must be an HTTP(S) URL without credentials or a fragment.");
+  }
+}
+
+function parseCustomMcpProtocol(value: unknown): "http" | "sse" | "streamable_http" {
+  if (value === undefined || value === "streamable_http") return "streamable_http";
+  if (value === "http") return "http";
+  if (value === "sse") return "sse";
+  throw new Error("protocol must be streamable_http or sse.");
+}
+
+function parseCustomMcpVisibility(value: unknown): CustomMcpVisibility {
+  if (value === undefined || value === "personal") return "personal";
+  if (value === "team" || value === "partial") return value;
+  throw new Error("visibility must be personal, team, or partial.");
+}
+
+function parseCustomMcpCredential(
+  value: unknown,
+): { type: "api_key" | "oauth2"; providerName: string; authConfig: ApplicationCenterAuthConfig } | undefined {
+  if (value === undefined) return undefined;
+  const input = recordOf(value);
+  if (input.mode !== "reference" || !requiredNonEmpty(input.credentialProviderName)) {
+    throw new Error("proxyCredential requires mode=reference and credentialProviderName.");
+  }
+  const providerName = input.credentialProviderName.trim();
+  if (input.type === "api_key") {
+    return {
+      type: "api_key",
+      providerName,
+      authConfig: { Type: "KEY_AUTH", ApikeyConfig: [{ CredentialProviderName: providerName }] },
+    };
+  }
+  if (input.type === "oauth2") {
+    const flow = input.flow === undefined ? "USER_FEDERATION" : requiredString(input.flow);
+    return {
+      type: "oauth2",
+      providerName,
+      authConfig: { Type: "OAUTH", OAuthConfig: [{ CredentialProviderName: providerName, Flow: flow }] },
+    };
+  }
+  throw new Error("proxyCredential.type must be api_key or oauth2.");
 }
 
 function parseRestAuth(value: unknown) {
@@ -1428,6 +2393,68 @@ function oracleAdapter(options: ConnectionControlAppOptions, body: Record<string
 
 function recordOf(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function oracleReferenceValues(value: Record<string, unknown>): Record<string, string> {
+  const allowed = new Set([
+    "host",
+    "port",
+    "database",
+    "tls",
+    "caCertificate",
+    "serviceName",
+    "sid",
+    "allowedSchemas",
+    "allowedTables",
+  ]);
+  const output: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (!allowed.has(key)) throw new Error(`Unexpected Oracle connection field: ${key}.`);
+    if (typeof raw !== "string" && typeof raw !== "number") throw new Error(`${key} must be a string or number.`);
+    const normalized = String(raw).trim();
+    if (normalized) output[key] = normalized;
+  }
+  if (!output.host || (!output.serviceName && !output.sid) || (output.serviceName && output.sid)) {
+    throw new Error("Broker-backed Oracle connections require host and exactly one of serviceName or sid.");
+  }
+  return output;
+}
+
+async function resolveManagedConnectionCredential(
+  runtime: ReturnType<typeof tenantRuntime>,
+  connection: ConnectionRecord,
+  principal: TenantPrincipal,
+  resourceId: string,
+  signal?: AbortSignal,
+): Promise<ResolvedCredential> {
+  if (!runtime.credentialBroker) {
+    throw new ConnectionError("credential_unavailable", "Credential broker is not configured.");
+  }
+  const resolved = await runtime.credentialBroker.resolve({
+    credentialRef: connection.credentialRef,
+    principal,
+    resourceId,
+    service: connection.service,
+    signal,
+  });
+  if (resolved.status === "authorization_required") {
+    throw new CredentialAuthorizationRequiredError(resolved.authorizationUrl);
+  }
+  if (connection.service === "oracle_database" && resolved.credential.authType !== "custom_credential") {
+    throw new ConnectionError("credential_unavailable", "Oracle Credential Broker must return a custom credential.");
+  }
+  const base = await runtime.connectionService.getCredential(connection.service, connection.connectionName);
+  return mergeManagedCredential(base, resolved.credential, connection.service);
+}
+
+function mergeResolvedCredential(
+  base: ResolvedCredential | undefined,
+  resolved: ResolvedCredential,
+): ResolvedCredential {
+  if (base?.authType === "custom_credential" && resolved.authType === "custom_credential") {
+    return { ...resolved, values: { ...base.values, ...resolved.values } };
+  }
+  return resolved;
 }
 
 function redactConnection(value: Record<string, unknown>): Record<string, unknown> {

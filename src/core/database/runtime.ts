@@ -333,7 +333,7 @@ export function normalizeDatabaseError(error: unknown): DatabaseRuntimeError {
   if (/certificate|tls|ssl|self signed|unable to verify/i.test(`${code} ${message}`)) {
     return new DatabaseRuntimeError("database_tls_failed", "Database TLS verification failed.");
   }
-  if (/timeout|cancel|57014|ETIMEOUT/i.test(`${code} ${message}`)) {
+  if (/timeout|timed out|cancel|57014|ETIMEOUT/i.test(`${code} ${message}`)) {
     return new DatabaseRuntimeError("database_timeout", "Database request timed out or was cancelled.");
   }
   if (
@@ -446,4 +446,116 @@ export function providerRequestError(error: unknown): ProviderRequestError {
   const status =
     mapped.code === "database_authentication_failed" ? 401 : mapped.code === "database_timeout" ? 504 : 400;
   return new ProviderRequestError(status, mapped.message, { code: mapped.code });
+}
+
+export function assertDatabaseResourceScope(
+  service: string,
+  actionId: string,
+  input: unknown,
+  scope: { schemas?: string[]; tables?: string[] },
+): void {
+  const value = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const schema = scopedSchemaName(service, value);
+  const table = typeof value.table === "string" ? value.table.trim().toLowerCase() : undefined;
+  const schemas = new Set((scope.schemas ?? []).map((entry) => entry.trim().toLowerCase()));
+  const tables = new Set((scope.tables ?? []).map((entry) => entry.trim().toLowerCase()));
+  if (schema && schemas.size > 0 && !schemas.has(schema)) {
+    throw new DatabaseRuntimeError("database_permission_denied", `${service} schema is outside the lease scope.`);
+  }
+  if (table && tables.size > 0 && !tables.has(table) && !tables.has(`${schema ?? "*"}.${table}`)) {
+    throw new DatabaseRuntimeError("database_permission_denied", `${service} table is outside the lease scope.`);
+  }
+  if (actionId.endsWith("execute_read_query") && (schemas.size > 0 || tables.size > 0)) {
+    const query = typeof value.query === "string" ? value.query.trim() : "";
+    if (!query) {
+      throw new DatabaseRuntimeError("database_permission_denied", `${service} query is outside the lease scope.`);
+    }
+    const dialect = service === "postgresql" ? "postgresql" : service === "sql_server" ? "transactsql" : "mysql";
+    const parser = new Parser();
+    const normalizedQuery = normalizeScopeSql(service, query);
+    let ast: unknown;
+    let tableList: string[];
+    try {
+      ast = parser.astify(normalizedQuery, { database: dialect });
+      tableList = parser.tableList(normalizedQuery, { database: dialect });
+    } catch {
+      throw new DatabaseRuntimeError("database_permission_denied", `${service} query is outside the lease scope.`);
+    }
+    const references = tableListToReferences(tableList, collectCteNames(ast));
+    if (
+      references.length === 0 ||
+      references.some(
+        (reference) =>
+          (schemas.size > 0 && (!reference.schema || !schemas.has(reference.schema.toLowerCase()))) ||
+          (tables.size > 0 &&
+            (!reference.table ||
+              (!tables.has(reference.table.toLowerCase()) &&
+                !tables.has(`${reference.schema ?? "*"}.${reference.table}`.toLowerCase())))),
+      )
+    ) {
+      throw new DatabaseRuntimeError("database_permission_denied", `${service} query is outside the lease scope.`);
+    }
+  }
+}
+
+function scopedSchemaName(service: string, value: Record<string, unknown>): string | undefined {
+  if (typeof value.schema === "string" && value.schema.trim()) {
+    return value.schema.trim().toLowerCase();
+  }
+  if (
+    ["mysql", "clickhouse", "doris", "starrocks"].includes(service) &&
+    typeof value.database === "string" &&
+    value.database.trim()
+  ) {
+    return value.database.trim().toLowerCase();
+  }
+  return undefined;
+}
+
+function normalizeScopeSql(service: string, query: string): string {
+  if (service !== "clickhouse") return query;
+  return query.replace(/\{[A-Za-z_][A-Za-z0-9_]*:[^}]+\}/g, "?");
+}
+
+function tableListToReferences(tableList: string[], cteNames: Set<string>): Array<{ schema?: string; table?: string }> {
+  return tableList.flatMap((entry) => {
+    const [operation, rawSchema, ...tableParts] = entry.split("::");
+    if (!operation || tableParts.length === 0) return [];
+    const table = tableParts.join("::").trim();
+    if (!table) return [];
+    const schema = rawSchema && rawSchema !== "null" ? rawSchema.trim() : undefined;
+    if (!schema && cteNames.has(table.toLowerCase())) return [];
+    return [{ schema, table }];
+  });
+}
+
+function collectCteNames(value: unknown): Set<string> {
+  const output = new Set<string>();
+  collectCteNamesInto(value, output);
+  return output;
+}
+
+function collectCteNamesInto(value: unknown, output: Set<string>): void {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectCteNamesInto(item, output));
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  if (Array.isArray(record.with)) {
+    for (const entry of record.with) {
+      const name = entry && typeof entry === "object" ? identifierText((entry as Record<string, unknown>).name) : "";
+      if (name) output.add(name.toLowerCase());
+    }
+  }
+  Object.values(record).forEach((item) => collectCteNamesInto(item, output));
+}
+
+function identifierText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (!value || typeof value !== "object") return "";
+  const record = value as Record<string, unknown>;
+  if (typeof record.value === "string") return record.value.trim();
+  if (typeof record.name === "string") return record.name.trim();
+  return "";
 }

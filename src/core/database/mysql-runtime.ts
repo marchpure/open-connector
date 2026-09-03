@@ -17,8 +17,8 @@ import {
 } from "./runtime.ts";
 
 interface MysqlBackendOptions {
-  service: "mysql" | "doris" | "starrocks";
-  engine: "MySQL" | "Apache Doris" | "StarRocks";
+  service: string;
+  engine: string;
   defaultPort: number;
   defaultDatabase: string;
   versionMatches: (version: string) => boolean;

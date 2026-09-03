@@ -21,6 +21,9 @@ declare module "oracledb" {
   }
 
   export interface Connection {
+    callTimeout: number;
+    clientId: string;
+    clientInfo: string;
     execute(sql: string): Promise<ExecuteResult>;
     execute(
       sql: string,

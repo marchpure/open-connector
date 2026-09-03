@@ -40,6 +40,7 @@ export class TenantConnectionStore implements IConnectionStore {
         connection_name text not null,
         connector_definition_version text not null,
         credential_ref text not null,
+        credential_mode text not null default 'local' check (credential_mode in ('local', 'managed')),
         credential_ciphertext text not null,
         profile_json text not null,
         status text not null,
@@ -81,6 +82,10 @@ export class TenantConnectionStore implements IConnectionStore {
       create index if not exists idx_control_execution_audit_scope
         on control_execution_audit (tenant_id, workspace_id, started_at);
     `);
+    const columns = this.database.prepare("pragma table_info(tenant_connections)").all() as Array<{ name?: unknown }>;
+    if (!columns.some((column) => column.name === "credential_mode")) {
+      this.database.exec("alter table tenant_connections add column credential_mode text not null default 'local'");
+    }
     ensureAuditCallerColumn(this.database);
   }
 
@@ -137,10 +142,11 @@ export class TenantConnectionStore implements IConnectionStore {
       .prepare(
         `insert into tenant_connections
           (id, tenant_id, workspace_id, owner_id, service, connection_name,
-           connector_definition_version, credential_ref, credential_ciphertext,
+           connector_definition_version, credential_ref, credential_mode, credential_ciphertext,
            profile_json, status, revision, visibility, created_at, updated_at)
-         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?)
+         values (?, ?, ?, ?, ?, ?, ?, ?, 'local', ?, ?, 'ready', ?, ?, ?, ?)
          on conflict(tenant_id, workspace_id, service, connection_name) do update set
+           credential_ref=excluded.credential_ref, credential_mode='local',
            credential_ciphertext=excluded.credential_ciphertext,
            profile_json=excluded.profile_json, status='ready',
            revision=excluded.revision, updated_at=excluded.updated_at`,
@@ -159,6 +165,76 @@ export class TenantConnectionStore implements IConnectionStore {
         revision,
         "personal",
         existing ? String((existing as StoredConnection & { updatedAt?: string }).updatedAt ?? now) : now,
+        now,
+      );
+    return { id, revision: String(revision), service, connectionName, credential };
+  }
+
+  async setCredentialReference(
+    service: string,
+    connectionName: string,
+    credentialRef: string,
+    values: Record<string, string>,
+  ): Promise<StoredConnection> {
+    const ref = credentialRef.trim();
+    if (!ref) throw new ConnectionError("invalid_input", "credentialRef is required.");
+    if (values.username || values.password) {
+      throw new ConnectionError(
+        "invalid_input",
+        "Broker-backed Oracle connections must not include username or password.",
+      );
+    }
+    const existingRow = this.database
+      .prepare(
+        `select id, owner_id, revision, created_at from tenant_connections
+          where tenant_id=? and workspace_id=? and service=? and connection_name=?`,
+      )
+      .get(this.principal.tenantId, this.principal.workspaceId, service, connectionName) as
+      | Record<string, unknown>
+      | undefined;
+    if (existingRow && String(existingRow.owner_id) !== this.principal.ownerId) {
+      throw new ConnectionError("connection_forbidden", "Only the connection owner may replace this connection.");
+    }
+    const id = String(existingRow?.id ?? randomUUID());
+    const revision = Number(existingRow?.revision ?? 0) + 1;
+    const now = new Date().toISOString();
+    const profile = {
+      accountId: `${service}:${id}`,
+      displayName: `${service} managed credential`,
+      grantedScopes: ["read"],
+    };
+    const credential: ResolvedCredential = {
+      authType: "custom_credential",
+      values,
+      profile,
+      metadata: { credentialRef: ref },
+    };
+    this.database
+      .prepare(
+        `insert into tenant_connections
+          (id, tenant_id, workspace_id, owner_id, service, connection_name,
+           connector_definition_version, credential_ref, credential_mode, credential_ciphertext,
+           profile_json, status, revision, visibility, created_at, updated_at)
+         values (?, ?, ?, ?, ?, ?, '1.0.0', ?, 'managed', ?, ?, 'ready', ?, 'personal', ?, ?)
+         on conflict(tenant_id, workspace_id, service, connection_name) do update set
+           credential_ref=excluded.credential_ref,
+           credential_mode='managed',
+           credential_ciphertext=excluded.credential_ciphertext,
+           profile_json=excluded.profile_json, status='ready',
+           revision=excluded.revision, updated_at=excluded.updated_at`,
+      )
+      .run(
+        id,
+        this.principal.tenantId,
+        this.principal.workspaceId,
+        this.principal.ownerId,
+        service,
+        connectionName,
+        ref,
+        await this.secretCodec.encode(JSON.stringify(credential)),
+        JSON.stringify(profile),
+        revision,
+        String(existingRow?.created_at ?? now),
         now,
       );
     return { id, revision: String(revision), service, connectionName, credential };
@@ -385,6 +461,7 @@ function rowToConnectionRecord(row: Record<string, unknown>): ConnectionRecord {
     connectionName: String(row.connection_name),
     connectorDefinitionVersion: String(row.connector_definition_version),
     credentialRef: String(row.credential_ref),
+    credentialMode: String(row.credential_mode ?? "local") as ConnectionRecord["credentialMode"],
     status: String(row.status) as ConnectionRecord["status"],
     revision: Number(row.revision),
     visibility: String(row.visibility) as ConnectionRecord["visibility"],

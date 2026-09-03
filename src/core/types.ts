@@ -338,6 +338,16 @@ export interface TransitFileStore {
 
 export type TransitFileWriter = TransitFileStore;
 
+/** Verified human and workload identity attached to one provider execution. */
+export interface ExecutionActor {
+  tenantId: string;
+  userId: string;
+  subject: string;
+  agentId?: string;
+  groups?: string[];
+  groupIds?: string[];
+}
+
 /**
  * Runtime services available to action executors.
  *
@@ -347,6 +357,8 @@ export type TransitFileWriter = TransitFileStore;
 export interface ExecutionContext {
   /** Resolve the credential currently configured for a provider service id. */
   getCredential(service: string): Promise<ResolvedCredential | undefined>;
+  /** Verified caller identity. Provider runtimes must never derive this from action input. */
+  actor?: ExecutionActor;
   /** Optional local temporary file storage for actions that produce downloadable files. */
   transitFiles?: TransitFileWriter;
   /** Optional cancellation signal propagated from the HTTP request or runner. */

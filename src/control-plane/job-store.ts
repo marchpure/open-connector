@@ -12,7 +12,7 @@ export interface ConnectionJob {
   kind: ConnectionJobKind;
   status: ConnectionJobStatus;
   result?: unknown;
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; authorizationUrl?: string };
   createdAt: string;
   updatedAt: string;
 }
@@ -75,14 +75,14 @@ export class ConnectionJobStore {
     return Number(updated.changes) === 1;
   }
 
-  fail(id: string, error: { code: string; message: string }): boolean {
+  fail(id: string, error: { code: string; message: string; authorizationUrl?: string }): boolean {
     const updated = this.database
       .prepare(
         `update connection_jobs set status='failed', error_json=?, updated_at=?
           where id=? and tenant_id=? and workspace_id=? and status in ('queued', 'running')`,
       )
       .run(
-        JSON.stringify(redactSecrets(error)),
+        JSON.stringify(redactJobError(error)),
         new Date().toISOString(),
         id,
         this.scope.tenantId,
@@ -124,6 +124,19 @@ export class ConnectionJobStore {
       .run(status, new Date().toISOString(), id, this.scope.tenantId, this.scope.workspaceId);
     return Number(updated.changes) === 1;
   }
+}
+
+function redactJobError(error: { code: string; message: string; authorizationUrl?: string }) {
+  const safe = redactSecrets(error) as Record<string, unknown>;
+  if (error.code === "authorization_required" && typeof error.authorizationUrl === "string") {
+    try {
+      const url = new URL(error.authorizationUrl);
+      if (url.protocol === "https:") safe.authorizationUrl = url.toString();
+    } catch {
+      // Invalid URLs remain redacted and cannot be used for authorization.
+    }
+  }
+  return safe;
 }
 
 function rowToJob(row: Record<string, unknown>): ConnectionJob {

@@ -61,6 +61,8 @@ export async function createPostgresqlBackend(
   return new PostgresqlBackend(config, entry.pool, signal);
 }
 
+export const createPostgresqlWireBackend: typeof createPostgresqlBackend = createPostgresqlBackend;
+
 class PostgresqlBackend implements DatabaseBackend {
   readonly config: DatabaseConnectionConfig;
   private readonly pool: Pool;

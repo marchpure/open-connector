@@ -3,6 +3,22 @@ import type { CredentialProfile, ResolvedCredential } from "../core/types.ts";
 export type ConnectionVisibility = "personal" | "team";
 export type ConnectionStatus = "draft" | "validating" | "ready" | "degraded" | "error" | "revoked";
 export type CatalogTier = "catalog" | "beta" | "verified";
+export type StructuredDatabaseCapability =
+  | "validate_connection"
+  | "list_databases"
+  | "list_schemas"
+  | "list_tables"
+  | "describe_table"
+  | "preview_table"
+  | "execute_read_query";
+
+export interface ProviderCapability {
+  name: StructuredDatabaseCapability;
+  status: CatalogTier;
+  verified: boolean;
+  evidenceRef?: string;
+  reason?: string;
+}
 
 /**
  * Provider-neutral identity for a resource discovered through a managed
@@ -54,6 +70,13 @@ export interface TenantPrincipal {
   subject: string;
   audience: string;
   ownerId: string;
+  /** Stable Agent Identity user-pool UID, when the principal came from a TIP. */
+  userPoolUserUid?: string;
+  /** Workload/Agent identity from the verified TIP act.sub claim. */
+  agentId?: string;
+  /** Userpool memberships carried by a verified TIP. */
+  groups?: string[];
+  groupIds?: string[];
 }
 
 export interface ConnectionRecord {
@@ -65,6 +88,7 @@ export interface ConnectionRecord {
   connectionName: string;
   connectorDefinitionVersion: string;
   credentialRef: string;
+  credentialMode: "local" | "managed";
   status: ConnectionStatus;
   revision: number;
   visibility: ConnectionVisibility;
@@ -83,6 +107,10 @@ export interface ConnectionLeaseClaims {
   connectionIds: string[];
   connectionRevisions?: Record<string, number>;
   allowedActions: string[];
+  allowedResources?: {
+    schemas?: string[];
+    tables?: string[];
+  };
   issuedAt: string;
   expiresAt: string;
   jti: string;

@@ -6,7 +6,13 @@ import type {
   ActionPolicySnapshot,
   PolicyErrorCode,
 } from "../../core/action-policy.ts";
-import type { ActionDefinition, ExecutionContext, ExecutionResult, TransitFileWriter } from "../../core/types.ts";
+import type {
+  ActionDefinition,
+  ExecutionActor,
+  ExecutionContext,
+  ExecutionResult,
+  TransitFileWriter,
+} from "../../core/types.ts";
 import type { IProviderLoader } from "../../providers/provider-loader.ts";
 import type { Logger } from "../logger.ts";
 import type { IRunLogStore, RunLog, RunLogCaller, RunLogListInput, RunLogPage } from "../storage/runtime-store.ts";
@@ -50,6 +56,10 @@ export interface RunActionInput {
   policy?: ActionPolicySnapshot;
   runtimeTokenId?: string;
   signal?: AbortSignal;
+  /** Request-scoped credential resolver, used by external credential brokers. */
+  getCredential?: ExecutionConnection["getCredential"];
+  /** Verified caller identity propagated to provider runtimes. */
+  actor?: ExecutionActor;
 }
 
 export interface ActionRunResult {
@@ -165,7 +175,7 @@ export class ActionRunner {
               action,
               executor,
               input.input,
-              this.createExecutionContext(connection.getCredential, input.signal),
+              this.createExecutionContext(input.getCredential ?? connection.getCredential, input.signal, input.actor),
             );
             if (input.signal?.aborted) {
               result = cancelledExecutionResult();
@@ -256,10 +266,12 @@ export class ActionRunner {
   private createExecutionContext(
     getCredential: ExecutionConnection["getCredential"],
     signal: AbortSignal | undefined,
+    actor: ExecutionActor | undefined,
   ): ExecutionContext {
     const context: ExecutionContext = {
       getCredential,
       signal,
+      actor,
     };
     if (this.options.transitFiles) {
       context.transitFiles = this.options.transitFiles;

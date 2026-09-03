@@ -13,7 +13,7 @@ export interface OracleQueryDriver {
   query(
     sql: string,
     binds: Record<string, unknown>,
-    options: { maxRows: number; timeoutMs: number },
+    options: { maxRows: number; timeoutMs: number; clientId?: string; clientInfo?: string },
   ): Promise<OracleQueryResult>;
 }
 
@@ -50,15 +50,25 @@ export interface OracleQueryLimits {
   timeoutMs: number;
   maxConcurrent: number;
   allowedSchemas?: string[];
+  allowedTables?: string[];
 }
+
+export interface OracleSessionIdentity {
+  clientId: string;
+  clientInfo?: string;
+}
+
+type OracleQueryOverrideLimits = Partial<Pick<OracleQueryLimits, "maxRows" | "maxBytes" | "timeoutMs">>;
 
 export class OracleAdapterError extends Error {
   readonly code: "invalid_config" | "write_query" | "schema_denied" | "query_limit" | "query_failed";
+  readonly cause?: unknown;
 
-  constructor(code: OracleAdapterError["code"], message: string) {
+  constructor(code: OracleAdapterError["code"], message: string, cause?: unknown) {
     super(message);
     this.name = "OracleAdapterError";
     this.code = code;
+    this.cause = cause;
   }
 }
 
@@ -67,11 +77,18 @@ export class OracleDatabaseAdapter {
   private readonly config: OracleConnectionConfig;
   private readonly driver: OracleQueryDriver;
   private readonly limits: OracleQueryLimits;
+  private readonly sessionIdentity?: OracleSessionIdentity;
 
-  constructor(config: OracleConnectionConfig, driver: OracleQueryDriver, limits: OracleQueryLimits) {
+  constructor(
+    config: OracleConnectionConfig,
+    driver: OracleQueryDriver,
+    limits: OracleQueryLimits,
+    sessionIdentity?: OracleSessionIdentity,
+  ) {
     this.config = config;
     this.driver = driver;
     this.limits = limits;
+    this.sessionIdentity = sessionIdentity;
     if (!config.serviceName && !config.sid) {
       throw new OracleAdapterError("invalid_config", "Oracle requires service_name or SID.");
     }
@@ -80,10 +97,14 @@ export class OracleDatabaseAdapter {
     }
   }
 
-  async query(sql: string, binds: Record<string, unknown> = {}): Promise<OracleQueryResult> {
-    const lineage = analyzeReadOnlyQuery(sql);
-    assertAllowedSchemas(lineage, this.limits.allowedSchemas);
-    return { ...(await this.execute(sql, binds)), lineage };
+  async query(
+    sql: string,
+    binds: Record<string, unknown> = {},
+    limits: OracleQueryOverrideLimits = {},
+  ): Promise<OracleQueryResult> {
+    const lineage = analyzeOracleReadOnlyQuery(sql);
+    assertAllowedSchemas(lineage, this.limits.allowedSchemas, this.limits.allowedTables);
+    return { ...(await this.execute(sql, binds, limits)), lineage };
   }
 
   async discover(input: { schema?: string; table?: string } = {}): Promise<OracleDiscoveryResult> {
@@ -104,7 +125,7 @@ export class OracleDatabaseAdapter {
     }
 
     const schema = normalizeDiscoveryIdentifier(input.schema);
-    assertAllowedSchemas([{ schema, object: "*" }], this.limits.allowedSchemas);
+    assertAllowedSchemas([{ schema, object: "*" }], this.limits.allowedSchemas, this.limits.allowedTables);
     if (!input.table) {
       const result = await this.execute("select table_name from all_tables where owner = :schema order by table_name", {
         schema,
@@ -132,23 +153,31 @@ export class OracleDatabaseAdapter {
     };
   }
 
-  private async execute(sql: string, binds: Record<string, unknown>): Promise<OracleQueryResult> {
+  private async execute(
+    sql: string,
+    binds: Record<string, unknown>,
+    overrideLimits: OracleQueryOverrideLimits = {},
+  ): Promise<OracleQueryResult> {
     if (this.active >= this.limits.maxConcurrent) {
       throw new OracleAdapterError("query_limit", "Oracle concurrency limit exceeded.");
     }
+    const maxRows = overrideLimits.maxRows ?? this.limits.maxRows;
+    const maxBytes = overrideLimits.maxBytes ?? this.limits.maxBytes;
+    const timeoutMs = overrideLimits.timeoutMs ?? this.limits.timeoutMs;
     this.active += 1;
     try {
       const result = await this.driver.query(sql, binds, {
-        maxRows: this.limits.maxRows,
-        timeoutMs: this.limits.timeoutMs,
+        maxRows,
+        timeoutMs,
+        ...this.sessionIdentity,
       });
-      if (result.rows.length > this.limits.maxRows || result.bytes > this.limits.maxBytes) {
+      if (result.rows.length > maxRows || result.bytes > maxBytes) {
         throw new OracleAdapterError("query_limit", "Oracle result limit exceeded.");
       }
       return result;
     } catch (error) {
       if (error instanceof OracleAdapterError) throw error;
-      throw new OracleAdapterError("query_failed", "Oracle query failed.");
+      throw new OracleAdapterError("query_failed", "Oracle query failed.", error);
     } finally {
       this.active -= 1;
     }
@@ -192,7 +221,7 @@ interface ParseNode {
   nodes?: ParseNode[];
 }
 
-function analyzeReadOnlyQuery(sql: string): OracleLineage[] {
+export function analyzeOracleReadOnlyQuery(sql: string): OracleLineage[] {
   const parser = getParserFromInput(sql);
   const tree = parser.sql_script();
   const parsed = getParsedNodes(sql, tree);
@@ -256,11 +285,20 @@ function normalizeIdentifier(value: string): string {
   return value.startsWith('"') && value.endsWith('"') ? value.slice(1, -1).replace(/""/g, '"') : value.toUpperCase();
 }
 
-function assertAllowedSchemas(lineage: OracleLineage[], allowedSchemas?: string[]): void {
-  if (!allowedSchemas?.length) return;
-  const allowed = new Set(allowedSchemas.map(normalizeIdentifier));
-  const denied = lineage.find((item) => item.schema && !allowed.has(item.schema));
+function assertAllowedSchemas(lineage: OracleLineage[], allowedSchemas?: string[], allowedTables?: string[]): void {
+  const schemas = new Set((allowedSchemas ?? []).map(normalizeIdentifier));
+  const tables = new Set((allowedTables ?? []).map(normalizeTableScope));
+  if (!schemas.size && !tables.size) return;
+  const denied = lineage.find((item) => {
+    if (item.schema && schemas.size && !schemas.has(item.schema)) return true;
+    if (tables.size && !tables.has(normalizeTableScope(`${item.schema ?? "*"}.${item.object}`))) return true;
+    return false;
+  });
   if (denied) {
-    throw new OracleAdapterError("schema_denied", `Oracle schema ${denied.schema} is not allowed.`);
+    throw new OracleAdapterError("schema_denied", "Oracle resource is not allowed.");
   }
+}
+
+function normalizeTableScope(value: string): string {
+  return value.trim().toUpperCase();
 }

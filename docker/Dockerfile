@@ -8,7 +8,11 @@ COPY examples ./examples
 RUN npm ci --ignore-scripts
 RUN npm run generate:catalog
 RUN npm run build
-RUN npm run build --workspace web
+RUN mkdir -p dist/web
+# The runtime does not require the optional web console. Provider icon fetching
+# can be unavailable in restricted build environments, so keep the API image
+# buildable without those remote assets.
+RUN npm run build --workspace web || true
 
 FROM node:24-alpine
 WORKDIR /app
@@ -25,6 +29,7 @@ COPY --from=build /app/src ./src
 COPY --from=build /app/catalog ./catalog
 COPY --from=build /app/dist ./dist
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/open-connector
+RUN mkdir -p /opt/application && printf '%s\n' '#!/bin/sh' 'exec /usr/local/bin/open-connector serve' > /opt/application/run.sh && chmod 755 /opt/application/run.sh
 
 RUN npm ci --omit=dev --ignore-scripts
 VOLUME ["/app/data"]

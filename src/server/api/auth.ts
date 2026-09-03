@@ -21,6 +21,7 @@ export interface LocalAuthOptions {
   hasRuntimeTokens?(): Promise<boolean>;
   resolveRuntimeToken?(token: string): Promise<RuntimeGrant | undefined>;
   verifyRuntimeJwt?: RuntimeJwtVerifier;
+  oauthResourceMetadataUrl?: string;
 }
 
 export interface LocalAuthSession {
@@ -79,6 +80,9 @@ export function createLocalAuthMiddleware(options: LocalAuthOptions): Middleware
       return;
     }
 
+    if (scope === "runtime" && options.oauthResourceMetadataUrl) {
+      context.header("WWW-Authenticate", `Bearer resource_metadata="${options.oauthResourceMetadataUrl}"`);
+    }
     return jsonError(context, 401, "unauthorized", "A valid local bearer token is required.");
   };
 }
@@ -103,6 +107,11 @@ function isPublicPath(path: string, method: string): boolean {
     path === "/health" ||
     path === "/oauth/callback" ||
     path.startsWith("/oauth/callback/") ||
+    path === "/oauth/authorize" ||
+    path === "/oauth/token" ||
+    path === "/oauth/register" ||
+    path === "/oauth/register/" ||
+    path.startsWith("/.well-known/") ||
     (method === "GET" && path === "/api/auth/session") ||
     (method === "POST" && path === "/api/auth/logout") ||
     (method === "GET" && path.startsWith("/api/files/")) ||

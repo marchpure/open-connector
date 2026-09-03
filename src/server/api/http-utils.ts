@@ -78,7 +78,7 @@ export async function readJsonBody(context: Context, maxBytes?: number): Promise
  */
 export function jsonError(
   context: Context,
-  status: 400 | 401 | 403 | 404 | 413 | 500,
+  status: 400 | 401 | 403 | 404 | 409 | 413 | 500,
   code: string,
   message: string,
 ): Response {

@@ -4,16 +4,21 @@ const oracle = vi.hoisted(() => {
   const execute = vi.fn();
   const rollback = vi.fn();
   const closeConnection = vi.fn();
-  const getConnection = vi.fn(async () => ({
+  const connection = {
+    callTimeout: 0,
+    clientId: "",
+    clientInfo: "",
     execute,
     rollback,
     close: closeConnection,
-  }));
+  };
+  const getConnection = vi.fn(async () => connection);
   return {
     execute,
     rollback,
     closeConnection,
     getConnection,
+    connection,
     createPool: vi.fn(async () => ({
       getConnection,
       close: vi.fn(),
@@ -42,6 +47,16 @@ describe("OracleThinDriver", () => {
   });
 
   it("executes queries in a driver-level read-only transaction and rolls back", async () => {
+    const sessionIdentities: Array<{ clientId: string; clientInfo: string }> = [];
+    oracle.execute.mockReset().mockImplementation(async () => {
+      sessionIdentities.push({
+        clientId: oracle.connection.clientId,
+        clientInfo: oracle.connection.clientInfo,
+      });
+      return sessionIdentities.length === 1
+        ? {}
+        : { rows: [{ ID: 1 }], metaData: [{ name: "ID", dbTypeName: "NUMBER", nullable: false }] };
+    });
     const driver = new OracleThinDriver(
       { host: "db", port: 1521, serviceName: "FREEPDB1" },
       { user: "reader", password: "secret" },
@@ -54,6 +69,8 @@ describe("OracleThinDriver", () => {
         {
           maxRows: 10,
           timeoutMs: 100,
+          clientId: "user-1",
+          clientInfo: "agent=claw-1;subject=subject-1",
         },
       ),
     ).resolves.toEqual({
@@ -71,5 +88,11 @@ describe("OracleThinDriver", () => {
     );
     expect(oracle.rollback).toHaveBeenCalledOnce();
     expect(oracle.closeConnection).toHaveBeenCalledOnce();
+    expect(sessionIdentities).toEqual([
+      { clientId: "user-1", clientInfo: "agent=claw-1;subject=subject-1" },
+      { clientId: "user-1", clientInfo: "agent=claw-1;subject=subject-1" },
+    ]);
+    expect(oracle.connection.clientId).toBe("");
+    expect(oracle.connection.clientInfo).toBe("");
   });
 });
