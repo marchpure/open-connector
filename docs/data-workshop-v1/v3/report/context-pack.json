@@ -1,0 +1,50 @@
+{
+  "brief": {
+    "user_request": "Freeze the Data Workshop V1 I0 V3 repository, ownership, API, schema, route, error, test, migration, and handoff baseline.",
+    "artifact_type": "html-briefing",
+    "audience": "Data Workshop W1-W7 owners and integration reviewers",
+    "objective": "Make the sole V3 architecture and superseded scope unmistakable and reviewable.",
+    "decision_needed": "All implementation work must start from these pins and contracts.",
+    "deadline_or_timeframe": "I0"
+  },
+  "constraints": {
+    "language": "en with canonical Chinese navigation labels",
+    "tone": "operational",
+    "confidentiality": "internal",
+    "must_include": [
+      "three canonical repository pins",
+      "W1-W7 ownership",
+      "V3 APIs and shared schemas",
+      "route and redirect matrix",
+      "migration ledger",
+      "test matrix",
+      "prototype discrepancy"
+    ],
+    "must_avoid": [
+      "business feature implementation claims",
+      "secret values",
+      "a second user MCP architecture",
+      "product navigation integration"
+    ]
+  },
+  "sources": ["S1", "S2", "S3", "S4", "S5", "S6", "S7"],
+  "facts": [
+    {
+      "claim": "SPEC V3 revision 135 supersedes the V2 Publication architecture and corrects top-level navigation.",
+      "source_ids": ["S2"],
+      "confidence": "high"
+    },
+    {
+      "claim": "The current public Inspire stable selection remains v4.8, while two V5 shapes exist but do not meet v5.1 routing.",
+      "source_ids": ["S2", "S3"],
+      "confidence": "high"
+    },
+    {
+      "claim": "The three canonical product repositories have verified default-branch SHAs and clean tracked checkouts.",
+      "source_ids": ["S4", "S7"],
+      "confidence": "high"
+    }
+  ],
+  "open_questions": [],
+  "assumptions": []
+}

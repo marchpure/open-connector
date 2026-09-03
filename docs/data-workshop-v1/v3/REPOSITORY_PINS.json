@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "baseline": "DWV1_I0_BASELINE_V3_FROZEN",
+  "observed_at": "2026-09-04T00:55:42+08:00",
+  "products": [
+    {
+      "name": "open-connector",
+      "owner": "W1/W2/W4",
+      "canonical_remote": "git@github.com:marchpure/open-connector.git",
+      "default_branch": "main",
+      "full_sha": "0fa2c728dfbf957735da2843ec2b8a4f3425b105",
+      "freeze_tag": "dwv1-i0-baseline-v3-source",
+      "local_checkout": "/Users/bytedance/worktrees/dwv1-open-connector-v3-source-pin",
+      "local_tracked_clean": true,
+      "remote_sha_equal": true
+    },
+    {
+      "name": "veadk-data-studio",
+      "owner": "W3/W6/W7",
+      "canonical_remote": "https://github.com/marchpure/veadk-data-studio.git",
+      "default_branch": "main",
+      "full_sha": "9766b3a5e810c12edcfbe3ba43d9a3e0419c2275",
+      "freeze_tag": "dwv1-i0-baseline-v3-source",
+      "local_checkout": "/Users/bytedance/veadk-data-studio",
+      "local_tracked_clean": true,
+      "remote_sha_equal": true
+    },
+    {
+      "name": "data-workshop-skill-agent",
+      "owner": "W5",
+      "canonical_remote": "git@github.com:marchpure/data-workshop-skill-agent.git",
+      "default_branch": "main",
+      "full_sha": "495d52e218bcde1b5386c01bcd4be04dc95852d3",
+      "freeze_tag": "dwv1-i0-baseline-v3-source",
+      "visibility": "private",
+      "local_checkout": "/Users/bytedance/data-workshop-skill-agent",
+      "local_tracked_clean": true,
+      "remote_sha_equal": true,
+      "contract_only_change": true
+    }
+  ],
+  "dependencies": [
+    {
+      "repository": "https://github.com/volcengine/veadk-python.git",
+      "role": "sdk_only",
+      "observed_default_branch": "main",
+      "observed_default_sha": "84e1cde41f5010d63bb0d5fc5bd88733d7219b5d",
+      "w5_dependency_pin": "ba5cd8ea2eabbf84961674802278f38fd1b8e9ce"
+    },
+    {
+      "repository": "https://github.com/marchpure/veadk-python.git",
+      "role": "read_only_donor_and_legacy_evidence_only",
+      "observed_default_branch": "main",
+      "observed_default_sha": "66df2b05f4ef67689b4835807b53fcb9e2357ff4",
+      "donor_commits": {
+        "skill_ui": "9c025a977800bc2abb026ec059813d0a37cd0add",
+        "openviking_primary": "d203bfb89a36baa908d0e60ef49f6175dd623942",
+        "openviking_isolation": "7ab6a8697a04cbbfdea7f88aaa27d6c117663fc2"
+      }
+    }
+  ],
+  "legacy_markers": [
+    {
+      "repository": "marchpure/open-connector",
+      "branch": "codex/dwv1-i0-p0-baseline",
+      "full_sha": "70974f7b167b78646f7cb183435f4c504387065a",
+      "tag": "dwv1-v2-baseline-superseded-by-v3",
+      "status": "SUPERSEDED_BY_DWV1_I0_BASELINE_V3"
+    },
+    {
+      "repository": "marchpure/veadk-python",
+      "branch": "feat/data-workshop-p0-gateway-publisher",
+      "implementation_full_sha": "40568577c91dbdab2b2440ed893444eaa1b6a8d3",
+      "marker_full_sha": "a1db9ceb406aef15a3e4f9a1558dc942c7f74038",
+      "tag": "dwv1-v2-publication-do-not-integrate",
+      "status": "DO_NOT_INTEGRATE"
+    }
+  ]
+}

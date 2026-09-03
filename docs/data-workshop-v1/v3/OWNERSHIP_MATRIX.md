@@ -1,0 +1,27 @@
+# W1–W7 ownership matrix
+
+Ownership is exclusive at the listed boundary. Cross-owner changes require a
+review from both owners and must preserve the shared schemas and API paths.
+
+| Workstream | Repository and owned paths                                                                                                                                                             | Owns                                                                                                                                  | Consumes                                                                                   | Must not own                                                                          |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| W1         | `marchpure/open-connector`: `src/connections/`, `src/actions/`, `src/traces/`, MCP transport/runtime core, durable state adapters                                                      | Provider catalog, Connection lifecycle, Action discovery/invocation, redacted Trace, stateless MCP transport, durable state           | W2 `AuthContext`, `PolicyDecision`, `Authorizer`                                           | IdP administration, AccessGrant policy, product shell, cloud edge, Skill generation   |
+| W2         | `marchpure/open-connector`: `src/auth/identity/`, `src/auth/access-grants/` and their migrations/tests                                                                                 | IdentityProviderConfig, JWT/JWKS verifier, SubjectResolver, AccessGrant, RoleDefinition, policy evaluation/invalidation, access audit | W1 Connection/Action identifiers and MCP authorization hooks                               | Publication lifecycle, Gateway, UI authorization, credentials for source systems      |
+| W3         | `marchpure/veadk-data-studio`: `client/src/features/data-workshop/{shell,connections,access}/`, `connections/docs/`, `server/data_workshop/{api,adapters/openconnector,repositories}/` | Product shell, OpenConnector embed, access administration UI/BFF, connection docs, route redirects                                    | Versioned W1/W2 APIs                                                                       | MCP data-plane proxy, raw admin token in browser, W6/W7 internals                     |
+| W4         | `marchpure/open-connector`: deployment manifests/config only                                                                                                                           | Stable dev HTTPS endpoint, APIG/WAF/LB routing, headers/stream pass-through, multi-instance readiness, WorkBuddy OAuth E2E evidence   | W1 runtime, W2 JWT/policy                                                                  | Connection/Action authorization or token exchange at the edge                         |
+| W5         | `marchpure/data-workshop-skill-agent`: `src/agent.py`, `src/tools/`, `src/validators/`, `src/artifacts/`, `tests/`                                                                     | Native veADK create/update/validate flow, Revision/Artifact/ZIP generation and security validation                                    | Delegated user test context, MCP capability refs, Knowledge ResourceRefs, public veADK SDK | Product UI/BFF, token storage, elevated-service-account fallback, product code in SDK |
+| W6         | `marchpure/veadk-data-studio`: `client/src/features/data-workshop/knowledge/openviking/`, `server/data_workshop/adapters/openviking/`                                                  | Hosted OpenViking Profile/resource/import/task/search/watch workspace and Knowledge ResourceRef                                       | Hosted OpenViking service                                                                  | Self-hosted OpenViking, Connection conversion, MCP adapter/publication                |
+| W7         | `marchpure/veadk-data-studio`: `client/src/features/data-workshop/skill-creator/`, Skill/session BFF APIs and repositories                                                             | Skill list/workbench, sessions/messages/events, capability/context binding, Revision/Artifact/Diff/download UI                        | W5 agent API, W2-filtered capability refs, W6 ResourceRefs                                 | Skill execution engine, token persistence, empty artifact pane                        |
+
+## Shared seam rules
+
+- W1 invokes W2 authorization before serializing each identity-visible
+  connection/action and immediately before every Action execution.
+- W3 uses versioned `/v1/*` APIs through the same-origin BFF. The browser never
+  receives an OpenConnector admin token.
+- W4 preserves `Authorization`, MCP session headers, methods, status codes, and
+  streaming; it never derives a business permission.
+- W5 returns `BLOCKED_AUTH` when delegated identity is unavailable.
+- W6 owns knowledge references; W2 owns data Action authorization. Neither
+  converts one object type into the other.
+- W7 shows Artifact controls only after W5 returns a validated Artifact.

@@ -1,0 +1,74 @@
+{
+  "claims": [
+    {
+      "claim_id": "C1",
+      "text": "The only V3 user path is OAuth Access Token through WorkBuddy to OpenConnector POST /mcp and then AccessGrant-authorized Connection Actions.",
+      "source_ids": ["S1", "S2"],
+      "artifact_location": "summary-and-architecture",
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C2",
+      "text": "AccessGrant binds a Connection, stable user or group subject, and reader/operator/custom role, with explicit deny precedence.",
+      "source_ids": ["S1", "S2"],
+      "artifact_location": "contract-model",
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C3",
+      "text": "There is no top-level MCP navigation in v5.1; browser /mcp routes redirect to /connections/docs while backend POST /mcp remains.",
+      "source_ids": ["S2"],
+      "artifact_location": "route-contract",
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C4",
+      "text": "The three canonical source pins are clean and equal to their remote default branches at the recorded observation time.",
+      "source_ids": ["S4", "S7"],
+      "artifact_location": "repository-pins",
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C5",
+      "text": "Public veADK is SDK-only and marchpure/veadk-python is donor-only.",
+      "source_ids": ["S2", "S4", "S5"],
+      "artifact_location": "repository-pins",
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C6",
+      "text": "All three exact donor commit IDs resolve and are restricted to selective source-pattern migration.",
+      "source_ids": ["S2", "S5", "S7"],
+      "artifact_location": "donor-ledger",
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C7",
+      "text": "The V2 Publication branch is quarantined and only generic redaction, idempotency, request-ID, error, and negative-auth patterns may be manually reimplemented.",
+      "source_ids": ["S2", "S6", "S7"],
+      "artifact_location": "migration",
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C8",
+      "text": "The published Inspire stable preview still targets v4.8 while two V5 shapes exist but conflict with v5.1 routing.",
+      "source_ids": ["S2", "S3", "S7"],
+      "artifact_location": "prototype-correction",
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C9",
+      "text": "OpenViking contributes only Profile/directory/resource Knowledge ResourceRefs to Skill Context.",
+      "source_ids": ["S1", "S2"],
+      "artifact_location": "contract-model",
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C10",
+      "text": "I0 freezes ownership, APIs, schemas, routes, errors, tests, migration rules, and handoffs without claiming feature completion.",
+      "source_ids": ["S2", "S7"],
+      "artifact_location": "scope",
+      "confidence": "high"
+    }
+  ]
+}

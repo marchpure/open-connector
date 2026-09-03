@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "baseline": "DWV1_I0_BASELINE_V3_FROZEN",
+  "kind": "contract_and_scope_baseline",
+  "frozen_at": "2026-09-04T00:55:42+08:00",
+  "artifact_repository": "marchpure/open-connector",
+  "artifact_branch": "docs/dwv1-i0-baseline-v3",
+  "artifact_tag": "dwv1-i0-baseline-v3",
+  "business_feature_implementation_claimed": false,
+  "authorities": {
+    "prd": {
+      "token": "KT6OdypsfoezVexGGYvcdtoZnVg",
+      "revision": 11,
+      "url": "https://bytedance.larkoffice.com/docx/KT6OdypsfoezVexGGYvcdtoZnVg"
+    },
+    "spec": {
+      "token": "NUMidBYfgop4BExlfracPc1nnfb",
+      "revision": 135,
+      "url": "https://bytedance.larkoffice.com/docx/NUMidBYfgop4BExlfracPc1nnfb"
+    },
+    "inspire": {
+      "canvas_id": "6a8a29f9c015c9021c92777c",
+      "url": "https://inspire.bytedance.net/prototype/canvas/6a8a29f9c015c9021c92777c",
+      "status": "interaction_donor_with_spec_v5_1_corrections"
+    }
+  },
+  "architecture": [
+    "Agent Identity",
+    "OAuth Access Token",
+    "WorkBuddy/MCP Client",
+    "OpenConnector HTTPS POST /mcp",
+    "JWT + AccessGrant",
+    "Connection Action"
+  ],
+  "access_grant_tuple": ["connection_id", "subject_type:user|group", "subject_id", "role_id:reader|operator|custom"],
+  "files": {
+    "repository_pins": "REPOSITORY_PINS.json",
+    "audit": "AUDIT_INVENTORY.md",
+    "ownership": "OWNERSHIP_MATRIX.md",
+    "authorization": "AUTHORIZATION.md",
+    "schemas": "contracts/schemas.json",
+    "openconnector_api": "contracts/openapi.yaml",
+    "bff_api": "contracts/bff-openapi.yaml",
+    "error_envelope": "contracts/ERROR_ENVELOPE.md",
+    "routes": "ROUTE_MATRIX.md",
+    "tests": "TEST_MATRIX.md",
+    "migration": "MIGRATION_LEDGER.md",
+    "handoff": "W1_W7_HANDOFF.md",
+    "report": "report/output/index.html"
+  }
+}

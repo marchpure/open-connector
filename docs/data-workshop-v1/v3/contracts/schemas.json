@@ -1,0 +1,316 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://data-workshop.internal/contracts/v3/schemas.json",
+  "title": "Data Workshop V1 V3 shared schemas",
+  "$defs": {
+    "StableId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "IdentityProviderConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenant_id",
+        "provider",
+        "issuer",
+        "audience",
+        "jwks_uri",
+        "user_pool_ref",
+        "group_claim",
+        "subject_claim",
+        "status"
+      ],
+      "properties": {
+        "tenant_id": { "$ref": "#/$defs/StableId" },
+        "provider": { "const": "agent_identity_oidc" },
+        "issuer": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "audience": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/StableId" }
+        },
+        "jwks_uri": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "user_pool_ref": { "$ref": "#/$defs/StableId" },
+        "group_claim": { "type": "string", "default": "groups" },
+        "subject_claim": { "type": "string", "default": "sub" },
+        "tenant_claim": { "type": "string", "default": "tenant_id" },
+        "status": {
+          "enum": ["unconfigured", "validating", "ready", "error"]
+        },
+        "jwks_last_refresh_at": {
+          "oneOf": [{ "$ref": "#/$defs/Timestamp" }, { "type": "null" }]
+        }
+      }
+    },
+    "AuthContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenant_id", "subject_id", "group_ids", "issuer", "audience", "authenticated_at"],
+      "properties": {
+        "tenant_id": { "$ref": "#/$defs/StableId" },
+        "subject_id": { "$ref": "#/$defs/StableId" },
+        "group_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/StableId" }
+        },
+        "issuer": { "type": "string", "format": "uri" },
+        "audience": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/StableId" }
+        },
+        "token_id_hash": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{16,128}$"
+        },
+        "authenticated_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "AccessGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "tenant_id",
+        "connection_id",
+        "subject_type",
+        "subject_id",
+        "subject_display_snapshot",
+        "role_id",
+        "effect",
+        "action_scope",
+        "status",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "version"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/StableId" },
+        "tenant_id": { "$ref": "#/$defs/StableId" },
+        "connection_id": { "$ref": "#/$defs/StableId" },
+        "subject_type": { "enum": ["user", "group"] },
+        "subject_id": {
+          "$ref": "#/$defs/StableId",
+          "description": "Stable UserPool ID; never a display name or email."
+        },
+        "subject_display_snapshot": { "type": "string", "maxLength": 512 },
+        "role_id": { "enum": ["reader", "operator", "custom"] },
+        "effect": { "enum": ["allow", "deny"] },
+        "action_scope": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/StableId" }
+        },
+        "status": { "enum": ["active", "revoked"] },
+        "created_by": { "$ref": "#/$defs/StableId" },
+        "created_at": { "$ref": "#/$defs/Timestamp" },
+        "updated_at": { "$ref": "#/$defs/Timestamp" },
+        "version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "RoleDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "tenant_id", "name", "action_selector", "risk_ceiling", "version"],
+      "properties": {
+        "id": { "enum": ["reader", "operator", "custom"] },
+        "tenant_id": { "$ref": "#/$defs/StableId" },
+        "name": { "$ref": "#/$defs/StableId" },
+        "action_selector": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "action_ids"],
+          "properties": {
+            "mode": { "enum": ["read_only", "approved_operator", "explicit"] },
+            "action_ids": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/StableId" }
+            }
+          }
+        },
+        "risk_ceiling": { "enum": ["read", "write", "custom"] },
+        "version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "PolicyDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed",
+        "connection_id",
+        "action_id",
+        "matched_grant_ids",
+        "role_ids",
+        "reason_code",
+        "policy_version"
+      ],
+      "properties": {
+        "allowed": { "type": "boolean" },
+        "connection_id": { "$ref": "#/$defs/StableId" },
+        "action_id": { "$ref": "#/$defs/StableId" },
+        "matched_grant_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/StableId" }
+        },
+        "role_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["reader", "operator", "custom"] }
+        },
+        "reason_code": {
+          "enum": [
+            "ALLOWED_DIRECT",
+            "ALLOWED_GROUP",
+            "DENY_EXPLICIT",
+            "DENY_NO_GRANT",
+            "DENY_CONNECTION_DISABLED",
+            "DENY_ACTION_DISABLED",
+            "DENY_ACTION_UNAVAILABLE",
+            "DENY_TENANT_MISMATCH",
+            "DENY_SOURCE_NATIVE"
+          ]
+        },
+        "policy_version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "IdentitySubject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject_type", "subject_id", "display_name", "status"],
+      "properties": {
+        "subject_type": { "enum": ["user", "group"] },
+        "subject_id": { "$ref": "#/$defs/StableId" },
+        "display_name": { "type": "string", "maxLength": 512 },
+        "status": { "enum": ["active", "disabled", "unknown"] }
+      }
+    },
+    "AccessPreviewRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject_id"],
+      "properties": {
+        "subject_id": { "$ref": "#/$defs/StableId" },
+        "connection_id": { "$ref": "#/$defs/StableId" }
+      }
+    },
+    "AccessPreviewResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenant_id", "subject_id", "connections", "policy_version"],
+      "properties": {
+        "tenant_id": { "$ref": "#/$defs/StableId" },
+        "subject_id": { "$ref": "#/$defs/StableId" },
+        "connections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["connection_id", "allowed_action_ids", "decisions"],
+            "properties": {
+              "connection_id": { "$ref": "#/$defs/StableId" },
+              "allowed_action_ids": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "$ref": "#/$defs/StableId" }
+              },
+              "decisions": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/PolicyDecision" }
+              }
+            }
+          }
+        },
+        "policy_version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "KnowledgeResourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "knowledge" },
+        "provider": { "const": "openviking" },
+        "profile_id": { "$ref": "#/$defs/StableId" },
+        "resource_type": { "enum": ["profile", "directory", "resource"] },
+        "uri": { "type": "string", "pattern": "^viking://" },
+        "display_name": { "type": "string", "maxLength": 512 },
+        "version": { "type": "string", "maxLength": 256 }
+      },
+      "required": ["kind", "provider", "profile_id", "resource_type", "uri"]
+    },
+    "McpCapabilityRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "connection_id", "action_ids"],
+      "properties": {
+        "kind": { "const": "mcp_capability" },
+        "connection_id": { "$ref": "#/$defs/StableId" },
+        "action_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/StableId" }
+        }
+      }
+    },
+    "ErrorEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error", "meta"],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message", "retryable"],
+          "properties": {
+            "code": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+            "retryable": { "type": "boolean" },
+            "details": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["request_id"],
+          "properties": {
+            "request_id": { "$ref": "#/$defs/StableId" }
+          }
+        }
+      }
+    },
+    "SuccessEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["data", "meta"],
+      "properties": {
+        "data": {},
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["request_id"],
+          "properties": {
+            "request_id": { "$ref": "#/$defs/StableId" },
+            "next_page_token": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

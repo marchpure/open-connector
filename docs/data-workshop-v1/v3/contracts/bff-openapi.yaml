@@ -1,0 +1,310 @@
+openapi: 3.1.0
+info:
+  title: Data Workshop V1 V3 Web+BFF API
+  version: 3.0.0
+  description: Same-origin browser API. It never proxies the MCP data plane.
+security:
+  - browserSession: []
+paths:
+  /v1/bootstrap:
+    get:
+      operationId: getBootstrap
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+  /v1/openconnector/launch-sessions:
+    post:
+      operationId: createOpenConnectorLaunchSession
+      responses:
+        "201": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/connections:
+    get:
+      operationId: listConnectionSummaries
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+  /v1/connections/{connectionId}/access:
+    get:
+      operationId: getConnectionAccess
+      parameters:
+        - $ref: "#/components/parameters/ConnectionId"
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/access-grants:
+    get:
+      operationId: listAccessGrants
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+    post:
+      operationId: createAccessGrant
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./schemas.json#/$defs/AccessGrant"
+      responses:
+        "201": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateAccessGrant
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, version]
+              properties:
+                id: { type: string }
+                role_id: { enum: [reader, operator, custom] }
+                effect: { enum: [allow, deny] }
+                action_scope:
+                  type: array
+                  uniqueItems: true
+                  items: { type: string }
+                version: { type: integer, minimum: 1 }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/access-grants/{grantId}:
+    get:
+      operationId: getAccessGrant
+      parameters:
+        - $ref: "#/components/parameters/GrantId"
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/access-grants/{grantId}:revoke:
+    post:
+      operationId: revokeAccessGrant
+      parameters:
+        - $ref: "#/components/parameters/GrantId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/access:preview:
+    post:
+      operationId: previewAccess
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./schemas.json#/$defs/AccessPreviewRequest"
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/access/audit:
+    get:
+      operationId: listAccessAudit
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+  /v1/connection-docs/config:
+    get:
+      operationId: getConnectionDocsConfig
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+  /v1/connection-docs/status:
+    get:
+      operationId: getConnectionDocsStatus
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/openviking/profiles:
+    get:
+      operationId: listOpenVikingProfiles
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+    post:
+      operationId: createOpenVikingProfile
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/openviking/resources:
+    get:
+      operationId: listOpenVikingResources
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+  /v1/openviking/resources:import:
+    post:
+      operationId: importOpenVikingResource
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/openviking/resources/{resourceId}/content:
+    get:
+      operationId: getOpenVikingResourceContent
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/openviking/search:
+    post:
+      operationId: searchOpenViking
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/openviking/tasks:
+    get:
+      operationId: listOpenVikingTasks
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+  /v1/openviking/watches:
+    get:
+      operationId: listOpenVikingWatches
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+    post:
+      operationId: createOpenVikingWatch
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/skills:
+    get:
+      operationId: listSkills
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+    post:
+      operationId: createSkill
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/skills/{skillId}:
+    get:
+      operationId: getSkill
+      parameters:
+        - $ref: "#/components/parameters/SkillId"
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/skills/{skillId}/sessions:
+    post:
+      operationId: createSkillSession
+      parameters:
+        - $ref: "#/components/parameters/SkillId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionId}:
+    get:
+      operationId: getSession
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionId}/messages:
+    post:
+      operationId: createSessionMessage
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202": { $ref: "#/components/responses/Success" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionId}/events:
+    get:
+      operationId: streamSessionEvents
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Server-sent session events.
+          content:
+            text/event-stream:
+              schema: { type: string }
+  /v1/skills/{skillId}/revisions:
+    get:
+      operationId: listSkillRevisions
+      parameters:
+        - $ref: "#/components/parameters/SkillId"
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+  /v1/skills/{skillId}/artifacts:
+    get:
+      operationId: listSkillArtifacts
+      parameters:
+        - $ref: "#/components/parameters/SkillId"
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+  /v1/artifacts/{artifactId}/download:
+    get:
+      operationId: downloadArtifact
+      parameters:
+        - name: artifactId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Validated Skill ZIP.
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        default: { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    browserSession:
+      type: apiKey
+      in: cookie
+      name: dw_session
+      description: HttpOnly, Secure, SameSite browser session.
+  parameters:
+    ConnectionId:
+      name: connectionId
+      in: path
+      required: true
+      schema: { type: string }
+    GrantId:
+      name: grantId
+      in: path
+      required: true
+      schema: { type: string }
+    SkillId:
+      name: skillId
+      in: path
+      required: true
+      schema: { type: string }
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 16, maxLength: 256 }
+  responses:
+    Success:
+      description: Successful operation.
+      content:
+        application/json:
+          schema:
+            $ref: "./schemas.json#/$defs/SuccessEnvelope"
+    Error:
+      description: Standard redacted failure.
+      content:
+        application/json:
+          schema:
+            $ref: "./schemas.json#/$defs/ErrorEnvelope"

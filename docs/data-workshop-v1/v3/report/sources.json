@@ -1,0 +1,69 @@
+{
+  "sources": [
+    {
+      "id": "S1",
+      "title": "数据工作坊 V1 产品 PRD｜连接级授权与统一 MCP 接入",
+      "type": "lark_doc",
+      "revision": 11,
+      "updated_at": "2026-09-03",
+      "url": "https://bytedance.larkoffice.com/docx/KT6OdypsfoezVexGGYvcdtoZnVg",
+      "confidence": "high",
+      "permission_scope": "authenticated enterprise document"
+    },
+    {
+      "id": "S2",
+      "title": "数据工作坊 V1 技术 SPEC V3｜OpenConnector 统一 MCP 与连接级授权",
+      "type": "lark_doc",
+      "revision": 135,
+      "updated_at": "2026-09-03",
+      "url": "https://bytedance.larkoffice.com/docx/NUMidBYfgop4BExlfracPc1nnfb",
+      "confidence": "high",
+      "permission_scope": "authenticated enterprise document"
+    },
+    {
+      "id": "S3",
+      "title": "Data Workshop Inspire Canvas",
+      "type": "prototype",
+      "observed_at": "2026-09-04T00:55:42+08:00",
+      "url": "https://inspire.bytedance.net/prototype/canvas/6a8a29f9c015c9021c92777c",
+      "confidence": "high",
+      "permission_scope": "authenticated enterprise prototype"
+    },
+    {
+      "id": "S4",
+      "title": "Canonical product repository metadata and refs",
+      "type": "git_remote",
+      "observed_at": "2026-09-04T00:55:42+08:00",
+      "url": "https://github.com/marchpure/open-connector",
+      "confidence": "high",
+      "permission_scope": "repository read"
+    },
+    {
+      "id": "S5",
+      "title": "Frozen donor commits",
+      "type": "git_commits",
+      "observed_at": "2026-09-04T00:55:42+08:00",
+      "url": "https://github.com/marchpure/veadk-python/commits/main",
+      "confidence": "high",
+      "permission_scope": "repository read"
+    },
+    {
+      "id": "S6",
+      "title": "V2 Publication implementation and quarantine marker",
+      "type": "git_branch",
+      "observed_at": "2026-09-04T00:55:42+08:00",
+      "url": "https://github.com/marchpure/veadk-python/tree/feat/data-workshop-p0-gateway-publisher",
+      "confidence": "high",
+      "permission_scope": "repository read"
+    },
+    {
+      "id": "S7",
+      "title": "V3 baseline contract package",
+      "type": "git_branch",
+      "observed_at": "2026-09-04T00:55:42+08:00",
+      "url": "https://github.com/marchpure/open-connector/tree/docs/dwv1-i0-baseline-v3/docs/data-workshop-v1/v3",
+      "confidence": "high",
+      "permission_scope": "repository read"
+    }
+  ]
+}

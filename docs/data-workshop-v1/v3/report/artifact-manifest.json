@@ -1,0 +1,18 @@
+{
+  "schema": "arkclaw.artifact-manifest.v1",
+  "artifact_type": "html-briefing",
+  "title": "Data Workshop V1 I0 Baseline V3",
+  "audience": "Data Workshop W1-W7 owners and integration reviewers",
+  "confidentiality": "internal",
+  "source_count": 7,
+  "generated_at": "2026-09-04T00:55:42+08:00",
+  "main_entry": "output/index.html",
+  "published_url": "https://marchpure.github.io/open-connector/data-workshop-v1/v3/report/output/",
+  "assumptions": [],
+  "open_questions": [],
+  "known_limitations": [
+    "This is a contract and scope baseline; it does not claim V3 business implementation or deployment.",
+    "The public Inspire stable preview still selects v4.8; V5 shapes are interaction donors and SPEC V3 revision 135 is authoritative for v5.1 routing."
+  ],
+  "export_targets": ["standalone HTML", "GitHub Pages"]
+}
