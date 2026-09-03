@@ -78,6 +78,7 @@ export interface IConnectServerOptions {
   runtimePolicyStore: IRuntimePolicyStore;
   actionSearch?: ActionSearchIndexProvider;
   registerStaticRoutes?: (app: Hono) => void;
+  registerPreAuthRoutes?: (app: Hono) => void;
   logger?: Logger;
   compressApiResponses?: boolean;
 }
@@ -109,6 +110,7 @@ export class ConnectServer {
   createApp(): Hono {
     const app = new Hono();
     const auth = this.options.auth ?? {};
+    this.options.registerPreAuthRoutes?.(app);
 
     app.use("*", async (context, next) => {
       await next();
