@@ -48,6 +48,7 @@ describe("PostgreSQL migrations with PGlite", () => {
           { name: "0010_runtime.sql" },
           { name: "0011_runtime_token_connection_scope.sql" },
           { name: "0012_marketplace.sql" },
+          { name: "0013_access_grants.sql" },
         ],
       });
 

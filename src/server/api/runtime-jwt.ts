@@ -1,12 +1,20 @@
+import type { IdentityProviderConfig, RuntimeSubject } from "../access/access-grants.ts";
+import type { JWTPayload } from "jose";
+
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
 export interface RuntimeJwtConfig {
   jwksUri?: string;
   issuer?: string;
   audience?: string;
+  userPoolRef?: string;
+  subjectClaim?: string;
+  groupsClaim?: string;
+  tenantClaim?: string;
+  tenant?: string;
 }
 
-export type RuntimeJwtVerifier = (token: string) => Promise<boolean>;
+export type RuntimeJwtVerifier = (token: string) => Promise<RuntimeSubject | boolean | undefined>;
 
 /**
  * Creates a JWT access-token verifier when all runtime JWT settings are configured.
@@ -43,12 +51,103 @@ export function createRuntimeJwtVerifier(config: RuntimeJwtConfig): RuntimeJwtVe
   const jwks = createRemoteJWKSet(url);
   return async (token) => {
     try {
-      await jwtVerify(token, jwks, { issuer, audience, requiredClaims: ["exp"] });
-      return true;
+      const verified = await jwtVerify(token, jwks, { issuer, audience, requiredClaims: ["exp"] });
+      return resolveSubject(verified.payload, {
+        issuer,
+        audience,
+        jwksUri,
+        userPoolRef: config.userPoolRef?.trim() || issuer,
+        subjectClaim: config.subjectClaim?.trim() || "sub",
+        groupsClaim: config.groupsClaim?.trim() || "groups",
+        tenantClaim: config.tenantClaim?.trim(),
+        tenant: config.tenant?.trim(),
+      });
     } catch {
-      return false;
+      return undefined;
     }
   };
+}
+
+export function createRuntimeJwtVerifierFromIdentityConfig(
+  getConfig: () => Promise<IdentityProviderConfig | undefined>,
+): RuntimeJwtVerifier {
+  let cache:
+    | {
+        key: string;
+        verify: RuntimeJwtVerifier;
+      }
+    | undefined;
+  return async (token) => {
+    const config = await getConfig();
+    if (!config) return undefined;
+    const key = JSON.stringify(config);
+    if (!cache || cache.key !== key) {
+      cache = {
+        key,
+        verify: createRequiredRuntimeJwtVerifier({
+          jwksUri: config.jwksUri,
+          issuer: config.issuer,
+          audience: config.audience,
+          userPoolRef: config.userPoolRef,
+          subjectClaim: config.subjectClaim,
+          groupsClaim: config.groupsClaim,
+          tenantClaim: config.tenantClaim,
+          tenant: config.tenant,
+        }),
+      };
+    }
+    return cache.verify(token);
+  };
+}
+
+function createRequiredRuntimeJwtVerifier(
+  config: Required<Pick<RuntimeJwtConfig, "jwksUri" | "issuer" | "audience">> & RuntimeJwtConfig,
+): RuntimeJwtVerifier {
+  const verifier = createRuntimeJwtVerifier(config);
+  if (!verifier) {
+    throw new Error("Runtime JWT verifier requires issuer, audience, and JWKS URI.");
+  }
+  return verifier;
+}
+
+function resolveSubject(payload: JWTPayload, config: IdentityProviderConfig): RuntimeSubject | undefined {
+  const sub = readStringClaim(payload, config.subjectClaim);
+  if (!sub) return undefined;
+  const tenant = config.tenantClaim ? readStringClaim(payload, config.tenantClaim) : config.tenant;
+  if (config.tenant && tenant !== config.tenant) return undefined;
+  return {
+    issuer: config.issuer,
+    audience: config.audience,
+    userPoolRef: config.userPoolRef,
+    tenant,
+    sub,
+    groups: readGroupsClaim(payload, config.groupsClaim),
+  };
+}
+
+function readStringClaim(payload: JWTPayload, claim: string): string | undefined {
+  if (claim === "sub" && payload.sub) {
+    return payload.sub;
+  }
+  const value = payload[claim];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function readGroupsClaim(payload: JWTPayload, claim: string): string[] {
+  const value = payload[claim];
+  if (Array.isArray(value)) {
+    return [
+      ...new Set(
+        value
+          .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+          .map((item) => item.trim()),
+      ),
+    ];
+  }
+  if (typeof value === "string" && value.trim()) {
+    return [value.trim()];
+  }
+  return [];
 }
 
 function isLoopbackHttpUrl(url: URL): boolean {

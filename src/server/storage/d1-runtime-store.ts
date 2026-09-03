@@ -8,6 +8,15 @@ import type {
 } from "../../marketplace/marketplace-service.ts";
 import type { IOAuthClientConfigStore, OAuthClientConfig } from "../../oauth/oauth-client-config-service.ts";
 import type { IOAuthStateStore, OAuthAuthorizationState } from "../../oauth/oauth-flow-service.ts";
+import type {
+  AccessAuditListInput,
+  AccessAuditRecord,
+  AccessGrantRecord,
+  AccessPolicyVersion,
+  IAccessGrantStore,
+  IdentityProviderConfig,
+  RuntimeSubject,
+} from "../access/access-grants.ts";
 import type { D1DatabaseBinding } from "../cloudflare/cloudflare-bindings.ts";
 import type { ISecretCodec } from "../secrets/secret-codec-core.ts";
 import type {
@@ -34,6 +43,7 @@ export interface D1RuntimeDatabaseOptions {
 }
 
 export class D1RuntimeDatabase implements RuntimeDatabase {
+  readonly accessGrantStore: D1AccessGrantStore;
   readonly connectionStore: D1ConnectionStore;
   readonly oauthClientConfigStore: D1OAuthClientConfigStore;
   readonly oauthStateStore: D1OAuthStateStore;
@@ -45,6 +55,7 @@ export class D1RuntimeDatabase implements RuntimeDatabase {
 
   constructor(database: D1DatabaseBinding, options: D1RuntimeDatabaseOptions = {}) {
     const secretCodec = options.secretCodec ?? new PlainTextSecretCodec();
+    this.accessGrantStore = new D1AccessGrantStore(database);
     this.connectionStore = new D1ConnectionStore(database, secretCodec);
     this.oauthClientConfigStore = new D1OAuthClientConfigStore(database, secretCodec);
     this.oauthStateStore = new D1OAuthStateStore(database, secretCodec);
@@ -53,6 +64,172 @@ export class D1RuntimeDatabase implements RuntimeDatabase {
     this.runLogStore = new D1RunLogStore(database, options.runLimit ?? DEFAULT_RUN_LIMIT);
     this.idempotencyStore = new D1IdempotencyStore(database, secretCodec);
     this.marketplaceStore = new D1MarketplaceStore(database);
+  }
+}
+
+export class D1AccessGrantStore implements IAccessGrantStore {
+  private readonly database: D1DatabaseBinding;
+
+  constructor(database: D1DatabaseBinding) {
+    this.database = database;
+  }
+
+  async getIdentityProviderConfig(): Promise<IdentityProviderConfig | undefined> {
+    const row = await this.database
+      .prepare("select value from identity_provider_config where id = 1")
+      .first<RuntimeRow>();
+    return row ? parseJson<IdentityProviderConfig>(readString(row, "value")) : undefined;
+  }
+
+  async setIdentityProviderConfig(config: IdentityProviderConfig): Promise<void> {
+    await this.database
+      .prepare(
+        `
+        insert into identity_provider_config (id, value, updated_at)
+        values (1, ?, ?)
+        on conflict(id) do update set value = excluded.value, updated_at = excluded.updated_at
+      `,
+      )
+      .bind(JSON.stringify(config), new Date().toISOString())
+      .run();
+  }
+
+  async listGrants(): Promise<AccessGrantRecord[]> {
+    const { results } = await this.database
+      .prepare(
+        `
+        select id, subject_type, subject, connection_id, role, effect, custom_actions, reason, created_at, updated_at, revoked_at
+        from access_grants
+        order by created_at desc, id desc
+      `,
+      )
+      .all<RuntimeRow>();
+    return results.map(readAccessGrantRow);
+  }
+
+  async addGrant(grant: AccessGrantRecord): Promise<void> {
+    await this.database
+      .prepare(
+        `
+        insert into access_grants (
+          id, subject_type, subject, connection_id, role, effect, custom_actions, reason, created_at, updated_at, revoked_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      )
+      .bind(
+        grant.id,
+        grant.subjectType,
+        grant.subject,
+        grant.connectionId,
+        grant.role,
+        grant.effect,
+        JSON.stringify(grant.customActions),
+        grant.reason ?? null,
+        grant.createdAt,
+        grant.updatedAt,
+        grant.revokedAt ?? null,
+      )
+      .run();
+  }
+
+  async updateGrant(
+    id: string,
+    patch: Partial<Pick<AccessGrantRecord, "role" | "effect" | "customActions" | "reason" | "updatedAt">>,
+  ): Promise<AccessGrantRecord | undefined> {
+    const row = await this.database.prepare("select * from access_grants where id = ?").bind(id).first<RuntimeRow>();
+    if (!row) return undefined;
+    const next = { ...readAccessGrantRow(row), ...patch };
+    await this.database
+      .prepare(
+        `
+        update access_grants
+        set role = ?, effect = ?, custom_actions = ?, reason = ?, updated_at = ?
+        where id = ?
+      `,
+      )
+      .bind(next.role, next.effect, JSON.stringify(next.customActions), next.reason ?? null, next.updatedAt, id)
+      .run();
+    return next;
+  }
+
+  async revokeGrant(id: string, revokedAt: string): Promise<AccessGrantRecord | undefined> {
+    const row = await this.database.prepare("select * from access_grants where id = ?").bind(id).first<RuntimeRow>();
+    if (!row) return undefined;
+    await this.database
+      .prepare("update access_grants set revoked_at = ?, updated_at = ? where id = ?")
+      .bind(revokedAt, revokedAt, id)
+      .run();
+    return { ...readAccessGrantRow(row), revokedAt, updatedAt: revokedAt };
+  }
+
+  async getPolicyVersion(): Promise<AccessPolicyVersion> {
+    const row = await this.database
+      .prepare("select version, updated_at from access_policy_version where id = 1")
+      .first<RuntimeRow>();
+    if (!row) return { version: 1, updatedAt: new Date(0).toISOString() };
+    return { version: readNumber(row, "version"), updatedAt: readString(row, "updated_at") };
+  }
+
+  async bumpPolicyVersion(updatedAt: string): Promise<AccessPolicyVersion> {
+    await this.database
+      .prepare(
+        `
+        insert into access_policy_version (id, version, updated_at)
+        values (1, 2, ?)
+        on conflict(id) do update set version = version + 1, updated_at = excluded.updated_at
+      `,
+      )
+      .bind(updatedAt)
+      .run();
+    return this.getPolicyVersion();
+  }
+
+  async recordSubject(subject: RuntimeSubject, seenAt: string): Promise<void> {
+    await this.database
+      .prepare(
+        `
+        insert into identity_subjects (subject_key, value, seen_at)
+        values (?, ?, ?)
+        on conflict(subject_key) do update set value = excluded.value, seen_at = excluded.seen_at
+      `,
+      )
+      .bind(subjectKey(subject), JSON.stringify(subject), seenAt)
+      .run();
+  }
+
+  async listSubjects(): Promise<RuntimeSubject[]> {
+    const { results } = await this.database
+      .prepare("select value from identity_subjects order by seen_at desc, subject_key")
+      .all<RuntimeRow>();
+    return results.map((row) => parseJson<RuntimeSubject>(readString(row, "value")));
+  }
+
+  async addAudit(record: AccessAuditRecord): Promise<void> {
+    await this.database
+      .prepare(
+        `
+        insert into access_audit (id, subject_key, connection_id, action_id, value, created_at)
+        values (?, ?, ?, ?, ?, ?)
+      `,
+      )
+      .bind(
+        record.id,
+        subjectKey(record.subject),
+        record.connectionId ?? null,
+        record.actionId ?? null,
+        JSON.stringify(record),
+        record.createdAt,
+      )
+      .run();
+  }
+
+  async listAudit(input: AccessAuditListInput = {}): Promise<AccessAuditRecord[]> {
+    const limit = Math.max(1, Math.min(input.limit ?? 200, 1000));
+    const { results } = await this.database
+      .prepare("select value from access_audit order by created_at desc, id desc limit ?")
+      .bind(limit)
+      .all<RuntimeRow>();
+    return results.map((row) => parseJson<AccessAuditRecord>(readString(row, "value")));
   }
 }
 
@@ -616,6 +793,15 @@ function readString(row: RuntimeRow, key: string): string {
   return value;
 }
 
+function readNumber(row: RuntimeRow, key: string): number {
+  const value = row[key];
+  if (typeof value !== "number") {
+    throw new Error(`Expected D1 column ${key} to be a number.`);
+  }
+
+  return value;
+}
+
 function readRunLogRow(row: RuntimeRow): RunLog {
   const run = parseJson<RunLog>(readString(row, "value"));
   return { ...run, service: readString(row, "service") };
@@ -635,4 +821,24 @@ function readOptionalString(row: RuntimeRow, key: string): string | undefined {
 
 function parseJson<T>(value: string): T {
   return JSON.parse(value) as T;
+}
+
+function readAccessGrantRow(row: RuntimeRow): AccessGrantRecord {
+  return {
+    id: readString(row, "id"),
+    subjectType: readString(row, "subject_type") as AccessGrantRecord["subjectType"],
+    subject: readString(row, "subject"),
+    connectionId: readString(row, "connection_id"),
+    role: readString(row, "role") as AccessGrantRecord["role"],
+    effect: readString(row, "effect") as AccessGrantRecord["effect"],
+    customActions: parseJson<string[]>(readString(row, "custom_actions")),
+    reason: readOptionalString(row, "reason"),
+    createdAt: readString(row, "created_at"),
+    updatedAt: readString(row, "updated_at"),
+    revokedAt: readOptionalString(row, "revoked_at"),
+  };
+}
+
+function subjectKey(subject: RuntimeSubject): string {
+  return [subject.issuer, subject.audience, subject.userPoolRef, subject.tenant ?? "", subject.sub].join("\u001f");
 }

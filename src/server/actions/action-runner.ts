@@ -90,36 +90,46 @@ export class ActionRunner {
         if (connectionPolicy && !connectionPolicy.allowed) {
           policy = connectionPolicy;
           result = { ok: false, error: { code: policy.code, message: policy.message } };
-        } else if (summary?.authType === "marketplace" && !this.options.marketplace?.supportsAction(action.id)) {
-          result = {
-            ok: false,
-            error: {
-              code: "connection_not_found",
-              message: "The selected Marketplace connection does not support this action.",
-            },
-          };
         } else {
-          connection = await this.options.connections.resolveForExecution(action.service, input.connectionName);
-          input.signal?.throwIfAborted();
-          const executor =
-            action.execution.locallyExecutable && !connection.marketplace
-              ? await this.options.providerLoader.loadActionExecutor(
-                  action.service,
-                  action.id,
-                  this.options.catalog.providers.find((provider) => provider.service === action.service)?.displayName,
-                )
-              : undefined;
-          input.signal?.throwIfAborted();
-          result = await executeProviderAction(
-            action,
-            connection.marketplace
-              ? (actionInput) => this.options.marketplace!.execute(action.id, actionInput, input.signal)
-              : executor,
-            input.input,
-            this.createExecutionContext(connection.getCredential, input.signal),
-          );
-          if (input.signal?.aborted) {
-            result = cancelledExecutionResult();
+          const actionConnectionPolicy =
+            summary?.authType === "no_auth" ? undefined : snapshot?.evaluateActionForConnection(action, summary?.id);
+          if (actionConnectionPolicy && !actionConnectionPolicy.allowed) {
+            policy = actionConnectionPolicy;
+            result = { ok: false, error: { code: policy.code, message: policy.message } };
+          } else if (summary?.authType === "marketplace" && !this.options.marketplace?.supportsAction(action.id)) {
+            result = {
+              ok: false,
+              error: {
+                code: "connection_not_found",
+                message: "The selected Marketplace connection does not support this action.",
+              },
+            };
+          } else {
+            if (actionConnectionPolicy) {
+              policy = actionConnectionPolicy;
+            }
+            connection = await this.options.connections.resolveForExecution(action.service, input.connectionName);
+            input.signal?.throwIfAborted();
+            const executor =
+              action.execution.locallyExecutable && !connection.marketplace
+                ? await this.options.providerLoader.loadActionExecutor(
+                    action.service,
+                    action.id,
+                    this.options.catalog.providers.find((provider) => provider.service === action.service)?.displayName,
+                  )
+                : undefined;
+            input.signal?.throwIfAborted();
+            result = await executeProviderAction(
+              action,
+              connection.marketplace
+                ? (actionInput) => this.options.marketplace!.execute(action.id, actionInput, input.signal)
+                : executor,
+              input.input,
+              this.createExecutionContext(connection.getCredential, input.signal),
+            );
+            if (input.signal?.aborted) {
+              result = cancelledExecutionResult();
+            }
           }
         }
       } catch (error) {

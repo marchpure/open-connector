@@ -7,6 +7,111 @@
   gap: 16px;
 }
 
+.access-grants-panel {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.access-grants-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.access-card-form {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+}
+
+.access-card-form h3,
+.access-audit-list h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 660;
+}
+
+.access-inline-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.access-inline-fields.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.access-card-form textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.grant-table {
+  min-width: 860px;
+  table-layout: fixed;
+}
+
+.grant-table th:nth-child(1) {
+  width: 220px;
+}
+
+.grant-table th:nth-child(5) {
+  width: 170px;
+}
+
+.grant-table th:nth-child(6) {
+  width: 120px;
+}
+
+.access-preview-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(180px, 1.1fr) minmax(160px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.access-json-preview {
+  max-height: 260px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--muted);
+}
+
+.access-audit-list {
+  display: grid;
+  gap: 8px;
+}
+
+.access-audit-item {
+  display: grid;
+  grid-template-columns: 84px minmax(120px, 1fr) minmax(160px, 1fr) 150px;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.access-audit-item > span,
+.access-audit-item > code,
+.access-audit-item > small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.access-audit-item > small {
+  color: var(--muted-foreground);
+}
+
 .token-table {
   min-width: 980px;
   table-layout: fixed;
@@ -811,6 +916,10 @@
     grid-template-columns: 1fr;
   }
 
+  .access-grants-grid {
+    grid-template-columns: 1fr;
+  }
+
   .runtime-policy-editor-grid {
     grid-template-columns: 1fr;
   }
@@ -828,6 +937,10 @@
   .policy-baseline-grid,
   .policy-rule-readout,
   .policy-allow-mode,
+  .access-inline-fields,
+  .access-inline-fields.two,
+  .access-preview-row,
+  .access-audit-item,
   .policy-advanced-grid {
     grid-template-columns: 1fr;
   }

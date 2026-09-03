@@ -13,7 +13,9 @@ import { MarketplaceService } from "../marketplace/marketplace-service.ts";
 import { OAuthClientConfigService } from "../oauth/oauth-client-config-service.ts";
 import { OAuthCredentialRefreshService } from "../oauth/oauth-credential-refresh-service.ts";
 import { OAuthFlowService } from "../oauth/oauth-flow-service.ts";
+import { AccessGrantService } from "./access/access-grants.ts";
 import { ActionRunner } from "./actions/action-runner.ts";
+import { createRuntimeJwtVerifierFromIdentityConfig } from "./api/runtime-jwt.ts";
 import { ConnectServer } from "./connect-server.ts";
 import { RuntimeTokenService } from "./storage/runtime-token-service.ts";
 
@@ -49,7 +51,10 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
   });
   await marketplace.initialize();
   const runtimeTokens = new RuntimeTokenService(options.runtimeDatabase.runtimeTokenStore, options.logger);
+  const accessGrants = new AccessGrantService(options.runtimeDatabase.accessGrantStore);
   const hasStoredRuntimeTokens = async (): Promise<boolean> => (await runtimeTokens.listTokens()).length > 0;
+  const hasRuntimeJwtConfig = async (): Promise<boolean> =>
+    Boolean(options.verifyRuntimeJwt) || Boolean(await accessGrants.getIdentityProviderConfig());
   const allowedCustomOAuth = new Set(options.allowedCustomOAuth);
   const isCustomClientConfigAllowed = (service: string): boolean =>
     allowedCustomOAuth.has("*") || allowedCustomOAuth.has(service);
@@ -102,10 +107,14 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
         adminToken: options.adminToken,
         runtimeToken: options.runtimeToken,
         hasRuntimeTokens: hasStoredRuntimeTokens,
+        hasRuntimeJwtConfig,
         resolveRuntimeToken: (token) => runtimeTokens.resolveToken(token),
-        verifyRuntimeJwt: options.verifyRuntimeJwt,
+        verifyRuntimeJwt:
+          options.verifyRuntimeJwt ??
+          createRuntimeJwtVerifierFromIdentityConfig(() => accessGrants.getIdentityProviderConfig()),
       },
       actionPolicy: options.actionPolicy,
+      accessGrants,
       logger: options.logger,
       marketplace,
       compressApiResponses: options.compressApiResponses,
@@ -113,6 +122,7 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
     runtimeAuthConfigured:
       Boolean(options.runtimeToken) ||
       Boolean(options.verifyRuntimeJwt) ||
+      (options.computeRuntimeAuthConfigured === false ? false : await hasRuntimeJwtConfig()) ||
       (options.computeRuntimeAuthConfigured === false ? false : await hasStoredRuntimeTokens()),
   };
 }
