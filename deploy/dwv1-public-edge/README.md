@@ -75,11 +75,11 @@ Current resource state:
   `idv-order-discount-agent-test.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service`;
   it currently has no promotable tag/digest.
 - Local Linux AMD64 OCI candidate:
-  `/tmp/data-workshop-v1-v3/w4/openconnector-bd8bab1-linux-amd64.oci.tar`.
+  `/tmp/data-workshop-v1-v3/w4/openconnector-87d1d8e-linux-amd64.oci.tar`.
   Its manifest digest is
-  `sha256:c610f5dd13ce3271c3b55f902580f18c0164d3b2ddb703c3a78ab1a14e5723db`;
+  `sha256:0b4e1435fedfe4075c43b97510d577f85b038b399bbf5f0f4a43da29ef26104d`;
   the archive SHA-256 is
-  `35f7f21015daeab012199279a8b8d833d2ce15e69232e8c833d68a2f3f9bf941`.
+  `dceefb322356f4acdad8ff8263d5948e3a864d1eb331c8823b12a60f1a37b68b`.
 - APIG gateway logging is enabled and its upstream pool has 1024 connections
   with an 86400-second idle timeout. Monitoring and rate-limit plugin bindings
   are not currently enabled, so they remain part of the eventual promotion.
