@@ -7,10 +7,13 @@ does not deploy AgentKit MCP Gateway or OpenViking and does not add product UI.
 
 `BLOCKED_UPSTREAM`: the frozen source
 `0fa2c728dfbf957735da2843ec2b8a4f3425b105` contains the OpenConnector console
-and stateless `POST /mcp`, but the W1 enhanced runtime and W2 WorkBuddy
-UserPool/Client branches have no commits beyond that frozen source. The real
-runtime remains the `/mcp` backend. `/edge-contract/mcp` is a separately
-labelled protocol probe; it is not an end-to-end substitute.
+and stateless `POST /mcp`. W1 and W2 have uncommitted implementation in their
+isolated worktrees, but neither branch has a commit beyond the frozen source.
+The deployment repository has no image tags, and the candidate identity
+service returns `504` for health, OIDC discovery, OAuth metadata, authorization,
+and JWKS probes. The real runtime remains the `/mcp` backend.
+`/edge-contract/mcp` is a separately labelled protocol probe; it is not an
+end-to-end substitute.
 
 The ECS/Caddy layout was derived file-by-file from the read-only donor
 `data-workshop-p0-connection-ecs` commit `dc103ff`. This package replaces the
@@ -49,6 +52,21 @@ The stable dev origin currently allocated by APIG is:
 ```text
 https://s4j054gh1e125mqsipi2e.apigateway-cn-beijing.volceapi.com
 ```
+
+Current resource state:
+
+- APIG service `s4j054gh1e125mqsipi2e`, HTTPS-only, routes to the existing ECS
+  upstream on private port 80.
+- ECS `i-yeu29z0u80xjd1uymo93`, public IP `101.126.155.97`, currently runs donor
+  source `ad8c3ca2befd0e3f28e8feaa094d97b841a4e620`.
+- Current donor image digest:
+  `sha256:d3dfc756f39a4f301b5b36aec4a345772953eb6dd172d5638a4bf7384e877b77`.
+- Target CR repository:
+  `idv-order-discount-agent-test.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service`;
+  it currently has no promotable tag/digest.
+- APIG gateway logging is enabled and its upstream pool has 1024 connections
+  with an 86400-second idle timeout. Monitoring and rate-limit plugin bindings
+  are not currently enabled, so they remain part of the eventual promotion.
 
 After this release is deployed, the browser-readable, secret-free evidence URL
 is:
