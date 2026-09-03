@@ -81,23 +81,29 @@ manifest-only commits must not be mistaken for a product code base.
 
 ## W1–W6 handoff
 
-W1/W2 code base: OpenConnector P0 commit
-`e8251a3dd96af1af6692bb2e95217acf2745641d`; tracked branch base including
-this manifest is `9d5d4825e4cf079bca2f541e33bf312370f245a3`. W1 may edit only state, storage,
-runtime-role, and infra; W2 may edit only publication, identity,
-authorization, and MCP runtime. Do not edit the original dirty worktree.
+W1 base: OpenConnector P0 code commit `e8251a3dd96af1af6692bb2e95217acf2745641d`;
+audit ref `bc94d83f3a9dee81405e9fcf20e93b2737416048`. Modify only state,
+storage, runtime-role, and infra. Do not edit the original dirty worktree.
 
-W3/W6 base: Data Studio `9766b3a5e810c12edcfbe3ba43d9a3e0419c2275`; W3 owns
-shell/BFF/contracts/OpenConnector adapter, W6 owns only OpenViking adapter,
-knowledge pages, and tests. Do not edit generated assets across lanes.
+W2 base: OpenConnector P0 code commit `e8251a3dd96af1af6692bb2e95217acf2745641d`;
+audit ref `bc94d83f3a9dee81405e9fcf20e93b2737416048`. Modify only publication,
+identity, authorization, and MCP runtime. Do not implement Gateway or ABAC.
 
-W4 has no product-code base; it owns only dev DRC/APIG/VeFaaS configuration and
-must preserve methods, headers, statuses, and stream passthrough.
+W3 base: Data Studio `9766b3a5e810c12edcfbe3ba43d9a3e0419c2275`. Modify only
+shell, BFF core, contracts, and OpenConnector adapter. Do not edit W6 paths or
+generated assets.
 
-W5 has no formal base: canonical
+W4 base: no product-code commit; infrastructure is environment-owned. Modify
+only dev DRC/APIG/VeFaaS configuration and preserve methods, headers, statuses,
+and stream passthrough.
+
+W5 base: unavailable; exact canonical repository
 `hydra-agent/data-workshop-skill-agent` must be created or access granted.
-The local-only skeleton SHA is `713e755bff80f9c3d0160b6888742a5a6f314f85`;
-it may be offered as a seed, not declared as the product base.
+Local skeleton `713e755bff80f9c3d0160b6888742a5a6f314f85` is seed only, not base.
+
+W6 base: Data Studio `9766b3a5e810c12edcfbe3ba43d9a3e0419c2275`. Modify only
+`adapters/openviking`, knowledge pages, and corresponding tests. Do not
+self-deploy OpenViking or edit BFF core.
 
 ## Verification
 
