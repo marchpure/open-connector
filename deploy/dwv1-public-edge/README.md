@@ -7,13 +7,14 @@ does not deploy AgentKit MCP Gateway or OpenViking and does not add product UI.
 
 `BLOCKED_UPSTREAM`: the frozen source
 `0fa2c728dfbf957735da2843ec2b8a4f3425b105` contains the OpenConnector console
-and stateless `POST /mcp`. W1 and W2 have uncommitted implementation in their
-isolated worktrees, but neither branch has a commit beyond the frozen source.
-The deployment repository has no image tags, and the candidate identity
-service returns `504` for health, OIDC discovery, OAuth metadata, authorization,
-and JWKS probes. The real runtime remains the `/mcp` backend.
-`/edge-contract/mcp` is a separately labelled protocol probe; it is not an
-end-to-end substitute.
+and stateless `POST /mcp`. W1 commit `1c65e146896903a1b85b57016f8bd10ba6f75695`
+and W2 commit `4bb0b4cbeb40086571f46515a50ff72fbbe3768c` are integrated in
+`bd8bab190906854e96809f44eaf4c9b9b2448c25`. Its Linux AMD64 image passed
+control-plane/runtime role smoke tests. The candidate identity service is
+online but does not publish `jwks_uri`, `/jwks` serves HTML, and no approved
+WorkBuddy Client identifier has been handed off. The real runtime remains the
+`/mcp` backend. `/edge-contract/mcp` is a separately labelled protocol probe;
+it is not an end-to-end substitute.
 
 The ECS/Caddy layout was derived file-by-file from the read-only donor
 `data-workshop-p0-connection-ecs` commit `dc103ff`. This package replaces the
@@ -73,6 +74,12 @@ Current resource state:
 - Target CR repository:
   `idv-order-discount-agent-test.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service`;
   it currently has no promotable tag/digest.
+- Local Linux AMD64 OCI candidate:
+  `/tmp/data-workshop-v1-v3/w4/openconnector-bd8bab1-linux-amd64.oci.tar`.
+  Its manifest digest is
+  `sha256:c610f5dd13ce3271c3b55f902580f18c0164d3b2ddb703c3a78ab1a14e5723db`;
+  the archive SHA-256 is
+  `35f7f21015daeab012199279a8b8d833d2ce15e69232e8c833d68a2f3f9bf941`.
 - APIG gateway logging is enabled and its upstream pool has 1024 connections
   with an 86400-second idle timeout. Monitoring and rate-limit plugin bindings
   are not currently enabled, so they remain part of the eventual promotion.
