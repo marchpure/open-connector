@@ -14,11 +14,11 @@ Design authority: Data Workshop V1 implementation SPEC, document
 
 | Role | Repository / remote | Branch | Local SHA | Remote SHA | Worktree state |
 |---|---|---|---|---|---|
-| Product | `marchpure/open-connector`, `git@github.com:marchpure/open-connector.git` | `codex/dwv1-i0-p0-baseline` | `e8251a3dd96af1af6692bb2e95217acf2745641d` | to be verified after push | clean independent worktree; derived from clean `496a230e8507fff50a43977c5cfaec3e9da3367e` |
+| Product | `marchpure/open-connector`, `git@github.com:marchpure/open-connector.git` | `codex/dwv1-i0-p0-baseline` | `49a7d89c10bfe0cd5e8207bbddcb32516d6996e1` | same SHA verified on `fork/codex/dwv1-i0-p0-baseline` | clean independent worktree; derived from clean `496a230e8507fff50a43977c5cfaec3e9da3367e` |
 | Product candidate retained | `marchpure/open-connector` | `feat/data-workshop-p0-connection-ecs` | `496a230e8507fff50a43977c5cfaec3e9da3367e` | `fork/feat/data-workshop-p0-connection-ecs` same SHA | clean; no unpushed commits |
 | Original user worktree | `marchpure/open-connector` | `codex/web-action-chain` | `50884f764c13a0629600dc38cae0616c1ec7c382` | branch not present on fork remote | dirty; 43 entries; preserved unchanged |
 | Product | `marchpure/veadk-data-studio`, `https://github.com/marchpure/veadk-data-studio.git` | `main` | `9766b3a5e810c12edcfbe3ba43d9a3e0419c2275` | same SHA on `veadk-data-studio/main` | clean; no unpushed commits |
-| Product skeleton only | intended `hydra-agent/data-workshop-skill-agent` | `main` | `713e755bff80f9c3d0160b6888742a5a6f314f85` | none | clean local-only recovery skeleton; not formal product baseline |
+| Product skeleton only | intended `hydra-agent/data-workshop-skill-agent` | `main` | `713e755bff80f9c3d0160b6888742a5a6f314f85` | none | clean local-only recovery skeleton; not formal product baseline; initial skeleton was `473f4c2722aca1e5e176a05c7853f41d43da82fb` |
 | SDK dependency only | `volcengine/veadk-python`, `https://github.com/volcengine/veadk-python.git` | `main` | local checkout dirty and behind | public upstream pin `ba5cd8ea2eabbf84961674802278f38fd1b8e9ce` | source not copied; W5 skeleton pins this commit |
 
 The W5 local skeleton intentionally does not substitute for the missing
@@ -98,14 +98,19 @@ it may be offered as a seed, not declared as the product base.
 - P0 OpenConnector: `npm run typecheck` passed; targeted auth/runtime/OAuth
   tests passed: 118 tests; `git diff --check` passed.
 - Data Studio: clean local/remote SHA equality verified; Python compilation and
-  `git diff --check` passed, with existing `return in finally` warnings.
+  `git diff --check` passed, with existing `return in finally` warnings. A
+  previously attempted test path was absent and is not counted as a pass;
+  available test inventory was rechecked before selecting any future test run.
 - W5 skeleton: one skeleton test passed; no product implementation claimed.
 - The original dirty OpenConnector worktree was not edited, staged, committed,
   reset, or cleaned.
 - Secret scan was rerun from each repository root over
-  `git ls-files -co --exclude-standard`; high-confidence private-key and
-  provider-token patterns are recorded without emitting matched content.
-  Generic field names and test fixtures were not treated as secrets.
+  `git ls-files -co --exclude-standard`, with stderr preserved. High-confidence
+  provider-token patterns matched only existing provider definition
+  placeholders (OpenConnector: three files) and a test connection fixture
+  (Data Studio: one file); no private-key or provider-token literal was
+  confirmed. Generic field names and test fixtures were not treated as
+  secrets, and no secret content was emitted.
 
 ## Unique external blocker
 
