@@ -260,6 +260,9 @@ export class ConnectServer {
       app.get("/api/access-grants", (context) => this.listAccessGrants(context));
       app.post("/api/access-grants", (context) => this.createAccessGrant(context));
       app.patch("/api/access-grants/:id", (context) => this.updateAccessGrant(context, context.req.param("id")));
+      app.post("/api/access-grants/:id\\:revoke", (context) =>
+        this.revokeAccessGrant(context, readColonActionAccessGrantId(context)),
+      );
       app.post("/api/access-grants/:id/revoke", (context) => this.revokeAccessGrant(context, context.req.param("id")));
       app.post("/api/access/preview", (context) => this.previewAccess(context));
       app.get("/api/access/audit", (context) => this.listAccessAudit(context));
@@ -1529,6 +1532,15 @@ function readPartialAccessGrantInput(body: Record<string, unknown>): Partial<Acc
       : { customActions: readOptionalStringList(body.customActions ?? body.custom_actions) }),
     ...(body.reason === undefined ? {} : { reason: optionalString(body.reason) ?? "" }),
   };
+}
+
+function readColonActionAccessGrantId(context: Context): string {
+  const params = context.req.param() as Record<string, string | undefined>;
+  const raw = params["id\\:revoke"] ?? params["id:revoke"] ?? params.id;
+  if (!raw?.endsWith(":revoke")) {
+    throw new HttpRequestError("invalid_input", "AccessGrant revoke id is required.");
+  }
+  return raw.slice(0, -":revoke".length);
 }
 
 function readPreviewSubject(body: Record<string, unknown>): ReturnType<typeof readRuntimeSubject> {

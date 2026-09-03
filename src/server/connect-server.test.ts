@@ -729,7 +729,7 @@ describe("ConnectServer", () => {
     });
     expect(allowed.status).toBe(200);
 
-    const revoke = await app.request(`/api/access-grants/${grantBody.id}/revoke`, { method: "POST" });
+    const revoke = await app.request(`/api/access-grants/${grantBody.id}:revoke`, { method: "POST" });
     expect(revoke.status).toBe(200);
     const deniedAfterRevoke = await app.request("/v1/actions/example.echo", {
       method: "POST",

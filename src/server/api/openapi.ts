@@ -328,6 +328,7 @@ export function createOpenApiDocument(
     "/api/identity-provider": createIdentityProviderPath(),
     "/api/access-grants": createAdminAccessGrantsPath(),
     "/api/access-grants/{id}": createAdminAccessGrantPath(),
+    "/api/access-grants/{id}:revoke": createAdminAccessGrantRevokePath(),
     "/api/access-grants/{id}/revoke": createAdminAccessGrantRevokePath(),
     "/api/access/preview": createAdminAccessPreviewPath(),
     "/api/access/audit": createAdminAccessAuditPath(),

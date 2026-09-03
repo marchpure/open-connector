@@ -251,6 +251,9 @@ describe("action execution OpenAPI", () => {
       get?: unknown;
       post?: { requestBody?: unknown; responses: Record<string, unknown> };
     };
+    const adminRevoke = document.paths["/api/access-grants/{id}:revoke"] as {
+      post?: { parameters?: Array<{ name: string }> };
+    };
     const runtimeGrants = document.paths["/v1/access-grants"] as {
       get?: unknown;
       post?: { responses: Record<string, { content?: { "application/json"?: { schema?: { required?: string[] } } } }> };
@@ -283,6 +286,7 @@ describe("action execution OpenAPI", () => {
     expect(identityProvider.put).toBeDefined();
     expect(adminGrants.get).toBeDefined();
     expect(adminGrants.post?.responses["413"]).toBeDefined();
+    expect(adminRevoke.post?.parameters).toContainEqual(expect.objectContaining({ name: "id" }));
     expect(runtimeGrants.get).toBeDefined();
     expect(runtimeGrants.post?.responses["200"]?.content?.["application/json"]?.schema?.required).toEqual(
       expect.arrayContaining(["success", "message", "data", "meta"]),
