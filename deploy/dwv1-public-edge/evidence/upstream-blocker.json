@@ -1,0 +1,11 @@
+{
+  "status": "BLOCKED_UPSTREAM",
+  "observedAt": "2026-09-04T05:35:00+08:00",
+  "frozenBase": "0fa2c728dfbf957735da2843ec2b8a4f3425b105",
+  "w1Branch": "feat/dwv1-rerun-20260904-w1-openconnector-core",
+  "w1CommitsBeyondBase": 0,
+  "w2Branch": "feat/dwv1-rerun-20260904-w2-identity-access",
+  "w2CommitsBeyondBase": 0,
+  "impact": "Approved WorkBuddy OAuth UserPool/Client and enhanced runtime integration cannot be truthfully verified",
+  "e2eClaimed": false
+}
