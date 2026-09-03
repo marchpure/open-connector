@@ -1,7 +1,14 @@
 import type {
   ConnectionRecord,
+  AccessAuditRecord,
+  AccessGrantEffect,
+  AccessGrantRecord,
+  AccessGrantRole,
+  AccessGrantSubjectType,
+  IdentityProviderConfig,
   PolicyRules,
   ProviderDefinition,
+  RuntimeSubject,
   RuntimePolicyState,
   RuntimeTokenCreation,
   RuntimeTokenSummary,
@@ -30,7 +37,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { apiDelete, apiPost, apiPut } from "./api";
+import { apiDelete, apiPatch, apiPost, apiPut } from "./api";
 import { formatDate } from "./model";
 import {
   countAllowedActions,
@@ -60,6 +67,10 @@ interface AccessPageProps {
   providers: ProviderDefinition[];
   connections: ConnectionRecord[];
   tokens: RuntimeTokenSummary[];
+  identityProvider?: IdentityProviderConfig | null;
+  accessGrants?: AccessGrantRecord[];
+  identitySubjects?: RuntimeSubject[];
+  accessAudit?: AccessAuditRecord[];
   policy: RuntimePolicyState;
   onRefresh(): void;
 }
@@ -121,6 +132,13 @@ export function AccessPage(props: AccessPageProps): ReactNode {
   const [createOpen, setCreateOpen] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<string | null>(null);
   const [tokenStatus, setTokenStatus] = useState<string | null>(null);
+  const [accessStatus, setAccessStatus] = useState<string | null>(null);
+  const [grantDraft, setGrantDraft] = useState(() => createAccessGrantDraft());
+  const [editingGrant, setEditingGrant] = useState<AccessGrantRecord | null>(null);
+  const [editGrantDraft, setEditGrantDraft] = useState(() => createAccessGrantDraft());
+  const [identityDraft, setIdentityDraft] = useState(() => createIdentityDraft(props.identityProvider ?? null));
+  const [previewDraft, setPreviewDraft] = useState(() => createPreviewDraft());
+  const [previewResult, setPreviewResult] = useState<unknown>(null);
   const previousPolicy = useRef(props.policy);
   const { copy, copied } = useClipboard();
   const savedRuntimeDraft = useMemo(() => createPolicyEditorDraft(policy.runtime), [policy.runtime]);
@@ -143,6 +161,7 @@ export function AccessPage(props: AccessPageProps): ReactNode {
     () => (runtimeEditing ? policyRisk(runtimeDraftState, props.providers) : null),
     [runtimeDraftState, props.providers, runtimeEditing],
   );
+  const identitySubjects = props.identitySubjects ?? [];
 
   useEffect(() => {
     if (props.policy === previousPolicy.current) {
@@ -154,6 +173,104 @@ export function AccessPage(props: AccessPageProps): ReactNode {
       setRuntimeDraft(createPolicyEditorDraft(props.policy.runtime));
     }
   }, [props.policy, runtimeEditing]);
+
+  useEffect(() => {
+    setIdentityDraft(createIdentityDraft(props.identityProvider ?? null));
+  }, [props.identityProvider]);
+
+  async function saveIdentityProvider(event: SubmitEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setAccessStatus("Saving identity provider...");
+    try {
+      await apiPut("/api/identity-provider", {
+        issuer: identityDraft.issuer,
+        audience: identityDraft.audience,
+        jwksUri: identityDraft.jwksUri,
+        userPoolRef: identityDraft.userPoolRef,
+        subjectClaim: identityDraft.subjectClaim || "sub",
+        groupsClaim: identityDraft.groupsClaim || "groups",
+        tenantClaim: identityDraft.tenantClaim || undefined,
+        tenant: identityDraft.tenant || undefined,
+      });
+      setAccessStatus("Identity provider saved.");
+      props.onRefresh();
+    } catch (error) {
+      setAccessStatus(error instanceof Error ? error.message : "Failed to save identity provider.");
+    }
+  }
+
+  async function createGrant(event: SubmitEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setAccessStatus("Saving grant...");
+    try {
+      await apiPost("/api/access-grants", {
+        subjectType: grantDraft.subjectType,
+        subject: grantDraft.subject,
+        connectionId: grantDraft.connectionId,
+        role: grantDraft.role,
+        effect: grantDraft.effect,
+        customActions: parsePolicyLines(grantDraft.customActions),
+        reason: grantDraft.reason || undefined,
+      });
+      setGrantDraft(createAccessGrantDraft());
+      setAccessStatus("Grant saved.");
+      props.onRefresh();
+    } catch (error) {
+      setAccessStatus(error instanceof Error ? error.message : "Failed to save grant.");
+    }
+  }
+
+  async function revokeGrant(id: string): Promise<void> {
+    setAccessStatus("Revoking grant...");
+    try {
+      await apiPost(`/api/access-grants/${id}/revoke`, {});
+      setAccessStatus("Grant revoked.");
+      props.onRefresh();
+    } catch (error) {
+      setAccessStatus(error instanceof Error ? error.message : "Failed to revoke grant.");
+    }
+  }
+
+  async function saveGrantEdit(event: SubmitEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!editingGrant) return;
+    setAccessStatus("Saving grant...");
+    try {
+      await apiPatch(`/api/access-grants/${editingGrant.id}`, {
+        role: editGrantDraft.role,
+        effect: editGrantDraft.effect,
+        customActions: parsePolicyLines(editGrantDraft.customActions),
+        reason: editGrantDraft.reason || undefined,
+      });
+      setEditingGrant(null);
+      setAccessStatus("Grant saved.");
+      props.onRefresh();
+    } catch (error) {
+      setAccessStatus(error instanceof Error ? error.message : "Failed to save grant.");
+    }
+  }
+
+  function openGrantEditor(grant: AccessGrantRecord): void {
+    setEditingGrant(grant);
+    setEditGrantDraft(createAccessGrantDraft(grant));
+  }
+
+  async function previewAccess(event: SubmitEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setAccessStatus("Previewing access...");
+    try {
+      const subject = selectedPreviewSubject(previewDraft.subjectKey, identitySubjects);
+      const result = await apiPost("/api/access/preview", {
+        subject,
+        connectionId: previewDraft.connectionId,
+        actionId: previewDraft.actionId || undefined,
+      });
+      setPreviewResult(result);
+      setAccessStatus("Preview ready.");
+    } catch (error) {
+      setAccessStatus(error instanceof Error ? error.message : "Failed to preview access.");
+    }
+  }
 
   async function submitToken(event: SubmitEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -280,6 +397,26 @@ export function AccessPage(props: AccessPageProps): ReactNode {
 
   return (
     <section className="detail-panel access-panel">
+      <AccessGrantSection
+        identityDraft={identityDraft}
+        grantDraft={grantDraft}
+        previewDraft={previewDraft}
+        previewResult={previewResult}
+        grants={props.accessGrants ?? []}
+        audit={props.accessAudit ?? []}
+        subjects={identitySubjects}
+        connectionOptions={connectionOptions}
+        status={accessStatus}
+        onIdentityDraftChange={setIdentityDraft}
+        onGrantDraftChange={setGrantDraft}
+        onPreviewDraftChange={setPreviewDraft}
+        onSaveIdentity={saveIdentityProvider}
+        onCreateGrant={createGrant}
+        onPreview={previewAccess}
+        onEditGrant={openGrantEditor}
+        onRevokeGrant={revokeGrant}
+      />
+
       <details
         className="access-section-disclosure"
         open={policyExpanded}
@@ -425,6 +562,16 @@ export function AccessPage(props: AccessPageProps): ReactNode {
           onConnectionsChange={setEditConnections}
           onSubmit={saveTokenPolicy}
           onClose={() => setEditingToken(null)}
+        />
+      ) : null}
+      {editingGrant ? (
+        <EditAccessGrantDialog
+          grant={editingGrant}
+          draft={editGrantDraft}
+          status={accessStatus}
+          onDraftChange={setEditGrantDraft}
+          onSubmit={saveGrantEdit}
+          onClose={() => setEditingGrant(null)}
         />
       ) : null}
       <Dialog open={confirmRuntimeSave} onOpenChange={setConfirmRuntimeSave}>
@@ -629,6 +776,345 @@ function PolicyDecisionTrace(props: { value: string; result: PolicyEvaluation })
         ))}
       </ol>
     </details>
+  );
+}
+
+interface IdentityDraft {
+  issuer: string;
+  audience: string;
+  jwksUri: string;
+  userPoolRef: string;
+  subjectClaim: string;
+  groupsClaim: string;
+  tenantClaim: string;
+  tenant: string;
+}
+
+interface GrantDraft {
+  subjectType: AccessGrantSubjectType;
+  subject: string;
+  connectionId: string;
+  role: AccessGrantRole;
+  effect: AccessGrantEffect;
+  customActions: string;
+  reason: string;
+}
+
+interface PreviewDraft {
+  subjectKey: string;
+  connectionId: string;
+  actionId: string;
+}
+
+function AccessGrantSection(props: {
+  identityDraft: IdentityDraft;
+  grantDraft: GrantDraft;
+  previewDraft: PreviewDraft;
+  previewResult: unknown;
+  grants: AccessGrantRecord[];
+  audit: AccessAuditRecord[];
+  subjects: RuntimeSubject[];
+  connectionOptions: ConnectionGrantOption[];
+  status: string | null;
+  onIdentityDraftChange(draft: IdentityDraft): void;
+  onGrantDraftChange(draft: GrantDraft): void;
+  onPreviewDraftChange(draft: PreviewDraft): void;
+  onSaveIdentity(event: SubmitEvent<HTMLFormElement>): Promise<void>;
+  onCreateGrant(event: SubmitEvent<HTMLFormElement>): Promise<void>;
+  onPreview(event: SubmitEvent<HTMLFormElement>): Promise<void>;
+  onEditGrant(grant: AccessGrantRecord): void;
+  onRevokeGrant(id: string): Promise<void>;
+}): ReactNode {
+  return (
+    <section className="access-grants-panel">
+      <div className="access-section-heading">
+        <div>
+          <h2>访问权限</h2>
+          <p>JWT 身份、用户/用户组授权、权限预览与审计。</p>
+        </div>
+        {props.status ? <FormStatus message={props.status} /> : null}
+      </div>
+      <div className="access-grants-grid">
+        <form className="access-card-form" onSubmit={(event) => void props.onSaveIdentity(event)}>
+          <h3>Identity Provider</h3>
+          <Label className="field">
+            <span>Issuer</span>
+            <Input
+              value={props.identityDraft.issuer}
+              onChange={(event) => props.onIdentityDraftChange({ ...props.identityDraft, issuer: event.target.value })}
+            />
+          </Label>
+          <Label className="field">
+            <span>Audience</span>
+            <Input
+              value={props.identityDraft.audience}
+              onChange={(event) =>
+                props.onIdentityDraftChange({ ...props.identityDraft, audience: event.target.value })
+              }
+            />
+          </Label>
+          <Label className="field">
+            <span>JWKS URI</span>
+            <Input
+              value={props.identityDraft.jwksUri}
+              onChange={(event) => props.onIdentityDraftChange({ ...props.identityDraft, jwksUri: event.target.value })}
+            />
+          </Label>
+          <div className="access-inline-fields">
+            <Label className="field">
+              <span>User pool</span>
+              <Input
+                value={props.identityDraft.userPoolRef}
+                onChange={(event) =>
+                  props.onIdentityDraftChange({ ...props.identityDraft, userPoolRef: event.target.value })
+                }
+              />
+            </Label>
+            <Label className="field">
+              <span>Subject claim</span>
+              <Input
+                value={props.identityDraft.subjectClaim}
+                onChange={(event) =>
+                  props.onIdentityDraftChange({ ...props.identityDraft, subjectClaim: event.target.value })
+                }
+              />
+            </Label>
+            <Label className="field">
+              <span>Group claim</span>
+              <Input
+                value={props.identityDraft.groupsClaim}
+                onChange={(event) =>
+                  props.onIdentityDraftChange({ ...props.identityDraft, groupsClaim: event.target.value })
+                }
+              />
+            </Label>
+          </div>
+          <div className="access-inline-fields two">
+            <Label className="field">
+              <span>Tenant claim</span>
+              <Input
+                value={props.identityDraft.tenantClaim}
+                onChange={(event) =>
+                  props.onIdentityDraftChange({ ...props.identityDraft, tenantClaim: event.target.value })
+                }
+              />
+            </Label>
+            <Label className="field">
+              <span>Tenant</span>
+              <Input
+                value={props.identityDraft.tenant}
+                onChange={(event) =>
+                  props.onIdentityDraftChange({ ...props.identityDraft, tenant: event.target.value })
+                }
+              />
+            </Label>
+          </div>
+          <Button
+            type="submit"
+            disabled={
+              !props.identityDraft.issuer ||
+              !props.identityDraft.audience ||
+              !props.identityDraft.jwksUri ||
+              !props.identityDraft.userPoolRef
+            }
+          >
+            <Save size={15} />
+            Save IdP
+          </Button>
+        </form>
+
+        <form className="access-card-form" onSubmit={(event) => void props.onCreateGrant(event)}>
+          <h3>New AccessGrant</h3>
+          <div className="access-inline-fields">
+            <Select
+              value={props.grantDraft.subjectType}
+              onValueChange={(value) =>
+                props.onGrantDraftChange({ ...props.grantDraft, subjectType: value as AccessGrantSubjectType })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="user">User</SelectItem>
+                <SelectItem value="group">Group</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={props.grantDraft.role}
+              onValueChange={(value) =>
+                props.onGrantDraftChange({ ...props.grantDraft, role: value as AccessGrantRole })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="reader">Reader</SelectItem>
+                <SelectItem value="operator">Operator</SelectItem>
+                <SelectItem value="custom">Custom</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={props.grantDraft.effect}
+              onValueChange={(value) =>
+                props.onGrantDraftChange({ ...props.grantDraft, effect: value as AccessGrantEffect })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="allow">Allow</SelectItem>
+                <SelectItem value="deny">Deny</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <Label className="field">
+            <span>Subject</span>
+            <Input
+              value={props.grantDraft.subject}
+              onChange={(event) => props.onGrantDraftChange({ ...props.grantDraft, subject: event.target.value })}
+            />
+          </Label>
+          <ConnectionSelect
+            value={props.grantDraft.connectionId}
+            options={props.connectionOptions}
+            onChange={(connectionId) => props.onGrantDraftChange({ ...props.grantDraft, connectionId })}
+          />
+          {props.grantDraft.role === "custom" ? (
+            <Label className="field">
+              <span>Custom actions</span>
+              <textarea
+                value={props.grantDraft.customActions}
+                onChange={(event) =>
+                  props.onGrantDraftChange({ ...props.grantDraft, customActions: event.target.value })
+                }
+                placeholder="example.echo"
+              />
+            </Label>
+          ) : null}
+          <Label className="field">
+            <span>Reason</span>
+            <Input
+              value={props.grantDraft.reason}
+              onChange={(event) => props.onGrantDraftChange({ ...props.grantDraft, reason: event.target.value })}
+            />
+          </Label>
+          <Button type="submit" disabled={!props.grantDraft.subject.trim() || !props.grantDraft.connectionId}>
+            <ShieldCheck size={15} />
+            Save Grant
+          </Button>
+        </form>
+      </div>
+
+      <section className="table-panel">
+        {props.grants.length === 0 ? (
+          <EmptyState
+            icon={<ShieldCheck size={20} />}
+            title="No access grants"
+            description="Create a user or group grant for a connection."
+            density="compact"
+          />
+        ) : (
+          <Table className="grant-table">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Subject</TableHead>
+                <TableHead>Connection</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Effect</TableHead>
+                <TableHead>Updated</TableHead>
+                <TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {props.grants.map((grant) => (
+                <TableRow key={grant.id}>
+                  <TableCell>
+                    <strong>
+                      {grant.subjectType}:{grant.subject}
+                    </strong>
+                  </TableCell>
+                  <TableCell>{connectionLabel(grant.connectionId, props.connectionOptions)}</TableCell>
+                  <TableCell>
+                    {grant.role}
+                    {grant.role === "custom" ? ` (${grant.customActions.length})` : ""}
+                  </TableCell>
+                  <TableCell>
+                    <Badge tone={grant.effect === "deny" ? "error" : grant.revokedAt ? undefined : "success"}>
+                      {grant.revokedAt ? "revoked" : grant.effect}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{formatDate(grant.updatedAt)}</TableCell>
+                  <TableCell className="table-actions">
+                    <div className="token-table-actions">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={Boolean(grant.revokedAt)}
+                        onClick={() => props.onEditGrant(grant)}
+                      >
+                        <Pencil size={15} />
+                        Edit
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={Boolean(grant.revokedAt)}
+                        onClick={() => void props.onRevokeGrant(grant.id)}
+                      >
+                        <Trash2 size={15} />
+                        Revoke
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </section>
+
+      <form className="access-preview-row" onSubmit={(event) => void props.onPreview(event)}>
+        <SubjectSelect
+          value={props.previewDraft.subjectKey}
+          subjects={props.subjects}
+          onChange={(subjectKey) => props.onPreviewDraftChange({ ...props.previewDraft, subjectKey })}
+        />
+        <ConnectionSelect
+          value={props.previewDraft.connectionId}
+          options={props.connectionOptions}
+          onChange={(connectionId) => props.onPreviewDraftChange({ ...props.previewDraft, connectionId })}
+        />
+        <Input
+          value={props.previewDraft.actionId}
+          onChange={(event) => props.onPreviewDraftChange({ ...props.previewDraft, actionId: event.target.value })}
+          placeholder="optional action id"
+        />
+        <Button type="submit" disabled={!props.previewDraft.subjectKey || !props.previewDraft.connectionId}>
+          <Play size={15} />
+          Preview
+        </Button>
+      </form>
+      {props.previewResult ? (
+        <pre className="access-json-preview">{JSON.stringify(props.previewResult, null, 2)}</pre>
+      ) : null}
+
+      <section className="access-audit-list">
+        <h3>Audit</h3>
+        {props.audit.slice(0, 8).map((item) => (
+          <div key={item.id} className="access-audit-item">
+            <Badge tone={item.decision.allowed ? "success" : "error"}>
+              {item.decision.allowed ? "allowed" : "denied"}
+            </Badge>
+            <span>{item.subject.sub}</span>
+            <code>{item.actionId ?? item.connectionId ?? "connection"}</code>
+            <small>{formatDate(item.createdAt)}</small>
+          </div>
+        ))}
+      </section>
+    </section>
   );
 }
 
@@ -933,6 +1419,95 @@ function EditTokenPolicyDialog(props: EditTokenPolicyDialogProps): ReactNode {
   );
 }
 
+function EditAccessGrantDialog(props: {
+  grant: AccessGrantRecord;
+  draft: GrantDraft;
+  status: string | null;
+  onDraftChange(draft: GrantDraft): void;
+  onSubmit(event: SubmitEvent<HTMLFormElement>): Promise<void>;
+  onClose(): void;
+}): ReactNode {
+  return (
+    <Dialog open onOpenChange={(open) => (!open ? props.onClose() : undefined)}>
+      <DialogContent
+        className="token-dialog max-w-[min(620px,calc(100vw-2rem))] gap-0 overflow-hidden p-0 sm:max-w-[min(620px,calc(100vw-2rem))]"
+        showCloseButton={false}
+      >
+        <DialogHeader className="token-dialog-header">
+          <div>
+            <DialogTitle>Edit AccessGrant</DialogTitle>
+            <DialogDescription>
+              {props.grant.subjectType}:{props.grant.subject}
+            </DialogDescription>
+          </div>
+          <Button variant="ghost" size="icon-sm" onClick={props.onClose} aria-label="Close">
+            <X size={16} />
+          </Button>
+        </DialogHeader>
+        <div className="token-dialog-body">
+          <form className="token-dialog-form" onSubmit={(event) => void props.onSubmit(event)}>
+            <div className="access-inline-fields">
+              <Select
+                value={props.draft.role}
+                onValueChange={(value) => props.onDraftChange({ ...props.draft, role: value as AccessGrantRole })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="reader">Reader</SelectItem>
+                  <SelectItem value="operator">Operator</SelectItem>
+                  <SelectItem value="custom">Custom</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                value={props.draft.effect}
+                onValueChange={(value) => props.onDraftChange({ ...props.draft, effect: value as AccessGrantEffect })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="allow">Allow</SelectItem>
+                  <SelectItem value="deny">Deny</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {props.draft.role === "custom" ? (
+              <Label className="field">
+                <span>Custom actions</span>
+                <textarea
+                  value={props.draft.customActions}
+                  onChange={(event) => props.onDraftChange({ ...props.draft, customActions: event.target.value })}
+                />
+              </Label>
+            ) : null}
+            <Label className="field">
+              <span>Reason</span>
+              <Input
+                value={props.draft.reason}
+                onChange={(event) => props.onDraftChange({ ...props.draft, reason: event.target.value })}
+              />
+            </Label>
+            {props.status ? <FormStatus message={props.status} /> : null}
+            <div className="token-dialog-actions">
+              <div className="button-row">
+                <Button variant="outline" type="button" onClick={props.onClose}>
+                  Close
+                </Button>
+                <Button type="submit">
+                  <Save size={16} />
+                  Save Grant
+                </Button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function policyDraftFromRules(rules: PolicyRules): PolicyDraft {
   return {
     allowedActions: rules.allowedActions.join("\n"),
@@ -949,6 +1524,86 @@ export function policyRulesFromDraft(draft: PolicyDraft): PolicyRules {
     allowedProxies: parsePolicyLines(draft.allowedProxies),
     blockedProxies: parsePolicyLines(draft.blockedProxies),
   };
+}
+
+function createIdentityDraft(config: IdentityProviderConfig | null): IdentityDraft {
+  return {
+    issuer: config?.issuer ?? "",
+    audience: config?.audience ?? "",
+    jwksUri: config?.jwksUri ?? "",
+    userPoolRef: config?.userPoolRef ?? "",
+    subjectClaim: config?.subjectClaim ?? "sub",
+    groupsClaim: config?.groupsClaim ?? "groups",
+    tenantClaim: config?.tenantClaim ?? "",
+    tenant: config?.tenant ?? "",
+  };
+}
+
+function createAccessGrantDraft(grant?: AccessGrantRecord): GrantDraft {
+  return {
+    subjectType: grant?.subjectType ?? "user",
+    subject: grant?.subject ?? "",
+    connectionId: grant?.connectionId ?? "",
+    role: grant?.role ?? "reader",
+    effect: grant?.effect ?? "allow",
+    customActions: grant?.customActions.join("\n") ?? "",
+    reason: grant?.reason ?? "",
+  };
+}
+
+function createPreviewDraft(): PreviewDraft {
+  return { subjectKey: "", connectionId: "", actionId: "" };
+}
+
+function ConnectionSelect(props: {
+  value: string;
+  options: ConnectionGrantOption[];
+  onChange(value: string): void;
+}): ReactNode {
+  return (
+    <Select value={props.value} onValueChange={props.onChange}>
+      <SelectTrigger aria-label="Connection">
+        <SelectValue placeholder="Connection" />
+      </SelectTrigger>
+      <SelectContent>
+        {props.options.map((option) => (
+          <SelectItem key={option.id} value={option.id}>
+            {option.provider} / {option.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function SubjectSelect(props: { value: string; subjects: RuntimeSubject[]; onChange(value: string): void }): ReactNode {
+  return (
+    <Select value={props.value} onValueChange={props.onChange}>
+      <SelectTrigger aria-label="Subject">
+        <SelectValue placeholder="Subject" />
+      </SelectTrigger>
+      <SelectContent>
+        {props.subjects.map((subject) => (
+          <SelectItem key={previewSubjectKey(subject)} value={previewSubjectKey(subject)}>
+            {subject.sub}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function selectedPreviewSubject(key: string, subjects: RuntimeSubject[]): RuntimeSubject | undefined {
+  return subjects.find((subject) => previewSubjectKey(subject) === key);
+}
+
+function previewSubjectKey(subject: RuntimeSubject): string {
+  return [subject.issuer, subject.audience, subject.userPoolRef, subject.tenant ?? "", subject.sub].join(":");
+}
+
+function connectionLabel(connectionId: string, options: ConnectionGrantOption[]): string {
+  const option = options.find((candidate) => candidate.id === connectionId);
+  return option ? `${option.provider} / ${option.name}` : connectionId;
 }
 
 function tokenPolicySummary(token: RuntimeTokenSummary, t: NonNullable<ReturnType<typeof useTranslate>>): string {

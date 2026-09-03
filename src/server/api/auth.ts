@@ -1,3 +1,4 @@
+import type { RuntimeSubject } from "../access/access-grants.ts";
 import type { RuntimeGrant } from "../storage/runtime-token-service.ts";
 import type { RuntimeJwtVerifier } from "./runtime-jwt.ts";
 import type { Context, MiddlewareHandler } from "hono";
@@ -19,6 +20,7 @@ export interface LocalAuthOptions {
   adminToken?: string;
   runtimeToken?: string;
   hasRuntimeTokens?(): Promise<boolean>;
+  hasRuntimeJwtConfig?(): Promise<boolean>;
   resolveRuntimeToken?(token: string): Promise<RuntimeGrant | undefined>;
   verifyRuntimeJwt?: RuntimeJwtVerifier;
 }
@@ -38,6 +40,7 @@ export interface RuntimeAuthContext {
 
 const runtimeGrants = new WeakMap<Request, RuntimeGrant>();
 const runtimeAuthContexts = new WeakMap<Request, RuntimeAuthContext>();
+const runtimeSubjects = new WeakMap<Request, RuntimeSubject>();
 
 export function readRuntimeGrant(context: Context): RuntimeGrant | undefined {
   return runtimeGrants.get(context.req.raw);
@@ -45,6 +48,10 @@ export function readRuntimeGrant(context: Context): RuntimeGrant | undefined {
 
 export function readRuntimeAuthContext(context: Context): RuntimeAuthContext | undefined {
   return runtimeAuthContexts.get(context.req.raw);
+}
+
+export function readRuntimeSubject(context: Context): RuntimeSubject | undefined {
+  return runtimeSubjects.get(context.req.raw);
 }
 
 export function createLocalAuthMiddleware(options: LocalAuthOptions): MiddlewareHandler {
@@ -163,7 +170,10 @@ async function hasValidToken(context: Context, options: LocalAuthOptions, scope:
     const hasRuntimeTokens = options.hasRuntimeTokens
       ? await options.hasRuntimeTokens()
       : options.resolveRuntimeToken !== undefined;
-    if (!hasRuntimeTokens && !options.verifyRuntimeJwt) {
+    const hasRuntimeJwtConfig = options.hasRuntimeJwtConfig
+      ? await options.hasRuntimeJwtConfig()
+      : options.verifyRuntimeJwt !== undefined;
+    if (!hasRuntimeTokens && !hasRuntimeJwtConfig) {
       return true;
     }
     return hasValidRuntimeToken(context, options);
@@ -275,8 +285,13 @@ async function hasValidRuntimeToken(context: Context, options: LocalAuthOptions)
     runtimeAuthContexts.set(context.req.raw, { kind: "stored_token", tokenId: grant.tokenId });
     return true;
   }
-  const userVerified = await (options.verifyRuntimeJwt?.(token) ?? false);
-  if (userVerified) {
+  const subject = await options.verifyRuntimeJwt?.(token);
+  if (subject && typeof subject === "object") {
+    runtimeSubjects.set(context.req.raw, subject);
+    runtimeAuthContexts.set(context.req.raw, { kind: "user_bearer" });
+    return true;
+  }
+  if (subject === true) {
     runtimeAuthContexts.set(context.req.raw, { kind: "user_bearer" });
     return true;
   }

@@ -141,6 +141,53 @@ export interface RuntimeTokenSummary {
   lastUsedAt?: string;
 }
 
+export type AccessGrantRole = "reader" | "operator" | "custom";
+export type AccessGrantSubjectType = "user" | "group";
+export type AccessGrantEffect = "allow" | "deny";
+
+export interface IdentityProviderConfig {
+  issuer: string;
+  audience: string;
+  jwksUri: string;
+  userPoolRef: string;
+  subjectClaim: string;
+  groupsClaim: string;
+  tenantClaim?: string;
+  tenant?: string;
+}
+
+export interface RuntimeSubject {
+  issuer: string;
+  audience: string;
+  userPoolRef: string;
+  tenant?: string;
+  sub: string;
+  groups: string[];
+}
+
+export interface AccessGrantRecord {
+  id: string;
+  subjectType: AccessGrantSubjectType;
+  subject: string;
+  connectionId: string;
+  role: AccessGrantRole;
+  effect: AccessGrantEffect;
+  customActions: string[];
+  reason?: string;
+  createdAt: string;
+  updatedAt: string;
+  revokedAt?: string;
+}
+
+export interface AccessAuditRecord {
+  id: string;
+  subject: RuntimeSubject;
+  connectionId?: string;
+  actionId?: string;
+  decision: PolicyDecision;
+  createdAt: string;
+}
+
 export interface PolicyRules {
   allowedActions: string[];
   blockedActions: string[];
@@ -155,9 +202,13 @@ export interface RuntimePolicyState {
 }
 
 export interface PolicyCheck {
-  source: "deployment" | "runtime" | "token";
+  source: "deployment" | "runtime" | "token" | "access_grant";
   outcome: "allow_match" | "block_match" | "allow_miss";
   rule?: string;
+  grantId?: string;
+  role?: string;
+  reason?: string;
+  policyVersion?: number;
 }
 
 export interface PolicyDecision {
@@ -220,6 +271,10 @@ export interface AppData {
   connections: ConnectionRecord[];
   oauthConfigs: OAuthConfig[];
   runtimeTokens: RuntimeTokenSummary[];
+  identityProvider?: IdentityProviderConfig | null;
+  accessGrants?: AccessGrantRecord[];
+  identitySubjects?: RuntimeSubject[];
+  accessAudit?: AccessAuditRecord[];
   runtimePolicy?: RuntimePolicyState;
   runs: RunLog[];
   runsNextCursor?: string;
@@ -308,6 +363,10 @@ export const emptyData: AppData = {
   connections: [],
   oauthConfigs: [],
   runtimeTokens: [],
+  identityProvider: null,
+  accessGrants: [],
+  identitySubjects: [],
+  accessAudit: [],
   runtimePolicy: {
     deployment: emptyPolicyRules(),
     runtime: emptyPolicyRules(),

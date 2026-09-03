@@ -2,6 +2,9 @@ import type { AppLang } from "./i18n";
 import type {
   AppData,
   ConnectionRecord,
+  AccessAuditRecord,
+  AccessGrantRecord,
+  IdentityProviderConfig,
   OAuthConfig,
   ProviderDefinition,
   RunLogPage,
@@ -157,6 +160,10 @@ export async function loadRuntimeData(
     connections,
     oauthConfigs,
     runtimeTokens,
+    identityProvider,
+    accessGrants,
+    identitySubjects,
+    accessAudit,
     runtimePolicy,
     runPage,
     marketplace,
@@ -166,6 +173,10 @@ export async function loadRuntimeData(
     apiGet<ConnectionRecord[]>("/api/connections"),
     apiGet<OAuthConfig[]>("/api/oauth/configs"),
     apiGet<RuntimeTokenSummary[]>("/api/runtime-tokens"),
+    apiGet<IdentityProviderConfig | null>("/api/identity-provider"),
+    apiGet<AccessGrantRecord[]>("/api/access-grants"),
+    apiGet<import("./model").RuntimeSubject[]>("/api/identity/subjects"),
+    apiGet<AccessAuditRecord[]>("/api/access/audit"),
     apiGet<RuntimePolicyState>("/api/runtime-policy"),
     apiGet<RunLogPage>("/api/runs"),
     apiGet<import("./model").MarketplaceState>("/api/marketplace"),
@@ -179,6 +190,10 @@ export async function loadRuntimeData(
       connections,
       oauthConfigs,
       runtimeTokens,
+      identityProvider,
+      accessGrants,
+      identitySubjects,
+      accessAudit,
       runtimePolicy,
       runs: runPage.items,
       runsNextCursor: runPage.nextCursor,
@@ -437,6 +452,10 @@ export function AppShell(props: {
                   providers={props.data.providers}
                   connections={props.data.connections}
                   tokens={props.data.runtimeTokens}
+                  identityProvider={props.data.identityProvider}
+                  accessGrants={props.data.accessGrants}
+                  identitySubjects={props.data.identitySubjects}
+                  accessAudit={props.data.accessAudit}
                   policy={props.data.runtimePolicy ?? emptyData.runtimePolicy!}
                   onRefresh={props.onRefresh}
                 />

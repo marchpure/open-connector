@@ -56,6 +56,11 @@ async function main(): Promise<void> {
     jwksUri: process.env.OOMOL_CONNECT_JWKS_URI,
     issuer: process.env.OOMOL_CONNECT_JWT_ISSUER,
     audience: process.env.OOMOL_CONNECT_JWT_AUDIENCE,
+    userPoolRef: process.env.OOMOL_CONNECT_JWT_USER_POOL_REF,
+    subjectClaim: process.env.OOMOL_CONNECT_JWT_SUBJECT_CLAIM,
+    groupsClaim: process.env.OOMOL_CONNECT_JWT_GROUPS_CLAIM,
+    tenantClaim: process.env.OOMOL_CONNECT_JWT_TENANT_CLAIM,
+    tenant: process.env.OOMOL_CONNECT_JWT_TENANT,
   });
   const actionPolicy = new ActionPolicyService({
     allowedActions: parseActionPolicyList(process.env.OOMOL_CONNECT_ALLOWED_ACTIONS),
