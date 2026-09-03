@@ -6,6 +6,7 @@ import type { MarketplaceConfigInput, MarketplaceService } from "../marketplace/
 import type { OAuthClientConfigInput } from "../oauth/oauth-client-config-service.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
 import type { LocalAuthOptions } from "./api/auth.ts";
+import type { McpAuthorizer } from "./api/mcp-authorizer.ts";
 import type { RuntimeActionHttpResult } from "./api/runtime-api.ts";
 import type { ITransitFileService, TransitFileUpload } from "./files/transit-file-store.ts";
 import type { Logger } from "./logger.ts";
@@ -24,7 +25,7 @@ import { ActionPolicyService, emptyPolicyRules } from "../core/action-policy.ts"
 import { DEFAULT_ACTION_SEARCH_LIMIT, createActionSearchIndexProvider, searchActions } from "../core/action-search.ts";
 import { optionalRecord, optionalString, requiredString, requiredStringArray } from "../core/cast.ts";
 import { MarketplaceError } from "../marketplace/marketplace-service.ts";
-import { createMcpServer, listMcpToolSummaries } from "../mcp.ts";
+import { createMcpServer, listAuthorizedMcpToolSummaries } from "../mcp.ts";
 import { OAuthClientConfigError, OAuthClientConfigService } from "../oauth/oauth-client-config-service.ts";
 import { OAuthFlowError, OAuthFlowService } from "../oauth/oauth-flow-service.ts";
 import {
@@ -36,9 +37,16 @@ import {
 } from "./actions/action-idempotency.ts";
 import { ActionRunner } from "./actions/action-runner.ts";
 import { renderActionMarkdown } from "./api/action-markdown.ts";
-import { clearLocalAuthCookie, createLocalAuthMiddleware, readLocalAuthSession, readRuntimeGrant } from "./api/auth.ts";
+import {
+  clearLocalAuthCookie,
+  createLocalAuthMiddleware,
+  readLocalAuthSession,
+  readRuntimeAuthContext,
+  readRuntimeGrant,
+} from "./api/auth.ts";
 import { getResponseCachePolicy } from "./api/cache-policy.ts";
 import { HttpRequestError, internalError, jsonError, notFound, readJsonBody } from "./api/http-utils.ts";
+import { mcpM2mAuthorizer } from "./api/mcp-authorizer.ts";
 import { renderOAuthCompletionPage } from "./api/oauth-completion-page.ts";
 import { createOpenApiDocument } from "./api/openapi.ts";
 import { policyRequestMaxBytes, readRuntimePolicyRules, readTokenPolicy } from "./api/policy-input.ts";
@@ -59,6 +67,8 @@ import { createTransitFileResponse, TransitFileError } from "./files/transit-fil
 import { ProxyRunner } from "./proxy/proxy-runner.ts";
 import { decodeRunLogCursor } from "./storage/runtime-store.ts";
 import { summarizeRuntimeToken } from "./storage/runtime-token-service.ts";
+
+export type ConnectServerRole = "all" | "control-plane" | "mcp-runtime";
 
 /**
  * Dependencies required to construct the local connector server.
@@ -83,6 +93,8 @@ export interface IConnectServerOptions {
   logger?: Logger;
   compressApiResponses?: boolean;
   marketplace?: MarketplaceService;
+  mcpAuthorizer?: McpAuthorizer;
+  role?: ConnectServerRole;
 }
 
 /**
@@ -112,6 +124,9 @@ export class ConnectServer {
   createApp(): Hono {
     const app = new Hono();
     const auth = this.options.auth ?? {};
+    const role = this.options.role ?? "all";
+    const controlPlaneEnabled = role === "all" || role === "control-plane";
+    const runtimeEnabled = role === "all" || role === "mcp-runtime";
 
     app.use("*", async (context, next) => {
       await next();
@@ -135,7 +150,7 @@ export class ConnectServer {
       app.use("/api/*", compress());
     }
     app.use("*", createLocalAuthMiddleware(auth));
-    if (this.options.marketplace) {
+    if (controlPlaneEnabled && this.options.marketplace) {
       app.get("/api/marketplace", (context) => context.json(this.options.marketplace!.getState()));
       app.put("/api/marketplace", (context) => this.configureMarketplace(context));
       app.patch("/api/marketplace", (context) => this.configureMarketplace(context));
@@ -147,88 +162,106 @@ export class ConnectServer {
         this.updateProviderPreference(context, context.req.param("service")),
       );
     }
-    app.get("/v1/health", (context) => writeRuntimeSuccess(context, { ok: true, runtime: "oomol-connect" }));
-    app.get("/v1/providers", (context) => this.listRuntimeProviders(context));
-    app.get("/v1/actions", (context) => this.listRuntimeActions(context));
-    app.get("/v1/actions/search", (context) => this.searchRuntimeActions(context));
-    app.get("/v1/actions/:actionId", (context) => this.getRuntimeAction(context, context.req.param("actionId")));
-    app.post("/v1/actions/:actionId", (context) => this.createRuntimeActionRun(context, context.req.param("actionId")));
-    app.get("/v1/apps", (context) => this.listRuntimeApps(context));
-    app.get("/v1/apps/authenticated", (context) => this.listAuthenticatedRuntimeApps(context));
-    app.get("/v1/apps/services/:service", (context) =>
-      this.listRuntimeAppsByService(context, context.req.param("service")),
-    );
-    app.post("/v1/proxy/:service", (context) => this.createRuntimeProxyRequest(context, context.req.param("service")));
-
-    app.get("/openapi.json", (context) =>
-      context.json(
-        createOpenApiDocument(this.options.catalog.providers, {
-          actionId: optionalString(context.req.query("actionId")),
+    if (runtimeEnabled) {
+      app.get("/v1/health", (context) => writeRuntimeSuccess(context, { ok: true, runtime: "oomol-connect" }));
+      app.get("/v1/providers", (context) => this.listRuntimeProviders(context));
+      app.get("/v1/actions", (context) => this.listRuntimeActions(context));
+      app.get("/v1/actions/search", (context) => this.searchRuntimeActions(context));
+      app.get("/v1/actions/:actionId", (context) => this.getRuntimeAction(context, context.req.param("actionId")));
+      app.post("/v1/actions/:actionId", (context) =>
+        this.createRuntimeActionRun(context, context.req.param("actionId")),
+      );
+      app.get("/v1/apps", (context) => this.listRuntimeApps(context));
+      app.get("/v1/apps/authenticated", (context) => this.listAuthenticatedRuntimeApps(context));
+      app.get("/v1/apps/services/:service", (context) =>
+        this.listRuntimeAppsByService(context, context.req.param("service")),
+      );
+      app.post("/v1/proxy/:service", (context) =>
+        this.createRuntimeProxyRequest(context, context.req.param("service")),
+      );
+      app.post("/mcp", (context) => this.handleMcp(context));
+      app.get("/mcp", (context) => this.rejectMcpMethod(context));
+      app.delete("/mcp", (context) => this.rejectMcpMethod(context));
+      app.get("/mcp/tools", async (context) =>
+        context.json({
+          tools: await listAuthorizedMcpToolSummaries(this.mcpAuthorizer, {
+            auth: readRuntimeAuthContext(context),
+          }),
         }),
-      ),
-    );
-    app.get(
-      "/docs",
-      Scalar({
-        pageTitle: "OOMOL Connect API Reference",
-        url: "/openapi.json",
-        theme: "default",
-        darkMode: false,
-        forceDarkModeState: "light",
-        customCss: `
-          :root {
-            --scalar-color-accent: rgb(59, 99, 251);
-            --scalar-background-accent: rgba(59, 99, 251, 0.12);
-          }
-        `,
-      }),
-    );
+      );
+    }
 
-    // Schema-free listing. The action detail view loads full schemas on demand
-    // from /api/actions/:actionId. The catalog is immutable at runtime, so the
-    // body and its ETag are precomputed and reused, and unchanged reloads get a
-    // 304 instead of re-downloading the payload.
-    app.get("/api/providers", (context) => this.listProviderSummaries(context));
-    app.get("/api/providers/:service", (context) => this.getProvider(context, context.req.param("service")));
+    if (controlPlaneEnabled) {
+      app.get("/openapi.json", (context) =>
+        context.json(
+          createOpenApiDocument(this.options.catalog.providers, {
+            actionId: optionalString(context.req.query("actionId")),
+          }),
+        ),
+      );
+      app.get(
+        "/docs",
+        Scalar({
+          pageTitle: "OOMOL Connect API Reference",
+          url: "/openapi.json",
+          theme: "default",
+          darkMode: false,
+          forceDarkModeState: "light",
+          customCss: `
+            :root {
+              --scalar-color-accent: rgb(59, 99, 251);
+              --scalar-background-accent: rgba(59, 99, 251, 0.12);
+            }
+          `,
+        }),
+      );
 
-    app.get("/api/actions", (context) => context.json(this.options.catalog.actions));
-    app.get("/api/actions/search", (context) => this.searchApiActions(context));
-    app.get("/api/actions/:actionId/agent.md", (context) =>
-      this.getActionMarkdown(context, context.req.param("actionId")),
-    );
-    app.get("/api/actions/:actionId", (context) => this.getAction(context, context.req.param("actionId")));
-    app.get("/api/auth/session", async (context) => context.json(await readLocalAuthSession(context, auth)));
-    app.post("/api/auth/logout", (context) => {
-      clearLocalAuthCookie(context);
-      return context.json({ ok: true });
-    });
+      // Schema-free listing. The action detail view loads full schemas on demand
+      // from /api/actions/:actionId. The catalog is immutable at runtime, so the
+      // body and its ETag are precomputed and reused, and unchanged reloads get a
+      // 304 instead of re-downloading the payload.
+      app.get("/api/providers", (context) => this.listProviderSummaries(context));
+      app.get("/api/providers/:service", (context) => this.getProvider(context, context.req.param("service")));
 
-    app.get("/api/connections", (context) => this.listConnections(context));
-    app.put("/api/connections/:service", (context) => this.upsertConnection(context, context.req.param("service")));
-    app.delete("/api/connections/:service", (context) => this.disconnect(context, context.req.param("service")));
+      app.get("/api/actions", (context) => context.json(this.options.catalog.actions));
+      app.get("/api/actions/search", (context) => this.searchApiActions(context));
+      app.get("/api/actions/:actionId/agent.md", (context) =>
+        this.getActionMarkdown(context, context.req.param("actionId")),
+      );
+      app.get("/api/actions/:actionId", (context) => this.getAction(context, context.req.param("actionId")));
+      app.get("/api/auth/session", async (context) => context.json(await readLocalAuthSession(context, auth)));
+      app.post("/api/auth/logout", (context) => {
+        clearLocalAuthCookie(context);
+        return context.json({ ok: true });
+      });
 
-    app.get("/api/runs", (context) => this.listRuns(context));
-    app.get("/api/runs/:id", (context) => this.getRun(context, context.req.param("id")));
-    app.post("/api/files", (context) => this.createTransitFile(context));
-    app.get("/api/files/:fileId", (context) => this.getTransitFile(context, context.req.param("fileId")));
-    app.delete("/api/files/:fileId", (context) => this.deleteTransitFile(context, context.req.param("fileId")));
-    app.get("/api/runtime-tokens", (context) => this.listRuntimeTokens(context));
-    app.post("/api/runtime-tokens", (context) => this.createRuntimeToken(context));
-    app.put("/api/runtime-tokens/:id", (context) => this.updateRuntimeToken(context, context.req.param("id")));
-    app.delete("/api/runtime-tokens/:id", (context) => this.revokeRuntimeToken(context, context.req.param("id")));
-    app.get("/api/runtime-policy", (context) => this.getRuntimePolicy(context));
-    app.put("/api/runtime-policy", (context) => this.updateRuntimePolicy(context));
-    app.get("/api/oauth/configs", (context) => this.listOAuthConfigs(context));
-    app.put("/api/oauth/configs/:service", (context) => this.upsertOAuthConfig(context, context.req.param("service")));
-    app.delete("/api/oauth/configs/:service", (context) =>
-      this.deleteOAuthConfig(context, context.req.param("service")),
-    );
-    app.post("/api/oauth/authorizations", (context) => this.createOAuthAuthorization(context));
-    app.get("/oauth/callback", (context) => this.completeOAuth(context));
-    app.post("/mcp", (context) => this.handleMcp(context));
-    app.get("/mcp", (context) => this.rejectMcpMethod(context));
-    app.delete("/mcp", (context) => this.rejectMcpMethod(context));
-    app.get("/mcp/tools", (context) => context.json({ tools: listMcpToolSummaries() }));
+      app.get("/api/connections", (context) => this.listConnections(context));
+      app.put("/api/connections/:service", (context) => this.upsertConnection(context, context.req.param("service")));
+      app.delete("/api/connections/:service", (context) => this.disconnect(context, context.req.param("service")));
+
+      app.get("/api/runs", (context) => this.listRuns(context));
+      app.get("/api/runs/:id", (context) => this.getRun(context, context.req.param("id")));
+      app.post("/api/files", (context) => this.createTransitFile(context));
+      app.get("/api/files/:fileId", (context) => this.getTransitFile(context, context.req.param("fileId")));
+      app.delete("/api/files/:fileId", (context) => this.deleteTransitFile(context, context.req.param("fileId")));
+      app.get("/api/runtime-tokens", (context) => this.listRuntimeTokens(context));
+      app.post("/api/runtime-tokens", (context) => this.createRuntimeToken(context));
+      app.put("/api/runtime-tokens/:id", (context) => this.updateRuntimeToken(context, context.req.param("id")));
+      app.delete("/api/runtime-tokens/:id", (context) => this.revokeRuntimeToken(context, context.req.param("id")));
+      app.get("/api/runtime-policy", (context) => this.getRuntimePolicy(context));
+      app.put("/api/runtime-policy", (context) => this.updateRuntimePolicy(context));
+      app.get("/api/oauth/configs", (context) => this.listOAuthConfigs(context));
+      app.put("/api/oauth/configs/:service", (context) =>
+        this.upsertOAuthConfig(context, context.req.param("service")),
+      );
+      app.delete("/api/oauth/configs/:service", (context) =>
+        this.deleteOAuthConfig(context, context.req.param("service")),
+      );
+      app.post("/api/oauth/authorizations", (context) => this.createOAuthAuthorization(context));
+      app.get("/oauth/callback", (context) => this.completeOAuth(context));
+    } else if (runtimeEnabled) {
+      app.get("/api/files/:fileId", (context) => this.getTransitFile(context, context.req.param("fileId")));
+    }
 
     this.options.registerStaticRoutes?.(app);
     app.onError((error, context) => {
@@ -796,6 +829,7 @@ export class ConnectServer {
   }
 
   private async handleMcp(context: Context): Promise<Response> {
+    const subject = { auth: readRuntimeAuthContext(context) };
     const handler = createMcpHandler(
       () =>
         createMcpServer({
@@ -807,6 +841,8 @@ export class ConnectServer {
           actionSearch: this.actionSearch,
           getPolicySnapshot: () => this.getPolicySnapshot(context),
           runtimeGrant: readRuntimeGrant(context),
+          authorizer: this.mcpAuthorizer,
+          authorizationSubject: subject,
           signal: context.req.raw.signal,
         }),
       { legacy: "stateless", responseMode: "json" },
@@ -816,6 +852,10 @@ export class ConnectServer {
     } finally {
       await handler.close();
     }
+  }
+
+  private get mcpAuthorizer(): McpAuthorizer {
+    return this.options.mcpAuthorizer ?? mcpM2mAuthorizer;
   }
 
   private rejectMcpMethod(context: Context): Response {

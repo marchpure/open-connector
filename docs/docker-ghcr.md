@@ -92,6 +92,32 @@ The command exits after applying migrations and does not start the HTTP server. 
 without a command still starts the server, which only checks schema readiness and never applies
 PostgreSQL DDL.
 
+### Split Control Plane And MCP Runtime
+
+The same image can run separate roles:
+
+```bash
+docker run -d --name open-connector-console \
+  -p 3000:3000 \
+  -e OOMOL_CONNECT_ROLE=control-plane \
+  -e OOMOL_CONNECT_DATABASE_URL="$OOMOL_CONNECT_DATABASE_URL" \
+  -e OOMOL_CONNECT_TRANSIT_FILE_BACKEND=s3 \
+  ghcr.io/oomol-lab/open-connector:latest
+
+docker run -d --name open-connector-mcp \
+  -p 3001:3000 \
+  -e OOMOL_CONNECT_ROLE=mcp-runtime \
+  -e OOMOL_CONNECT_DATABASE_URL="$OOMOL_CONNECT_DATABASE_URL" \
+  -e OOMOL_CONNECT_TRANSIT_FILE_BACKEND=s3 \
+  ghcr.io/oomol-lab/open-connector:latest
+```
+
+Use `control-plane` for the Engineering Console, admin API, connection CRUD, OAuth setup, runtime
+tokens, runtime policy, and run inspection. Use `mcp-runtime` for `/v1/*`, `/mcp`, `/mcp/tools`, and
+runtime file downloads. Split roles must share PostgreSQL and S3-compatible transit-file storage so
+connections, action traces, idempotency records, and files survive restarts and are visible across
+instances.
+
 ### Docker Compose
 
 The repository ships a [`docker-compose.yml`](../docker-compose.yml) that runs this published image.
@@ -111,6 +137,14 @@ To build from source instead of pulling, add the build overlay:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
+```
+
+To run the same image as separate control-plane and MCP runtime services, export
+`OOMOL_CONNECT_DATABASE_URL`, the S3/TOS-compatible storage settings, and the relevant auth secrets,
+then start the role overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.roles.yml up
 ```
 
 ## Verify
