@@ -335,13 +335,7 @@ export function createOpenApiDocument(
     "/api/files": createTransitFilesPath(),
     "/api/files/{fileId}": createTransitFilePath(),
     "/v1/actions/{actionId}": runPath,
-    "/v1/access-grants": createRuntimeAccessGrantsPath(),
-    "/v1/access-grants/{id}": createRuntimeAccessGrantPath(),
-    "/v1/access-grants/{id}:revoke": createRuntimeAccessGrantRevokePath(),
-    "/v1/access-grants/{id}/revoke": createRuntimeAccessGrantRevokePath(),
     "/v1/access:preview": createRuntimeAccessPreviewPath(),
-    "/v1/access/audit": createRuntimeAccessAuditPath(),
-    "/v1/identity/subjects": createRuntimeIdentitySubjectsPath(),
     "/v1/proxy/{service}": createProxyPath(),
     "/api/runs": createRunsPath(),
     "/api/runs/{id}": createRunDetailPath(),
@@ -1125,44 +1119,6 @@ function createAdminIdentitySubjectsPath(): Record<string, unknown> {
   };
 }
 
-function createRuntimeAccessGrantsPath(): Record<string, unknown> {
-  return {
-    get: runtimeAccessOperation(
-      "List AccessGrants.",
-      jsonSchema.array({ $ref: "#/components/schemas/AccessGrantRecord" }),
-    ),
-    post: runtimeMutationOperation(
-      "Create an AccessGrant.",
-      { $ref: "#/components/schemas/AccessGrantCreateRequest" },
-      { $ref: "#/components/schemas/AccessGrantRecord" },
-    ),
-  };
-}
-
-function createRuntimeAccessGrantPath(): Record<string, unknown> {
-  return {
-    patch: runtimeMutationOperation(
-      "Update mutable AccessGrant fields.",
-      { $ref: "#/components/schemas/AccessGrantPatchRequest" },
-      { $ref: "#/components/schemas/AccessGrantRecord" },
-      [400, 404, 413],
-      [accessGrantIdParameter],
-    ),
-  };
-}
-
-function createRuntimeAccessGrantRevokePath(): Record<string, unknown> {
-  return {
-    post: runtimeSimpleOperation(
-      "Revoke an AccessGrant.",
-      runtimeSuccessSchema({ $ref: "#/components/schemas/AccessGrantRecord" }),
-      [404],
-      undefined,
-      [accessGrantIdParameter],
-    ),
-  };
-}
-
 function createRuntimeAccessPreviewPath(): Record<string, unknown> {
   return {
     post: runtimeMutationOperation(
@@ -1171,43 +1127,6 @@ function createRuntimeAccessPreviewPath(): Record<string, unknown> {
       { $ref: "#/components/schemas/AccessPreviewResponse" },
       [400, 404, 413],
     ),
-  };
-}
-
-function createRuntimeAccessAuditPath(): Record<string, unknown> {
-  return {
-    get: runtimeAccessOperation(
-      "List AccessGrant policy audit records.",
-      jsonSchema.array({ $ref: "#/components/schemas/AccessAuditRecord" }),
-      [
-        queryParameter("limit", "Maximum records to return. Defaults to 200.", {
-          type: "integer",
-          minimum: 1,
-          maximum: 1000,
-          default: 200,
-        }),
-      ],
-    ),
-  };
-}
-
-function createRuntimeIdentitySubjectsPath(): Record<string, unknown> {
-  return {
-    get: runtimeAccessOperation(
-      "List verified JWT subjects seen by the runtime.",
-      jsonSchema.array({ $ref: "#/components/schemas/RuntimeSubject" }),
-    ),
-  };
-}
-
-function runtimeAccessOperation(summary: string, data: JsonSchema, parameters?: unknown[]): unknown {
-  return {
-    tags: ["Access"],
-    summary,
-    parameters,
-    responses: {
-      200: jsonResponse(runtimeSuccessSchema(data)),
-    },
   };
 }
 

@@ -251,20 +251,8 @@ describe("action execution OpenAPI", () => {
       get?: unknown;
       post?: { requestBody?: unknown; responses: Record<string, unknown> };
     };
-    const runtimeGrants = document.paths["/v1/access-grants"] as {
-      get?: unknown;
-      post?: { responses: Record<string, { content?: { "application/json"?: { schema?: { required?: string[] } } } }> };
-    };
     const runtimePreview = document.paths["/v1/access:preview"] as {
       post?: { responses: Record<string, unknown> };
-    };
-    const runtimeRevoke = document.paths["/v1/access-grants/{id}:revoke"] as {
-      post?: { parameters?: Array<{ name: string }> };
-    };
-    const runtimeSubjects = document.paths["/v1/identity/subjects"] as { get?: unknown };
-    const runtimeAudit = document.paths["/v1/access/audit"] as { get?: unknown };
-    const accessGrantPatch = document.paths["/v1/access-grants/{id}"] as {
-      patch?: { parameters?: Array<{ name: string }> };
     };
     const policyCheck = document.components.schemas.PolicyCheck as {
       properties: {
@@ -286,15 +274,13 @@ describe("action execution OpenAPI", () => {
     expect(identityProvider.put).toBeDefined();
     expect(adminGrants.get).toBeDefined();
     expect(adminGrants.post?.responses["413"]).toBeDefined();
-    expect(runtimeGrants.get).toBeDefined();
-    expect(runtimeGrants.post?.responses["200"]?.content?.["application/json"]?.schema?.required).toEqual(
-      expect.arrayContaining(["success", "message", "data", "meta"]),
-    );
-    expect(runtimeRevoke.post?.parameters).toContainEqual(expect.objectContaining({ name: "id" }));
+    expect(document.paths["/v1/access-grants"]).toBeUndefined();
+    expect(document.paths["/v1/access-grants/{id}"]).toBeUndefined();
+    expect(document.paths["/v1/access-grants/{id}:revoke"]).toBeUndefined();
+    expect(document.paths["/v1/access-grants/{id}/revoke"]).toBeUndefined();
+    expect(document.paths["/v1/access/audit"]).toBeUndefined();
+    expect(document.paths["/v1/identity/subjects"]).toBeUndefined();
     expect(runtimePreview.post?.responses["404"]).toBeDefined();
-    expect(runtimeSubjects.get).toBeDefined();
-    expect(runtimeAudit.get).toBeDefined();
-    expect(accessGrantPatch.patch?.parameters).toContainEqual(expect.objectContaining({ name: "id" }));
     expect(policyCheck.properties.source.enum).toContain("access_grant");
     expect(policyCheck.properties.grantId).toBeDefined();
     expect(policyCheck.properties.policyVersion).toBeDefined();

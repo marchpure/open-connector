@@ -692,12 +692,13 @@ describe("ConnectServer", () => {
       providerLoader: new EchoProviderLoader(),
       accessGrantStore,
       auth: {
+        adminToken: "local-token",
         verifyRuntimeJwt: async (token) => (token === "jwt-user-a" ? subject : undefined),
       },
     }).createApp();
     const connection = await app.request("/api/connections/example", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: { authorization: "Bearer local-token", "content-type": "application/json" },
       body: JSON.stringify({ authType: "api_key", values: { apiKey: "key" } }),
     });
     const connectionBody = (await connection.json()) as { id: string };
@@ -711,7 +712,7 @@ describe("ConnectServer", () => {
 
     const grant = await app.request("/api/access-grants", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { authorization: "Bearer local-token", "content-type": "application/json" },
       body: JSON.stringify({
         subjectType: "group",
         subject: "operators",
@@ -730,9 +731,15 @@ describe("ConnectServer", () => {
     });
     expect(allowed.status).toBe(200);
 
-    const revoke = await app.request(`/v1/access-grants/${grantBody.id}:revoke`, {
+    const userRevoke = await app.request(`/v1/access-grants/${grantBody.id}:revoke`, {
       method: "POST",
       headers: { authorization: "Bearer jwt-user-a" },
+    });
+    expect(userRevoke.status).toBe(401);
+
+    const revoke = await app.request(`/api/access-grants/${grantBody.id}/revoke`, {
+      method: "POST",
+      headers: { authorization: "Bearer local-token" },
     });
     expect(revoke.status).toBe(200);
     const deniedAfterRevoke = await app.request("/v1/actions/example.echo", {
@@ -746,15 +753,16 @@ describe("ConnectServer", () => {
     const tokenServer = createTestServer([{ ...apiKeyProvider, actions: [echoAction] }], {
       providerLoader: new EchoProviderLoader(),
       runtimeTokens: tokenService,
+      auth: { adminToken: "local-token" },
     }).createApp();
     await tokenServer.request("/api/connections/example", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: { authorization: "Bearer local-token", "content-type": "application/json" },
       body: JSON.stringify({ authType: "api_key", values: { apiKey: "key" } }),
     });
     const token = await tokenServer.request("/api/runtime-tokens", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { authorization: "Bearer local-token", "content-type": "application/json" },
       body: JSON.stringify({
         name: "m2m",
         allowedActions: ["example.echo"],
@@ -785,22 +793,22 @@ describe("ConnectServer", () => {
     };
     const app = createTestServer([{ ...apiKeyProvider, actions: [echoAction] }], {
       providerLoader: new EchoProviderLoader(),
-      auth: { verifyRuntimeJwt: async () => subject },
+      auth: { adminToken: "local-token", verifyRuntimeJwt: async () => subject },
     }).createApp();
     const connection = await app.request("/api/connections/example", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: { authorization: "Bearer local-token", "content-type": "application/json" },
       body: JSON.stringify({ authType: "api_key", values: { apiKey: "key" } }),
     });
     const { id: connectionId } = (await connection.json()) as { id: string };
     await app.request("/api/access-grants", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { authorization: "Bearer local-token", "content-type": "application/json" },
       body: JSON.stringify({ subjectType: "group", subject: "readers", connectionId, role: "operator" }),
     });
     await app.request("/api/access-grants", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { authorization: "Bearer local-token", "content-type": "application/json" },
       body: JSON.stringify({ subjectType: "user", subject: "user-b", connectionId, role: "operator", effect: "deny" }),
     });
 
@@ -816,9 +824,12 @@ describe("ConnectServer", () => {
     expect(previewBody.data.decision.allowed).toBe(false);
     expect(previewBody.data.decision.checks[0]?.outcome).toBe("block_match");
 
-    const audit = await app.request("/v1/access/audit", { headers: { authorization: "Bearer jwt" } });
-    const auditBody = (await audit.json()) as { data: AccessAuditRecord[] };
-    expect(auditBody.data.some((item) => item.subject.sub === "user-b" && item.actionId === "example.echo")).toBe(true);
+    const userAudit = await app.request("/v1/access/audit", { headers: { authorization: "Bearer jwt" } });
+    expect(userAudit.status).toBe(401);
+
+    const audit = await app.request("/api/access/audit", { headers: { authorization: "Bearer local-token" } });
+    const auditBody = (await audit.json()) as AccessAuditRecord[];
+    expect(auditBody.some((item) => item.subject.sub === "user-b" && item.actionId === "example.echo")).toBe(true);
   });
 
   it("requires authentication when JWT is the only configured runtime credential", async () => {
@@ -837,6 +848,148 @@ describe("ConnectServer", () => {
         })
       ).status,
     ).toBe(200);
+  });
+
+  it("keeps management routes admin-only while runtime credentials can use MCP", async () => {
+    const subject: RuntimeSubject = {
+      issuer: "https://issuer.example.com",
+      audience: "runtime",
+      userPoolRef: "pool",
+      sub: "user-c",
+      groups: ["operators"],
+    };
+    const runtimeTokens = new RuntimeTokenService(new MemoryRuntimeTokenStore());
+    const app = createTestServer([{ ...apiKeyProvider, actions: [echoAction] }], {
+      auth: {
+        adminToken: "local-token",
+        verifyRuntimeJwt: async (token) => (token === "jwt-user-c" ? subject : undefined),
+      },
+      runtimeTokens,
+      providerLoader: new EchoProviderLoader(),
+    }).createApp();
+    const adminHeaders = { authorization: "Bearer local-token" };
+    const jsonAdminHeaders = { ...adminHeaders, "content-type": "application/json" };
+    const connection = await app.request("/api/connections/example", {
+      method: "PUT",
+      headers: jsonAdminHeaders,
+      body: JSON.stringify({ authType: "api_key", values: { apiKey: "key" } }),
+    });
+    const { id: connectionId } = (await connection.json()) as { id: string };
+    const tokenResponse = await app.request("/api/runtime-tokens", {
+      method: "POST",
+      headers: jsonAdminHeaders,
+      body: JSON.stringify({
+        name: "stored runtime",
+        allowedActions: ["example.echo"],
+        blockedActions: [],
+        allowedProxies: [],
+        allowedConnections: [],
+      }),
+    });
+    const runtimeToken = (await tokenResponse.json()) as { token: string };
+    const grantInput = {
+      subjectType: "user",
+      subject: "user-c",
+      connectionId,
+      role: "custom",
+      customActions: ["example.echo"],
+    };
+    const adminGrant = await app.request("/api/access-grants", {
+      method: "POST",
+      headers: jsonAdminHeaders,
+      body: JSON.stringify(grantInput),
+    });
+    expect(adminGrant.status).toBe(200);
+    const grant = (await adminGrant.json()) as { id: string };
+
+    const credentials = [
+      ["no token", undefined],
+      ["stored runtime token", `Bearer ${runtimeToken.token}`],
+      ["runtime JWT", "Bearer jwt-user-c"],
+    ] as const;
+    for (const [, authorization] of credentials) {
+      const headers: HeadersInit | undefined = authorization ? { authorization } : undefined;
+      const jsonHeaders: HeadersInit = authorization
+        ? { authorization, "content-type": "application/json" }
+        : { "content-type": "application/json" };
+      expect((await app.request("/v1/access-grants", { headers })).status).toBe(401);
+      expect(
+        (
+          await app.request("/v1/access-grants", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify(grantInput),
+          })
+        ).status,
+      ).toBe(401);
+      expect(
+        (
+          await app.request(`/v1/access-grants/${grant.id}`, {
+            method: "PATCH",
+            headers: jsonHeaders,
+            body: JSON.stringify({ role: "reader" }),
+          })
+        ).status,
+      ).toBe(401);
+      expect(
+        (
+          await app.request(`/v1/access-grants/${grant.id}:revoke`, {
+            method: "POST",
+            headers,
+          })
+        ).status,
+      ).toBe(401);
+      expect((await app.request("/v1/access/audit", { headers })).status).toBe(401);
+      expect((await app.request("/v1/identity/subjects", { headers })).status).toBe(401);
+    }
+
+    expect((await app.request("/v1/access-grants", { headers: adminHeaders })).status).toBe(200);
+    expect(
+      (
+        await app.request(`/v1/access-grants/${grant.id}`, {
+          method: "PATCH",
+          headers: jsonAdminHeaders,
+          body: JSON.stringify({ role: "custom", customActions: ["example.echo"] }),
+        })
+      ).status,
+    ).toBe(200);
+    expect((await app.request("/v1/access/audit", { headers: adminHeaders })).status).toBe(200);
+    expect((await app.request("/v1/identity/subjects", { headers: adminHeaders })).status).toBe(200);
+
+    expect((await app.request("/mcp/tools")).status).toBe(401);
+    expect(
+      (await app.request("/mcp/tools", { headers: { authorization: `Bearer ${runtimeToken.token}` } })).status,
+    ).toBe(200);
+    expect((await app.request("/mcp/tools", { headers: { authorization: "Bearer jwt-user-c" } })).status).toBe(200);
+    expect((await app.request("/mcp/tools", { headers: adminHeaders })).status).toBe(401);
+
+    await expect(
+      callMcpTool(app, runtimeToken.token, "execute_action", { actionId: "example.echo", input: {} }),
+    ).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(
+      callMcpTool(app, "jwt-user-c", "execute_action", { actionId: "example.echo", input: {} }),
+    ).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(
+      callMcpTool(app, undefined, "execute_action", { actionId: "example.echo", input: {} }),
+    ).rejects.toThrow(/401|Unauthorized/i);
+    await expect(
+      callMcpTool(app, "local-token", "execute_action", { actionId: "example.echo", input: {} }),
+    ).rejects.toThrow(/401|Unauthorized/i);
+    const adminRevoke = await app.request(`/v1/access-grants/${grant.id}:revoke`, {
+      method: "POST",
+      headers: adminHeaders,
+    });
+    expect(adminRevoke.status).toBe(200);
+    await expect(
+      callMcpTool(app, "jwt-user-c", "execute_action", { actionId: "example.echo", input: {} }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "connection_not_allowed" },
+    });
   });
 
   it("serves API routes when static routes are disabled", async () => {
@@ -1690,14 +1843,19 @@ describe("ConnectServer", () => {
 
   it("manages runtime tokens and gates runtime API calls after one is created", async () => {
     const runtimeTokens = new RuntimeTokenService(new MemoryRuntimeTokenStore());
-    const app = createTestServer([apiKeyProvider], { runtimeTokens }).createApp();
+    const app = createTestServer([apiKeyProvider], {
+      auth: { adminToken: "local-token" },
+      runtimeTokens,
+    }).createApp();
+    const adminHeaders = { authorization: "Bearer local-token" };
+    const jsonAdminHeaders = { ...adminHeaders, "content-type": "application/json" };
 
     const initiallyOpen = await app.request("/v1/actions");
     expect(initiallyOpen.status).toBe(200);
 
     const created = await app.request("/api/runtime-tokens", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: jsonAdminHeaders,
       body: JSON.stringify({
         name: "Claude Desktop",
         allowedActions: [" example.* ", "example.*"],
@@ -1717,7 +1875,7 @@ describe("ConnectServer", () => {
     });
     expect(JSON.stringify(createdBody.record)).not.toContain(createdBody.token);
 
-    const listed = await app.request("/api/runtime-tokens");
+    const listed = await app.request("/api/runtime-tokens", { headers: adminHeaders });
     expect(listed.status).toBe(200);
     await expect(listed.json()).resolves.toMatchObject([
       {
@@ -1732,7 +1890,7 @@ describe("ConnectServer", () => {
 
     const updated = await app.request(`/api/runtime-tokens/${createdBody.record.id}`, {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: jsonAdminHeaders,
       body: JSON.stringify({
         allowedActions: ["example.echo"],
         blockedActions: [],
@@ -1765,11 +1923,12 @@ describe("ConnectServer", () => {
 
     const revoked = await app.request(`/api/runtime-tokens/${createdBody.record.id}`, {
       method: "DELETE",
+      headers: adminHeaders,
     });
     expect(revoked.status).toBe(200);
     await expect(revoked.json()).resolves.toEqual({ id: createdBody.record.id, revoked: true });
 
-    const listedAfterRevoke = await app.request("/api/runtime-tokens");
+    const listedAfterRevoke = await app.request("/api/runtime-tokens", { headers: adminHeaders });
     expect(listedAfterRevoke.status).toBe(200);
     await expect(listedAfterRevoke.json()).resolves.toEqual([]);
 
@@ -1945,18 +2104,21 @@ describe("ConnectServer", () => {
   it("enforces stored token connection scope on HTTP actions, proxies, and runtime discovery", async () => {
     const runtimeTokens = new RuntimeTokenService(new MemoryRuntimeTokenStore());
     const app = createTestServer([{ ...apiKeyProvider, actions: [echoAction] }], {
+      auth: { adminToken: "local-token" },
       runtimeTokens,
       providerLoader: new ProxyProviderLoader(),
     }).createApp();
+    const adminHeaders = { authorization: "Bearer local-token" };
+    const jsonAdminHeaders = { ...adminHeaders, "content-type": "application/json" };
     const defaultConnectionResponse = await app.request("/api/connections/example", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: jsonAdminHeaders,
       body: JSON.stringify({ authType: "api_key", values: { apiKey: "default-key" } }),
     });
     const defaultConnection = (await defaultConnectionResponse.json()) as { id: string };
     const workConnectionResponse = await app.request("/api/connections/example", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: jsonAdminHeaders,
       body: JSON.stringify({
         authType: "api_key",
         connectionName: "work",
@@ -1966,7 +2128,7 @@ describe("ConnectServer", () => {
     const workConnection = (await workConnectionResponse.json()) as { id: string };
     const created = await app.request("/api/runtime-tokens", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: jsonAdminHeaders,
       body: JSON.stringify({
         name: "Work only",
         allowedActions: [],
@@ -2045,7 +2207,7 @@ describe("ConnectServer", () => {
 
     const grantedMissingCreated = await app.request("/api/runtime-tokens", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: jsonAdminHeaders,
       body: JSON.stringify({
         name: "Work and ghost",
         allowedActions: [],
@@ -2070,13 +2232,13 @@ describe("ConnectServer", () => {
     expect(grantedMissing.status).toBe(403);
     await expect(grantedMissing.json()).resolves.toMatchObject({ errorCode: "connection_not_allowed" });
 
-    const adminConnections = await app.request("/api/connections");
+    const adminConnections = await app.request("/api/connections", { headers: adminHeaders });
     expect(adminConnections.status).toBe(200);
     const listed = (await adminConnections.json()) as Array<{ id: string; connectionName: string }>;
     expect(listed.map((connection) => connection.connectionName).sort()).toEqual(["default", "work"]);
     expect(listed.map((connection) => connection.id).sort()).toEqual([defaultConnection.id, workConnection.id].sort());
 
-    const guide = await app.request("/api/actions/example.echo/agent.md");
+    const guide = await app.request("/api/actions/example.echo/agent.md", { headers: adminHeaders });
     expect(guide.status).toBe(200);
     expect(await guide.text()).toContain("## Current Connection");
   });
@@ -2149,10 +2311,15 @@ describe("ConnectServer", () => {
 
   it("rejects token policy updates that omit allowedConnections", async () => {
     const runtimeTokens = new RuntimeTokenService(new MemoryRuntimeTokenStore());
-    const app = createTestServer([apiKeyProvider], { runtimeTokens }).createApp();
+    const app = createTestServer([apiKeyProvider], {
+      auth: { adminToken: "local-token" },
+      runtimeTokens,
+    }).createApp();
+    const adminHeaders = { authorization: "Bearer local-token" };
+    const jsonAdminHeaders = { ...adminHeaders, "content-type": "application/json" };
     const created = await app.request("/api/runtime-tokens", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: jsonAdminHeaders,
       body: JSON.stringify({
         name: "Work only",
         allowedActions: [],
@@ -2164,12 +2331,12 @@ describe("ConnectServer", () => {
     const token = (await created.json()) as { record: { id: string } };
     const omitted = await app.request(`/api/runtime-tokens/${token.record.id}`, {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: jsonAdminHeaders,
       body: JSON.stringify({ allowedActions: [], blockedActions: [], allowedProxies: [] }),
     });
     expect(omitted.status).toBe(400);
     await expect(omitted.json()).resolves.toMatchObject({ error: { code: "invalid_input" } });
-    const listed = await app.request("/api/runtime-tokens");
+    const listed = await app.request("/api/runtime-tokens", { headers: adminHeaders });
     expect(listed.status).toBe(200);
     await expect(listed.json()).resolves.toMatchObject([{ allowedConnections: ["connection-id"] }]);
   });
@@ -2178,6 +2345,7 @@ describe("ConnectServer", () => {
     let executions = 0;
     const runtimeTokens = new RuntimeTokenService(new MemoryRuntimeTokenStore());
     const app = createTestServer([{ ...apiKeyProvider, actions: [echoAction] }], {
+      auth: { adminToken: "local-token" },
       runtimeTokens,
       providerLoader: new ActionProviderLoader(async (input, context) => {
         executions += 1;
@@ -2187,13 +2355,13 @@ describe("ConnectServer", () => {
     }).createApp();
     await app.request("/api/connections/example", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: { authorization: "Bearer local-token", "content-type": "application/json" },
       body: JSON.stringify({ authType: "api_key", values: { apiKey: "example-key" } }),
     });
     const createToken = async (name: string): Promise<string> => {
       const response = await app.request("/api/runtime-tokens", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { authorization: "Bearer local-token", "content-type": "application/json" },
         body: JSON.stringify({ name }),
       });
       return ((await response.json()) as { token: string }).token;
@@ -3397,18 +3565,20 @@ describe("ConnectServer", () => {
   it("applies stored runtime token proxy grants independently of action rules", async () => {
     const runtimeTokens = new RuntimeTokenService(new MemoryRuntimeTokenStore());
     const app = createTestServer([apiKeyProvider], {
+      auth: { adminToken: "local-token" },
       runtimeTokens,
       providerLoader: new ProxyProviderLoader(),
     }).createApp();
+    const jsonAdminHeaders = { authorization: "Bearer local-token", "content-type": "application/json" };
 
     await app.request("/api/connections/example", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: jsonAdminHeaders,
       body: JSON.stringify({ authType: "api_key", values: { apiKey: "example-key" } }),
     });
     const deniedCreation = await app.request("/api/runtime-tokens", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: jsonAdminHeaders,
       body: JSON.stringify({
         name: "Actions only",
         allowedActions: ["*"],
@@ -3419,7 +3589,7 @@ describe("ConnectServer", () => {
     const deniedToken = (await deniedCreation.json()) as { token: string };
     const grantedCreation = await app.request("/api/runtime-tokens", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: jsonAdminHeaders,
       body: JSON.stringify({
         name: "Example proxy",
         allowedActions: ["example.echo"],
@@ -3828,6 +3998,30 @@ async function createTestStaticRoot(): Promise<string> {
   await writeFile(join(root, "index.html"), '<!doctype html><div id="root"></div>');
   await writeFile(join(root, "assets", "console.js"), "console.log('ok');");
   return root;
+}
+
+async function callMcpTool(
+  app: ReturnType<ConnectServer["createApp"]>,
+  token: string | undefined,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  const fetcher: typeof fetch = async (input, init) => {
+    const headers = new Headers(init?.headers);
+    if (token) {
+      headers.set("authorization", `Bearer ${token}`);
+    }
+    return app.fetch(new Request(input, { ...init, headers }));
+  };
+  const transport = new StreamableHTTPClientTransport(new URL("https://connect.test/mcp"), { fetch: fetcher });
+  const client = new Client({ name: "connect-server-test", version: "0.0.0" });
+  try {
+    await client.connect(transport);
+    const result = await client.callTool({ name, arguments: args });
+    return result.structuredContent;
+  } finally {
+    await client.close();
+  }
 }
 
 function createTestTransitFiles(rootDir: string, options: { maxBytes?: number } = {}): TransitFileService {

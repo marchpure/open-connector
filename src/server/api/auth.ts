@@ -153,15 +153,15 @@ async function installAdminCookieForBearer(context: Context, options: LocalAuthO
 async function hasValidToken(context: Context, options: LocalAuthOptions, scope: AuthScope): Promise<boolean> {
   const token = tokenForScope(options, scope);
   if (!token) {
-    if (scope === "admin") {
-      return true;
-    }
     const hasRuntimeTokens = options.hasRuntimeTokens
       ? await options.hasRuntimeTokens()
       : options.resolveRuntimeToken !== undefined;
     const hasRuntimeJwtConfig = options.hasRuntimeJwtConfig
       ? await options.hasRuntimeJwtConfig()
       : options.verifyRuntimeJwt !== undefined;
+    if (scope === "admin") {
+      return !hasRuntimeTokens && !hasRuntimeJwtConfig;
+    }
     if (!hasRuntimeTokens && !hasRuntimeJwtConfig) {
       return true;
     }
@@ -247,7 +247,24 @@ function normalizeToken(token: string | undefined): string | undefined {
 }
 
 function readAuthScope(path: string): AuthScope {
-  return path === "/mcp" || path.startsWith("/mcp/") || path === "/v1" || path.startsWith("/v1/") ? "runtime" : "admin";
+  if (isRuntimePath(path)) {
+    return "runtime";
+  }
+  return "admin";
+}
+
+function isRuntimePath(path: string): boolean {
+  return (
+    path === "/mcp" ||
+    path.startsWith("/mcp/") ||
+    path === "/v1" ||
+    path === "/v1/health" ||
+    path === "/v1/providers" ||
+    path.startsWith("/v1/actions") ||
+    path.startsWith("/v1/apps") ||
+    path.startsWith("/v1/proxy/") ||
+    path === "/v1/access:preview"
+  );
 }
 
 function canUseAdminAuth(path: string, method: string): boolean {
