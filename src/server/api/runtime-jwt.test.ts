@@ -22,6 +22,15 @@ beforeAll(async () => {
   const publicKey = await exportJWK(signingKeys.publicKey);
   server = createServer((request, response) => {
     response.setHeader("content-type", "application/json");
+    if (request.url === "/userinfo") {
+      response.end(
+        JSON.stringify({
+          sub: request.headers.authorization === "Bearer mismatched-userinfo" ? "other-user" : "caller",
+          identity_userpool_group_uids: ["group-readers"],
+        }),
+      );
+      return;
+    }
     response.end(
       request.url === "/invalid"
         ? JSON.stringify({ invalid: true })
@@ -203,6 +212,55 @@ describe("createRuntimeJwtVerifier", () => {
     });
     if (!strict) throw new Error("JWT verifier was not configured.");
     await expect(strict(await signToken())).resolves.toBeUndefined();
+  });
+
+  it("enriches Access Token identity from UserInfo after JWT verification", async () => {
+    const verifier = createRuntimeJwtVerifier({
+      jwksUri,
+      issuer,
+      audience,
+      groupsClaim: "identity_userpool_group_uids",
+      allowedClientIds: ["bridge-client"],
+      requireGroupsClaim: true,
+      requireNbf: true,
+      requireAccessTokenClaims: true,
+      userinfoUri: jwksUri.replace("/jwks", "/userinfo"),
+    });
+    if (!verifier) throw new Error("JWT verifier was not configured.");
+    const token = await signToken({
+      notBefore: "0s",
+      claims: { client_id: "bridge-client", scope: "openid profile", jti: "token-id" },
+    });
+
+    await expect(verifier(token)).resolves.toMatchObject({
+      sub: "caller",
+      groups: ["group-readers"],
+    });
+  });
+
+  it("rejects ID-token-shaped JWTs before UserInfo enrichment", async () => {
+    const verifier = createRuntimeJwtVerifier({
+      jwksUri,
+      issuer,
+      audience,
+      groupsClaim: "identity_userpool_group_uids",
+      allowedClientIds: ["bridge-client"],
+      requireGroupsClaim: true,
+      requireNbf: true,
+      requireAccessTokenClaims: true,
+      userinfoUri: jwksUri.replace("/jwks", "/userinfo"),
+    });
+    if (!verifier) throw new Error("JWT verifier was not configured.");
+    const idTokenShaped = await signToken({
+      notBefore: "0s",
+      claims: {
+        client_id: "bridge-client",
+        azp: "bridge-client",
+        identity_userpool_group_uids: ["group-readers"],
+      },
+    });
+
+    await expect(verifier(idTokenShaped)).resolves.toBeUndefined();
   });
 
   it("rejects cross-tenant tokens", async () => {

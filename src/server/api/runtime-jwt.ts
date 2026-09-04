@@ -18,6 +18,8 @@ export interface RuntimeJwtConfig {
   requireGroupsClaim?: boolean;
   requireNbf?: boolean;
   requireUserPoolRefInIssuer?: boolean;
+  requireAccessTokenClaims?: boolean;
+  userinfoUri?: string;
 }
 
 export type RuntimeJwtVerifier = (token: string) => Promise<RuntimeSubject | boolean | undefined>;
@@ -66,7 +68,7 @@ export function createRuntimeJwtVerifier(config: RuntimeJwtConfig): RuntimeJwtVe
         audience,
         requiredClaims,
       });
-      return resolveSubject(verified.payload, {
+      const identityConfig: IdentityProviderConfig = {
         issuer,
         audience,
         jwksUri,
@@ -81,7 +83,18 @@ export function createRuntimeJwtVerifier(config: RuntimeJwtConfig): RuntimeJwtVe
         requireGroupsClaim: config.requireGroupsClaim,
         requireNbf: config.requireNbf,
         requireUserPoolRefInIssuer: config.requireUserPoolRefInIssuer,
-      });
+        requireAccessTokenClaims: config.requireAccessTokenClaims,
+        userinfoUri: config.userinfoUri?.trim(),
+      };
+      const subject = resolveSubject(verified.payload, identityConfig);
+      if (!subject) return undefined;
+      if (identityConfig.requireAccessTokenClaims && !hasAccessTokenClaims(verified.payload)) return undefined;
+      if (!identityConfig.userinfoUri) return subject;
+      const userinfo = await fetchUserinfo(identityConfig.userinfoUri, token);
+      if (!userinfo || readStringClaim(userinfo, identityConfig.subjectClaim) !== subject.sub) return undefined;
+      const groups = readGroupsClaim(userinfo, identityConfig.groupsClaim);
+      if (identityConfig.requireGroupsClaim && !Array.isArray(userinfo[identityConfig.groupsClaim])) return undefined;
+      return { ...subject, groups };
     } catch {
       return undefined;
     }
@@ -119,6 +132,8 @@ export function createRuntimeJwtVerifierFromIdentityConfig(
           requireGroupsClaim: config.requireGroupsClaim,
           requireNbf: config.requireNbf,
           requireUserPoolRefInIssuer: config.requireUserPoolRefInIssuer,
+          requireAccessTokenClaims: config.requireAccessTokenClaims,
+          userinfoUri: config.userinfoUri,
         }),
       };
     }
@@ -143,7 +158,7 @@ function resolveSubject(payload: JWTPayload, config: IdentityProviderConfig): Ru
   const clientId = readStringClaim(payload, "client_id") ?? readStringClaim(payload, "azp");
   if (config.allowedClientIds?.length && (!clientId || !config.allowedClientIds.includes(clientId))) return undefined;
   if (config.requireNbf && typeof payload.nbf !== "number") return undefined;
-  if (config.requireGroupsClaim && !Array.isArray(payload[config.groupsClaim])) return undefined;
+  if (config.requireGroupsClaim && !config.userinfoUri && !Array.isArray(payload[config.groupsClaim])) return undefined;
   if (config.requireUserPoolRefInIssuer && !issuerContainsUserPoolRef(config.issuer, config.userPoolRef)) {
     return undefined;
   }
@@ -157,6 +172,39 @@ function resolveSubject(payload: JWTPayload, config: IdentityProviderConfig): Ru
     sub,
     groups: readGroupsClaim(payload, config.groupsClaim),
   };
+}
+
+function hasAccessTokenClaims(payload: JWTPayload): boolean {
+  return (
+    typeof payload.client_id === "string" &&
+    Boolean(payload.client_id.trim()) &&
+    typeof payload.scope === "string" &&
+    Boolean(payload.scope.trim()) &&
+    typeof payload.jti === "string" &&
+    Boolean(payload.jti.trim()) &&
+    typeof payload.nbf === "number"
+  );
+}
+
+async function fetchUserinfo(uri: string, token: string): Promise<JWTPayload | undefined> {
+  let url: URL;
+  try {
+    url = new URL(uri);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "https:" && !isLoopbackHttpUrl(url)) return undefined;
+  try {
+    const response = await fetch(url, {
+      headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return undefined;
+    const value = (await response.json()) as unknown;
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as JWTPayload) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function normalizeStringList(values: string[] | undefined): string[] | undefined {

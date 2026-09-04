@@ -1233,6 +1233,12 @@ function identityProviderConfigSchema(): JsonSchema {
       requireUserPoolRefInIssuer: jsonSchema.boolean({
         description: "Require the Agent Identity issuer hostname to contain the configured UserPool UID.",
       }),
+      requireAccessTokenClaims: jsonSchema.boolean({
+        description: "Require access-token-specific client_id, scope, jti, and nbf claims.",
+      }),
+      userinfoUri: jsonSchema.url(
+        "Optional OIDC UserInfo endpoint used to retrieve the verified subject's group UID claims.",
+      ),
     },
     {
       required: ["issuer", "audience", "jwksUri", "userPoolRef", "subjectClaim", "groupsClaim"],

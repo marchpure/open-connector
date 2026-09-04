@@ -1538,6 +1538,11 @@ function readIdentityProviderConfig(body: Record<string, unknown>): IdentityProv
       typeof (body.requireUserPoolRefInIssuer ?? body.require_user_pool_ref_in_issuer) === "boolean"
         ? Boolean(body.requireUserPoolRefInIssuer ?? body.require_user_pool_ref_in_issuer)
         : undefined,
+    requireAccessTokenClaims:
+      typeof (body.requireAccessTokenClaims ?? body.require_access_token_claims) === "boolean"
+        ? Boolean(body.requireAccessTokenClaims ?? body.require_access_token_claims)
+        : undefined,
+    userinfoUri: optionalString(body.userinfoUri ?? body.userinfo_uri),
   };
 }
 

@@ -49,11 +49,11 @@ The persisted IdentityProviderConfig must use:
   "tenantClaim": "<verified stable tenant claim, when present>",
   "tenant": "<verified claim value, otherwise omit both fields>",
   "allowedClientIds": ["<OAuth client UID>"],
-  "tokenTypeClaim": "typ",
-  "tokenType": "access_token",
   "requireGroupsClaim": true,
   "requireNbf": true,
-  "requireUserPoolRefInIssuer": true
+  "requireUserPoolRefInIssuer": true,
+  "requireAccessTokenClaims": true,
+  "userinfoUri": "<discovered UserPool userinfo endpoint>"
 }
 ```
 

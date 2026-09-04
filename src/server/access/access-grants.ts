@@ -20,6 +20,8 @@ export interface IdentityProviderConfig {
   requireGroupsClaim?: boolean;
   requireNbf?: boolean;
   requireUserPoolRefInIssuer?: boolean;
+  requireAccessTokenClaims?: boolean;
+  userinfoUri?: string;
 }
 
 export interface RuntimeSubject {
@@ -322,6 +324,8 @@ function normalizeIdentityProviderConfig(config: IdentityProviderConfig): Identi
     requireGroupsClaim: config.requireGroupsClaim === true,
     requireNbf: config.requireNbf === true,
     requireUserPoolRefInIssuer: config.requireUserPoolRefInIssuer === true,
+    requireAccessTokenClaims: config.requireAccessTokenClaims === true,
+    userinfoUri: normalizeOptionalString(config.userinfoUri),
   };
   return normalized;
 }
