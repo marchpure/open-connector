@@ -36,7 +36,6 @@ for role in controlPlane mcpRuntime; do
       InitializerSec: 120,
       CpuMilli: $cpu,
       MemoryMB: $memory,
-      CpuStrategy: "always",
       ExclusiveMode: false,
       MaxConcurrency: 100,
       ProjectName: "default",

@@ -19,9 +19,10 @@ test "$(jq -r '.baseImage' "$config")" = "$expected_registry/idv-order-discount-
   fail "base image must use the corrected registry digest"
 image=$(jq -r '.image' "$config")
 printf '%s' "$image" |
-  grep -Eq "^$expected_registry/[a-zA-Z0-9._/-]+@sha256:[a-f0-9]{64}$" ||
-  fail "bootstrap image must use a resolved registry digest"
-test "$image" != "$(jq -r '.baseImage' "$config")" || fail "bootstrap image must include the KMS adapter"
+  grep -Eq "^$expected_registry/idv-order-discount-agent-test/knowledge-dev-connection-service:corrected-20b966a0bdcbbcef-kms-bootstrap(-r[0-9]+)?$" ||
+  fail "VeFaaS image must use the unique corrected bootstrap tag"
+printf '%s' "$(jq -r '.imageDigest' "$config")" |
+  grep -Eq '^sha256:[a-f0-9]{64}$' || fail "bootstrap registry digest is missing"
 
 for path in \
   .controlPlane.name .controlPlane.command .controlPlane.role \

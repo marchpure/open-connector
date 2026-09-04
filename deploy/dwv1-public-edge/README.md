@@ -29,6 +29,22 @@ idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-
 The protected customer host `101.126.155.97` is explicitly outside this
 deployment and rollback boundary.
 
+The frozen dev origin is:
+
+```text
+https://su4f9ugsggenk65g7f7m5.apigateway-cn-beijing.volceapi.com
+```
+
+The VeFaaS bootstrap image is pinned by registry digest:
+
+```text
+idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service@sha256:18aa05b29b2374ec721500c82611f83373118e4b4668b8a34688324383f689bf
+```
+
+Transit files use the private `dwv1-openconnector-dev-2107625663` TOS bucket.
+Only the function role can access its `transit/` prefix, which expires objects
+after two days and incomplete multipart uploads after one day.
+
 ## Gates
 
 Copy `config.example.json` outside the repository and fill only approved

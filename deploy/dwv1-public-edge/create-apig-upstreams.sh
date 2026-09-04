@@ -18,12 +18,6 @@ create_upstream() {
     --Name "$name" \
     --Protocol HTTP \
     --SourceType VeFaas \
-    --ConnectionPoolSettings.Enable true \
-    --ConnectionPoolSettings.MaxConnections 1024 \
-    --ConnectionPoolSettings.Http1MaxPendingRequests 1024 \
-    --ConnectionPoolSettings.IdleTimeout 900 \
-    --LoadBalancerSettings.LbPolicy SimpleLB \
-    --LoadBalancerSettings.SimpleLB ROUND_ROBIN \
     --UpstreamSpec.VeFaas.FunctionId "$function_id" \
     ---profile default
 }

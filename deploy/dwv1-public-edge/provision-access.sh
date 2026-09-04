@@ -29,15 +29,19 @@ bucket=$(jq -r '.tos.bucket' "$config")
 policy_document=$(jq -cn --arg trn "$secret_trn" --arg bucket "$bucket" \
   '{
     Statement:
-      [{Effect:"Allow",Action:["kms:GetSecretValue"],Resource:[$trn]}] +
-      (if $bucket == "" then [] else [{
-        Effect:"Allow",
-        Action:["tos:HeadObject","tos:GetObject","tos:PutObject","tos:ListBucket"],
-        Resource:[
-          ("trn:tos:::bucket/" + $bucket),
-          ("trn:tos:::bucket/" + $bucket + "/transit/*")
-        ]
-      }] end)
+      [{Effect:"Allow",Action:["kms:GetSecretValue","metakms:GetSecretValue"],Resource:[$trn]}] +
+      (if $bucket == "" then [] else [
+        {
+          Effect:"Allow",
+          Action:["tos:List*"],
+          Resource:[("trn:tos:::" + $bucket)]
+        },
+        {
+          Effect:"Allow",
+          Action:["tos:HeadObject","tos:GetObject","tos:PutObject","tos:DeleteObject"],
+          Resource:[("trn:tos:::" + $bucket + "/transit/*")]
+        }
+      ] end)
   }')
 trust_document='{"Statement":[{"Effect":"Allow","Action":["sts:AssumeRole"],"Principal":{"Service":["vefaas","vefaas_dev"]}}]}'
 

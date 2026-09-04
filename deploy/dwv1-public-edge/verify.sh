@@ -13,7 +13,9 @@ health_headers=$(mktemp)
 mcp_headers=$(mktemp)
 mcp_body=$(mktemp)
 tools_body=$(mktemp)
-trap 'rm -f "$health_headers" "$mcp_headers" "$mcp_body" "$tools_body"' EXIT
+tools_list_body=$(mktemp)
+tools_call_body=$(mktemp)
+trap 'rm -f "$health_headers" "$mcp_headers" "$mcp_body" "$tools_body" "$tools_list_body" "$tools_call_body"' EXIT
 
 curl --fail --silent --show-error --max-time 20 \
   --dump-header "$health_headers" "$origin/health" >/dev/null
@@ -35,6 +37,22 @@ curl --fail --silent --show-error --max-time 30 \
   -H "authorization: Bearer $runtime_token" \
   "$origin/mcp/tools" >"$tools_body"
 jq -e '.tools | type == "array"' "$tools_body" >/dev/null
+
+curl --fail --silent --show-error --no-buffer --max-time 60 \
+  -H "authorization: Bearer $runtime_token" \
+  -H 'accept: application/json, text/event-stream' \
+  -H 'content-type: application/json' \
+  -X POST "$origin/mcp" \
+  --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' >"$tools_list_body"
+grep -Eq '"result"|event: message' "$tools_list_body"
+
+curl --fail --silent --show-error --no-buffer --max-time 60 \
+  -H "authorization: Bearer $runtime_token" \
+  -H 'accept: application/json, text/event-stream' \
+  -H 'content-type: application/json' \
+  -X POST "$origin/mcp" \
+  --data '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_apps","arguments":{}}}' >"$tools_call_body"
+grep -Eq '"result"|event: message' "$tools_call_body"
 
 unauthorized=$(curl --silent --output /dev/null --write-out '%{http_code}' \
   --max-time 20 -X POST "$origin/mcp" \
@@ -58,6 +76,8 @@ jq -n \
     noStore: true,
     runtimeApiKeyInitialize: true,
     runtimeApiKeyToolsList: true,
+    standardMcpToolsList: true,
+    safeReadOnlyToolsCall: "list_apps",
     unauthenticatedRejected: true,
     secretsRecorded: false
   }' >"$evidence_dir/mcp-smoke.json"

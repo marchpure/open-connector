@@ -3,16 +3,17 @@
   "region": "cn-beijing",
   "sourceSha": "20b966a0bdcbbcef55d8cba33ef5c380b2502efe",
   "baseImage": "idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service@sha256:d853446c637643990677feb7bbe21b24acd78e9a21446cc00a75e201ed942583",
-  "image": "idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service@sha256:083561964108b0220defa15c17f0bec19a9fc1644c8e7d83f1eaaaae96efab98",
+  "image": "idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service:corrected-20b966a0bdcbbcef-kms-bootstrap-r3",
+  "imageDigest": "sha256:18aa05b29b2374ec721500c82611f83373118e4b4668b8a34688324383f689bf",
   "controlPlane": {
     "name": "dwv1-openconnector-control-plane-dev",
-    "functionId": "",
+    "functionId": "6fmb81qa",
     "role": "control-plane",
     "command": "node /opt/dwv1-bootstrap/server.mjs"
   },
   "mcpRuntime": {
     "name": "dwv1-openconnector-mcp-runtime-dev",
-    "functionId": "",
+    "functionId": "hygmpcqd",
     "role": "mcp-runtime",
     "command": "node /opt/dwv1-bootstrap/server.mjs"
   },
@@ -28,40 +29,43 @@
   "network": {
     "vpcId": "vpc-mjim3l8hsem85smt1a0iylbv",
     "subnetIds": ["subnet-13g72tjkk4lj43n6nu5iogni4"],
-    "securityGroupIds": []
+    "securityGroupIds": ["sg-1uzvj526jncw51j8e5wfakns"]
   },
   "postgresql": {
-    "reuseApproved": false,
+    "reuseApproved": true,
     "instanceId": "postgres-ef669f38f7c6",
     "endpoint": "postgresef669f38f7c6.rds-pg.ivolces.com",
     "port": 5432,
     "database": "open_connector_dev",
-    "account": "open_connector_app"
+    "account": "open_connector_app",
+    "accountExists": true,
+    "databaseExists": true
   },
   "kms": {
     "secretName": "dwv1/openconnector/dev",
-    "secretTrn": "",
+    "secretExists": true,
+    "secretTrn": "trn:kms:cn-beijing:2107625663:secrets/dwv1/openconnector/dev",
     "roleName": "DWV1OpenConnectorVeFaaSDevRole",
-    "roleTrn": "",
+    "roleTrn": "trn:iam::2107625663:role/DWV1OpenConnectorVeFaaSDevRole",
     "policyName": "DWV1OpenConnectorSecretRead"
   },
   "tos": {
-    "enabled": false,
-    "bucket": "",
+    "enabled": true,
+    "bucket": "dwv1-openconnector-dev-2107625663",
     "region": "cn-beijing",
     "endpoint": "https://tos-s3-cn-beijing.volces.com",
     "lifecycleDays": 2
   },
   "apig": {
-    "gatewayId": "",
-    "serviceId": "",
-    "controlPlaneUpstreamId": "",
-    "mcpRuntimeUpstreamId": "",
-    "consoleRouteId": "",
-    "apiRouteId": "",
-    "mcpRouteId": "",
-    "v1RouteId": "",
-    "publicOrigin": ""
+    "gatewayId": "gdad6ualsn7qovdjiduag",
+    "serviceId": "su4f9ugsggenk65g7f7m5",
+    "controlPlaneUpstreamId": "udadakv94na1gfj55crag",
+    "mcpRuntimeUpstreamId": "udadakvp4na1gfj55crb0",
+    "consoleRouteId": "rdadaleevnaagvjdnvmh0",
+    "apiRouteId": "rdadalduvnaagvjdnvmgg",
+    "mcpRouteId": "rdadalcp4na1gfj55cri0",
+    "v1RouteId": "rdadald0uvs6jeq7fj020",
+    "publicOrigin": "https://su4f9ugsggenk65g7f7m5.apigateway-cn-beijing.volceapi.com"
   },
   "identity": {
     "issuer": "",
