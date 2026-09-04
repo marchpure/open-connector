@@ -1,0 +1,17 @@
+ARG BASE_IMAGE=idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service@sha256:d853446c637643990677feb7bbe21b24acd78e9a21446cc00a75e201ed942583
+
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS bootstrap-builder
+
+WORKDIR /build
+COPY bootstrap/package.json bootstrap/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
+
+FROM ${BASE_IMAGE}
+
+WORKDIR /opt/dwv1-bootstrap
+COPY bootstrap/package.json bootstrap/package-lock.json ./
+COPY --from=bootstrap-builder /build/node_modules ./node_modules
+COPY bootstrap/server.mjs ./
+
+ENTRYPOINT ["node", "/opt/dwv1-bootstrap/server.mjs"]
+CMD []

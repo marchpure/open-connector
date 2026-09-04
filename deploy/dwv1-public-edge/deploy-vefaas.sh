@@ -10,19 +10,22 @@ for role in controlPlane mcpRuntime; do
   name=$(jq -r ".$role.name" "$config")
   function_id=$(jq -r ".$role.functionId" "$config")
   command=$(jq -r ".$role.command" "$config")
+  openconnector_role=$(jq -r ".$role.role" "$config")
 
   common_body=$(jq -n \
     --arg command "$command" \
     --arg source "$image" \
-    --arg drc_binding "$(jq -r '.drc.bindingId' "$config")" \
-    --arg postgres_resource "$(jq -r '.drc.postgresResourceId' "$config")" \
-    --arg tos_resource "$(jq -r '.drc.tosResourceId' "$config")" \
-    --arg secret_resource "$(jq -r '.drc.secretResourceId' "$config")" \
+    --arg secret_name "$(jq -r '.kms.secretName' "$config")" \
+    --arg role_trn "$(jq -r '.kms.roleTrn' "$config")" \
+    --arg openconnector_role "$openconnector_role" \
     --arg source_sha "$(jq -r '.sourceSha' "$config")" \
     --argjson port "$(jq '.runtime.port' "$config")" \
     --argjson timeout "$(jq '.runtime.requestTimeout' "$config")" \
     --argjson cpu "$(jq '.runtime.cpuMilli' "$config")" \
     --argjson memory "$(jq '.runtime.memoryMB' "$config")" \
+    --arg vpc_id "$(jq -r '.network.vpcId' "$config")" \
+    --argjson subnet_ids "$(jq '.network.subnetIds' "$config")" \
+    --argjson security_group_ids "$(jq '.network.securityGroupIds' "$config")" \
     '{
       Command: $command,
       Source: $source,
@@ -37,18 +40,25 @@ for role in controlPlane mcpRuntime; do
       ExclusiveMode: false,
       MaxConcurrency: 100,
       ProjectName: "default",
+      Role: $role_trn,
       Envs: [
         {Key: "HOST", Value: "0.0.0.0"},
         {Key: "PORT", Value: ($port | tostring)},
         {Key: "NODE_ENV", Value: "production"},
         {Key: "DWV1_SOURCE_SHA", Value: $source_sha},
-        {Key: "DWV1_DRC_BINDING_ID", Value: $drc_binding},
-        {Key: "DWV1_POSTGRES_RESOURCE_ID", Value: $postgres_resource},
-        {Key: "DWV1_TOS_RESOURCE_ID", Value: $tos_resource},
-        {Key: "DWV1_SECRET_RESOURCE_ID", Value: $secret_resource}
+        {Key: "DWV1_KMS_SECRET_NAME", Value: $secret_name},
+        {Key: "DWV1_OPENCONNECTOR_ROLE", Value: $openconnector_role},
+        {Key: "DWV1_INTERNAL_PORT", Value: "3000"}
       ],
       TosMountConfig: {EnableTos: false},
-      NasStorage: {EnableNas: false}
+      NasStorage: {EnableNas: false},
+      VpcConfig: {
+        EnableVpc: true,
+        EnableSharedInternetAccess: true,
+        VpcId: $vpc_id,
+        SubnetIds: $subnet_ids,
+        SecurityGroupIds: $security_group_ids
+      }
     }')
 
   if test -n "$function_id"; then
@@ -60,8 +70,6 @@ for role in controlPlane mcpRuntime; do
       jq -r '.Result.Id // .Result.FunctionId')
     test -n "$function_id"
     printf '%s=%s\n' "$role" "$function_id"
-    printf 'Bind approved DRC secrets to function %s before release.\n' "$function_id" >&2
-    continue
   fi
 
   ve vefaas Release \

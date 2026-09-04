@@ -1,0 +1,9 @@
+{
+  "name": "dwv1-openconnector-vefaas-bootstrap",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@volcengine/kms": "1.0.7",
+    "@volcengine/sdk-core": "1.0.3"
+  }
+}

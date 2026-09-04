@@ -2,30 +2,55 @@
   "profile": "default",
   "region": "cn-beijing",
   "sourceSha": "20b966a0bdcbbcef55d8cba33ef5c380b2502efe",
-  "image": "idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service@sha256:d853446c637643990677feb7bbe21b24acd78e9a21446cc00a75e201ed942583",
+  "baseImage": "idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service@sha256:d853446c637643990677feb7bbe21b24acd78e9a21446cc00a75e201ed942583",
+  "image": "idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service@sha256:replace_with_bootstrap_registry_digest",
   "controlPlane": {
     "name": "dwv1-openconnector-control-plane-dev",
     "functionId": "",
-    "command": "/usr/local/bin/open-connector control-plane"
+    "role": "control-plane",
+    "command": "node /opt/dwv1-bootstrap/server.mjs"
   },
   "mcpRuntime": {
     "name": "dwv1-openconnector-mcp-runtime-dev",
     "functionId": "",
-    "command": "/usr/local/bin/open-connector mcp-runtime"
+    "role": "mcp-runtime",
+    "command": "node /opt/dwv1-bootstrap/server.mjs"
   },
   "runtime": {
-    "port": 3000,
+    "port": 8080,
+    "internalPort": 3000,
     "requestTimeout": 900,
     "minInstance": 1,
     "maxInstance": 3,
     "cpuMilli": 2000,
     "memoryMB": 4096
   },
-  "drc": {
-    "bindingId": "",
-    "postgresResourceId": "",
-    "tosResourceId": "",
-    "secretResourceId": ""
+  "network": {
+    "vpcId": "vpc-mjim3l8hsem85smt1a0iylbv",
+    "subnetIds": ["subnet-13g72tjkk4lj43n6nu5iogni4"],
+    "securityGroupIds": []
+  },
+  "postgresql": {
+    "reuseApproved": false,
+    "instanceId": "postgres-ef669f38f7c6",
+    "endpoint": "postgresef669f38f7c6.rds-pg.ivolces.com",
+    "port": 5432,
+    "database": "open_connector_dev",
+    "account": "open_connector_dev"
+  },
+  "kms": {
+    "secretName": "dwv1/openconnector/dev",
+    "secretTrn": "",
+    "roleName": "DWV1OpenConnectorVeFaaSDevRole",
+    "roleTrn": "",
+    "policyName": "DWV1OpenConnectorSecretRead"
+  },
+  "tos": {
+    "enabled": false,
+    "bucket": "",
+    "region": "cn-beijing",
+    "endpoint": "https://tos-s3-cn-beijing.volces.com",
+    "lifecycleDays": 2
   },
   "apig": {
     "gatewayId": "",

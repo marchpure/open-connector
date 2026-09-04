@@ -1,0 +1,8 @@
+{
+  "name": "dwv1-openconnector-cloud-tools",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@volcengine/tos-sdk": "2.9.1"
+  }
+}

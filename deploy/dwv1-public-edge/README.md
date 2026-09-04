@@ -1,6 +1,6 @@
 # DWV1 W4 corrected VeFaaS public edge
 
-This directory owns only the dev DRC, VeFaaS, and APIG deployment of
+This directory owns only the dev VeFaaS, KMS, PostgreSQL, TOS, and APIG deployment of
 OpenConnector. It does not create or operate ECS, EIP, Caddy, local PostgreSQL,
 MinIO, AgentKit MCP Gateway, or product UI resources.
 
@@ -13,12 +13,15 @@ idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-
 
 ## Architecture
 
-- DRC supplies approved PostgreSQL, TOS, and secret bindings.
+- KMS stores the approved PostgreSQL URL, Admin Token, Runtime Token,
+  encryption key, and optional TOS credentials in one dedicated Secret.
+- A dedicated VeFaaS IAM role can read only that Secret.
 - `dwv1-openconnector-control-plane-dev` runs
   `/usr/local/bin/open-connector control-plane`.
 - `dwv1-openconnector-mcp-runtime-dev` runs
   `/usr/local/bin/open-connector mcp-runtime`.
-- Both are `native/v1` VeFaaS web functions, listen on port 3000, share cloud
+- Both are `native/v1` VeFaaS web functions. The bootstrap listens on port
+  8080 and proxies to OpenConnector on loopback port 3000. They share cloud
   PostgreSQL state, use TOS for objects, and have no local durable state.
 - APIG routes `/mcp` and `/v1/*` to the runtime function, and `/api/*` plus the
   console to the control-plane function.
@@ -29,15 +32,15 @@ deployment and rollback boundary.
 ## Gates
 
 Copy `config.example.json` outside the repository and fill only approved
-resource IDs. Do not put secret values in the file. `preflight.sh` rejects
-missing DRC bindings, a mutable image reference, the wrong source SHA, or
-partial Identity configuration.
+resource identifiers. Do not put secret values in the file. `preflight.sh`
+rejects unapproved PostgreSQL reuse, missing VPC settings, a mutable image
+reference, the wrong source SHA, or partial Identity configuration.
 
-The public VeFaaS API describes ordinary environment values but does not expose
-a KMS Secret reference field. Database credentials, the Admin Token, the
-Runtime API Key, the encryption key, and TOS credentials must therefore be
-injected through the approved DRC/secret binding before a function is released.
-Plaintext secret values in `Envs` are prohibited.
+VeFaaS injects the bound role's temporary credentials into Web requests as
+`x-faas-*` headers. The thin bootstrap proxy reads the dedicated KMS Secret
+with those credentials, exports an allow-listed set of values only in the
+OpenConnector child process, strips the platform credential headers, and
+forwards the request. Plaintext secret values in function `Envs` are prohibited.
 
 Identity is optional for the first corrected deployment. If issuer, audience,
 JWKS URI, UserPool, and Client are not all approved and available, deploy and
@@ -46,16 +49,17 @@ external blocker.
 
 ## Release
 
-After DRC resources and bindings are approved:
+After PostgreSQL reuse and the cloud write set are approved:
 
 1. Run `preflight.sh`.
-2. Run `deploy-vefaas.sh`. New function IDs are printed before the script stops
-   for DRC secret binding. Add those IDs to the external config, bind the
-   approved resources, then rerun to update and release with `MinInstance=1`.
-3. Create a dedicated HTTPS APIG service and two VeFaaS upstreams. Record their
+2. Build and push the thin bootstrap image derived from the corrected digest.
+3. Create the dedicated KMS Secret, IAM policy/role, database/account and
+   VeFaaS network security group.
+4. Run `deploy-vefaas.sh` to create/update and release with `MinInstance=1`.
+5. Create a dedicated HTTPS APIG service and two VeFaaS upstreams. Record their
    IDs, run `create-apig-upstreams.sh` when only upstreams are missing, then run
    `deploy-apig.sh` to create the four path routes.
-4. Run `verify.sh` with a mode-0600 Runtime API Key file.
+6. Run `verify.sh` with a mode-0600 Runtime API Key file.
 
 All Volcengine calls use `---profile default`. VeFaaS releases use rolling
 traffic. `rollback.sh` releases the previous recorded revisions. Evidence
