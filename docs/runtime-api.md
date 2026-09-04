@@ -66,6 +66,12 @@ authentication coexists with existing runtime tokens and does not apply to admin
 [Configuration](configuration.md#jwt-access-tokens) for the resource-server scope and Node-only
 limitations.
 
+For user OAuth deployments, configure the persisted identity provider through
+`PUT /api/identity-provider`. The strict UserPool profile uses `sub`,
+`identity_userpool_group_uids`, `typ=access_token`, an approved bridge client ID, required `nbf`,
+and the audience observed in a real Access Token. User and group AccessGrants then control the
+connections and Actions returned by MCP discovery and accepted by execution.
+
 Admin endpoints under `/api/*`, `/docs`, and the Web Console use `OOMOL_CONNECT_ADMIN_TOKEN` when it
 is configured.
 

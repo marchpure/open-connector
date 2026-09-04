@@ -132,6 +132,79 @@ describe("createRuntimeJwtVerifier", () => {
     });
   });
 
+  it("enforces RS256 access-token, approved client, nbf, and group UID claims", async () => {
+    const strict = createRuntimeJwtVerifier({
+      jwksUri,
+      issuer,
+      audience,
+      userPoolRef: "pool-a",
+      groupsClaim: "identity_userpool_group_uids",
+      allowedClientIds: ["bridge-client"],
+      tokenTypeClaim: "typ",
+      tokenType: "access_token",
+      requireGroupsClaim: true,
+      requireNbf: true,
+      requireUserPoolRefInIssuer: false,
+    });
+    if (!strict) throw new Error("JWT verifier was not configured.");
+
+    await expect(
+      strict(
+        await signToken({
+          notBefore: "0s",
+          claims: {
+            sub: "user-a",
+            client_id: "bridge-client",
+            typ: "access_token",
+            identity_userpool_group_uids: ["group-readers"],
+          },
+        }),
+      ),
+    ).resolves.toMatchObject({ sub: "user-a", groups: ["group-readers"], userPoolRef: "pool-a" });
+
+    for (const claims of [
+      {
+        sub: "user-a",
+        client_id: "wrong-client",
+        typ: "access_token",
+        identity_userpool_group_uids: ["group-readers"],
+      },
+      {
+        sub: "user-a",
+        client_id: "bridge-client",
+        typ: "id_token",
+        identity_userpool_group_uids: ["group-readers"],
+      },
+      { sub: "user-a", client_id: "bridge-client", typ: "access_token" },
+    ]) {
+      await expect(strict(await signToken({ notBefore: "0s", claims }))).resolves.toBeUndefined();
+    }
+    await expect(
+      strict(
+        await signToken({
+          claims: {
+            sub: "user-a",
+            client_id: "bridge-client",
+            typ: "access_token",
+            identity_userpool_group_uids: ["group-readers"],
+          },
+        }),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("binds an Agent Identity issuer to the configured UserPool UID", async () => {
+    const strict = createRuntimeJwtVerifier({
+      jwksUri,
+      issuer,
+      audience,
+      userPoolRef: "different-pool",
+      requireUserPoolRefInIssuer: true,
+    });
+    if (!strict) throw new Error("JWT verifier was not configured.");
+    await expect(strict(await signToken())).resolves.toBeUndefined();
+  });
+
   it("rejects cross-tenant tokens", async () => {
     const verifier = createRuntimeJwtVerifier({
       jwksUri,

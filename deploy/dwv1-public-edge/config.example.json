@@ -1,10 +1,9 @@
 {
   "profile": "default",
   "region": "cn-beijing",
-  "sourceSha": "20b966a0bdcbbcef55d8cba33ef5c380b2502efe",
-  "baseImage": "idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service@sha256:d853446c637643990677feb7bbe21b24acd78e9a21446cc00a75e201ed942583",
-  "image": "idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service:corrected-20b966a0bdcbbcef-kms-bootstrap-r3",
-  "imageDigest": "sha256:18aa05b29b2374ec721500c82611f83373118e4b4668b8a34688324383f689bf",
+  "sourceSha": "",
+  "image": "idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service:dwv1-w41-<source-sha-12>",
+  "imageDigest": "",
   "controlPlane": {
     "name": "dwv1-openconnector-control-plane-dev",
     "functionId": "6fmb81qa",
@@ -72,6 +71,11 @@
     "audience": "",
     "jwksUri": "",
     "userPoolRef": "",
-    "clientRef": ""
+    "clientRef": "",
+    "oauthCompatEnabled": false,
+    "upstreamIssuer": "",
+    "clientId": "",
+    "scopes": "openid profile email offline_access",
+    "allowedRedirectUris": ""
   }
 }

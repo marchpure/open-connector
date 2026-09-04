@@ -3,6 +3,24 @@ import { describe, expect, it, vi } from "vitest";
 import { createLocalAuthMiddleware } from "./auth.ts";
 
 describe("createLocalAuthMiddleware", () => {
+  it("advertises OAuth protected-resource metadata for unauthenticated MCP requests", async () => {
+    const app = new Hono();
+    app.use(
+      "*",
+      createLocalAuthMiddleware({
+        verifyRuntimeJwt: async () => undefined,
+        oauthResourceMetadataUrl: "https://connector.example.com/.well-known/oauth-protected-resource/mcp",
+      }),
+    );
+    app.post("/mcp", (context) => context.json({ ok: true }));
+
+    const response = await app.request("/mcp", { method: "POST" });
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe(
+      'Bearer resource_metadata="https://connector.example.com/.well-known/oauth-protected-resource/mcp"',
+    );
+  });
+
   it("fails closed when a runtime token resolver is configured without a token-count callback", async () => {
     const app = new Hono();
     app.use(

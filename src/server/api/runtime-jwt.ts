@@ -12,6 +12,12 @@ export interface RuntimeJwtConfig {
   groupsClaim?: string;
   tenantClaim?: string;
   tenant?: string;
+  allowedClientIds?: string[];
+  tokenTypeClaim?: string;
+  tokenType?: string;
+  requireGroupsClaim?: boolean;
+  requireNbf?: boolean;
+  requireUserPoolRefInIssuer?: boolean;
 }
 
 export type RuntimeJwtVerifier = (token: string) => Promise<RuntimeSubject | boolean | undefined>;
@@ -51,7 +57,15 @@ export function createRuntimeJwtVerifier(config: RuntimeJwtConfig): RuntimeJwtVe
   const jwks = createRemoteJWKSet(url);
   return async (token) => {
     try {
-      const verified = await jwtVerify(token, jwks, { issuer, audience, requiredClaims: ["exp"] });
+      const requiredClaims = ["exp", "sub"];
+      if (config.requireNbf) requiredClaims.push("nbf");
+      if (config.tokenTypeClaim) requiredClaims.push(config.tokenTypeClaim);
+      const verified = await jwtVerify(token, jwks, {
+        algorithms: ["RS256"],
+        issuer,
+        audience,
+        requiredClaims,
+      });
       return resolveSubject(verified.payload, {
         issuer,
         audience,
@@ -61,6 +75,12 @@ export function createRuntimeJwtVerifier(config: RuntimeJwtConfig): RuntimeJwtVe
         groupsClaim: config.groupsClaim?.trim() || "groups",
         tenantClaim: config.tenantClaim?.trim(),
         tenant: config.tenant?.trim(),
+        allowedClientIds: normalizeStringList(config.allowedClientIds),
+        tokenTypeClaim: config.tokenTypeClaim?.trim(),
+        tokenType: config.tokenType?.trim(),
+        requireGroupsClaim: config.requireGroupsClaim,
+        requireNbf: config.requireNbf,
+        requireUserPoolRefInIssuer: config.requireUserPoolRefInIssuer,
       });
     } catch {
       return undefined;
@@ -93,6 +113,12 @@ export function createRuntimeJwtVerifierFromIdentityConfig(
           groupsClaim: config.groupsClaim,
           tenantClaim: config.tenantClaim,
           tenant: config.tenant,
+          allowedClientIds: config.allowedClientIds,
+          tokenTypeClaim: config.tokenTypeClaim,
+          tokenType: config.tokenType,
+          requireGroupsClaim: config.requireGroupsClaim,
+          requireNbf: config.requireNbf,
+          requireUserPoolRefInIssuer: config.requireUserPoolRefInIssuer,
         }),
       };
     }
@@ -113,6 +139,14 @@ function createRequiredRuntimeJwtVerifier(
 function resolveSubject(payload: JWTPayload, config: IdentityProviderConfig): RuntimeSubject | undefined {
   const sub = readStringClaim(payload, config.subjectClaim);
   if (!sub) return undefined;
+  if (config.tokenTypeClaim && readStringClaim(payload, config.tokenTypeClaim) !== config.tokenType) return undefined;
+  const clientId = readStringClaim(payload, "client_id") ?? readStringClaim(payload, "azp");
+  if (config.allowedClientIds?.length && (!clientId || !config.allowedClientIds.includes(clientId))) return undefined;
+  if (config.requireNbf && typeof payload.nbf !== "number") return undefined;
+  if (config.requireGroupsClaim && !Array.isArray(payload[config.groupsClaim])) return undefined;
+  if (config.requireUserPoolRefInIssuer && !issuerContainsUserPoolRef(config.issuer, config.userPoolRef)) {
+    return undefined;
+  }
   const tenant = config.tenantClaim ? readStringClaim(payload, config.tenantClaim) : config.tenant;
   if (config.tenant && tenant !== config.tenant) return undefined;
   return {
@@ -123,6 +157,20 @@ function resolveSubject(payload: JWTPayload, config: IdentityProviderConfig): Ru
     sub,
     groups: readGroupsClaim(payload, config.groupsClaim),
   };
+}
+
+function normalizeStringList(values: string[] | undefined): string[] | undefined {
+  const normalized = [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))];
+  return normalized.length ? normalized : undefined;
+}
+
+function issuerContainsUserPoolRef(issuer: string, userPoolRef: string): boolean {
+  try {
+    const hostname = new URL(issuer).hostname.toLowerCase();
+    return hostname.startsWith(`userpool-${userPoolRef.toLowerCase()}.`);
+  } catch {
+    return false;
+  }
 }
 
 function readStringClaim(payload: JWTPayload, claim: string): string | undefined {

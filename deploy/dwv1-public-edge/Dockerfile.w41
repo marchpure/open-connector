@@ -1,0 +1,42 @@
+FROM node:24-bookworm-slim@sha256:6642ef280aebc09c4541bee0b15c9f89f0f3f3c247ddee79ae1d37eddfdcbbaa AS app-builder
+WORKDIR /app
+COPY package.json package-lock.json tsconfig.json vitest.config.ts ./
+COPY web ./web
+COPY src ./src
+COPY scripts ./scripts
+COPY examples ./examples
+RUN npm ci --ignore-scripts
+RUN npm run generate:catalog
+RUN npm run build
+RUN npm run build --workspace web
+
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS bootstrap-builder
+WORKDIR /build
+COPY deploy/dwv1-public-edge/bootstrap/package.json deploy/dwv1-public-edge/bootstrap/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
+
+FROM node:24-bookworm-slim@sha256:6642ef280aebc09c4541bee0b15c9f89f0f3f3c247ddee79ae1d37eddfdcbbaa
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOST=0.0.0.0
+ENV OOMOL_CONNECT_DATA_DIR=/app/data
+COPY package.json package-lock.json ./
+COPY scripts/healthcheck.ts ./scripts/healthcheck.ts
+COPY scripts/ensure-generated.ts ./scripts/ensure-generated.ts
+COPY scripts/runtime-data.ts ./scripts/runtime-data.ts
+COPY migrations ./migrations
+COPY --from=app-builder /app/src ./src
+COPY --from=app-builder /app/catalog ./catalog
+COPY --from=app-builder /app/dist ./dist
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/open-connector
+RUN npm ci --omit=dev --ignore-scripts \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+
+WORKDIR /opt/dwv1-bootstrap
+COPY deploy/dwv1-public-edge/bootstrap/package.json deploy/dwv1-public-edge/bootstrap/package-lock.json ./
+COPY --from=bootstrap-builder /build/node_modules ./node_modules
+COPY deploy/dwv1-public-edge/bootstrap/server.mjs ./
+
+ENTRYPOINT ["node", "/opt/dwv1-bootstrap/server.mjs"]
+CMD []

@@ -8,8 +8,7 @@ const credentialPort = readPort("DWV1_CREDENTIAL_PORT", 18081);
 const secretName = requiredEnv("DWV1_KMS_SECRET_NAME");
 const role = requiredEnv("DWV1_OPENCONNECTOR_ROLE");
 const allowedRoles = new Set(["control-plane", "mcp-runtime"]);
-if (!allowedRoles.has(role))
-  throw new Error("Invalid DWV1_OPENCONNECTOR_ROLE.");
+if (!allowedRoles.has(role)) throw new Error("Invalid DWV1_OPENCONNECTOR_ROLE.");
 
 const allowedSecretKeys = new Set([
   "OOMOL_CONNECT_DATABASE_URL",
@@ -29,6 +28,13 @@ const allowedSecretKeys = new Set([
   "OOMOL_CONNECT_JWT_ISSUER",
   "OOMOL_CONNECT_JWT_AUDIENCE",
   "OOMOL_CONNECT_JWT_USER_POOL_REF",
+  "OPENCONNECTOR_OAUTH_COMPAT_ENABLED",
+  "OPENCONNECTOR_OAUTH_UPSTREAM_ISSUER",
+  "OPENCONNECTOR_OAUTH_CLIENT_ID",
+  "OPENCONNECTOR_OAUTH_CLIENT_SECRET",
+  "OPENCONNECTOR_OAUTH_STATE_SECRET",
+  "OPENCONNECTOR_OAUTH_SCOPES",
+  "OPENCONNECTOR_OAUTH_ALLOWED_REDIRECT_URIS",
   "TOS_CREDENTIAL_SOURCE",
 ]);
 const requiredSecretKeys = [
@@ -37,11 +43,7 @@ const requiredSecretKeys = [
   "OOMOL_CONNECT_RUNTIME_TOKEN",
   "OOMOL_CONNECT_ENCRYPTION_KEY",
 ];
-const strippedHeaders = new Set([
-  "x-faas-access-key-id",
-  "x-faas-secret-access-key",
-  "x-faas-session-token",
-]);
+const strippedHeaders = new Set(["x-faas-access-key-id", "x-faas-secret-access-key", "x-faas-session-token"]);
 
 let ready;
 let currentCredentials;
@@ -80,10 +82,7 @@ const server = http.createServer(async (request, response) => {
       "cache-control": "no-store",
     });
     response.end(JSON.stringify({ error: "service_initialization_failed" }));
-    console.error(
-      "OpenConnector bootstrap failed:",
-      error instanceof Error ? error.message : "unknown error",
-    );
+    console.error("OpenConnector bootstrap failed:", error instanceof Error ? error.message : "unknown error");
   }
 });
 
@@ -104,21 +103,16 @@ async function bootstrap(headers) {
     secretAccessKey,
     sessionToken,
   });
-  const output = await client.send(
-    new GetSecretValueCommand({ SecretName: secretName }),
-  );
+  const output = await client.send(new GetSecretValueCommand({ SecretName: secretName }));
   const value = output.SecretValue ?? output.Result?.SecretValue;
-  if (typeof value !== "string")
-    throw new Error("KMS Secret value is missing.");
+  if (typeof value !== "string") throw new Error("KMS Secret value is missing.");
   const secrets = JSON.parse(value);
   if (!secrets || typeof secrets !== "object" || Array.isArray(secrets)) {
     throw new Error("KMS Secret must be a JSON object.");
   }
   for (const key of Object.keys(secrets)) {
-    if (!allowedSecretKeys.has(key))
-      throw new Error(`Unexpected KMS Secret key: ${key}`);
-    if (typeof secrets[key] !== "string" || !secrets[key])
-      throw new Error(`Invalid KMS Secret key: ${key}`);
+    if (!allowedSecretKeys.has(key)) throw new Error(`Unexpected KMS Secret key: ${key}`);
+    if (typeof secrets[key] !== "string" || !secrets[key]) throw new Error(`Invalid KMS Secret key: ${key}`);
   }
   for (const key of requiredSecretKeys) {
     if (!secrets[key]) throw new Error(`Missing KMS Secret key: ${key}`);
@@ -141,9 +135,7 @@ async function bootstrap(headers) {
     stdio: "inherit",
   });
   child.once("exit", (code, signal) => {
-    console.error(
-      `OpenConnector exited: code=${code ?? "null"} signal=${signal ?? "null"}`,
-    );
+    console.error(`OpenConnector exited: code=${code ?? "null"} signal=${signal ?? "null"}`);
     process.exit(code ?? 1);
   });
   await waitUntilReady();
@@ -159,15 +151,13 @@ async function runMigration(secrets) {
     child.once("error", reject);
     child.once("exit", (exitCode) => resolve(exitCode));
   });
-  if (code !== 0)
-    throw new Error(`Database migration failed with exit code ${code}.`);
+  if (code !== 0) throw new Error(`Database migration failed with exit code ${code}.`);
 }
 
 function proxy(request, response) {
   const headers = {};
   for (const [key, value] of Object.entries(request.headers)) {
-    if (!strippedHeaders.has(key.toLowerCase()) && value !== undefined)
-      headers[key] = value;
+    if (!strippedHeaders.has(key.toLowerCase()) && value !== undefined) headers[key] = value;
   }
   headers.host = `127.0.0.1:${internalPort}`;
 
@@ -189,8 +179,7 @@ function proxy(request, response) {
     },
   );
   upstream.on("error", () => {
-    if (!response.headersSent)
-      response.writeHead(502, { "cache-control": "no-store" });
+    if (!response.headersSent) response.writeHead(502, { "cache-control": "no-store" });
     response.end();
   });
   request.pipe(upstream);
@@ -215,8 +204,7 @@ function requiredEnv(name) {
 
 function readPort(name, fallback) {
   const value = Number(process.env[name] ?? fallback);
-  if (!Number.isInteger(value) || value < 1 || value > 65535)
-    throw new Error(`Invalid ${name}.`);
+  if (!Number.isInteger(value) || value < 1 || value > 65535) throw new Error(`Invalid ${name}.`);
   return value;
 }
 

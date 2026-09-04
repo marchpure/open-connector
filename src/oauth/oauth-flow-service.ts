@@ -40,6 +40,15 @@ export interface OAuthAuthorizationState {
   createdAt: string;
   pkceCodeVerifier?: string;
   clientConfig?: OAuthClientConfig;
+  oauthCompat?: {
+    clientId: string;
+    redirectUri: string;
+    downstreamState: string;
+    codeChallenge: string;
+    codeChallengeMethod: "S256";
+    nonce: string;
+    upstreamAuthorizationCode?: string;
+  };
 }
 
 export interface OAuthFlowServiceOptions {

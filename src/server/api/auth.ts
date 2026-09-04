@@ -23,6 +23,7 @@ export interface LocalAuthOptions {
   hasRuntimeJwtConfig?(): Promise<boolean>;
   resolveRuntimeToken?(token: string): Promise<RuntimeGrant | undefined>;
   verifyRuntimeJwt?: RuntimeJwtVerifier;
+  oauthResourceMetadataUrl?: string;
 }
 
 export interface LocalAuthSession {
@@ -97,6 +98,9 @@ export function createLocalAuthMiddleware(options: LocalAuthOptions): Middleware
       return;
     }
 
+    if (scope === "runtime" && options.oauthResourceMetadataUrl) {
+      context.header("WWW-Authenticate", `Bearer resource_metadata="${options.oauthResourceMetadataUrl}"`);
+    }
     return jsonError(context, 401, "unauthorized", "A valid local bearer token is required.");
   };
 }

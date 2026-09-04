@@ -1221,6 +1221,18 @@ function identityProviderConfigSchema(): JsonSchema {
       groupsClaim: jsonSchema.nonWhitespaceString("JWT claim containing group membership. Defaults to groups."),
       tenantClaim: jsonSchema.string({ description: "Optional JWT claim containing tenant identity." }),
       tenant: jsonSchema.string({ description: "Optional required tenant value." }),
+      allowedClientIds: jsonSchema.array(jsonSchema.string(), {
+        description: "OAuth client_id or azp values authorized to call the runtime.",
+      }),
+      tokenTypeClaim: jsonSchema.string({ description: "JWT claim identifying the token type." }),
+      tokenType: jsonSchema.string({ description: "Required access-token type value." }),
+      requireGroupsClaim: jsonSchema.boolean({
+        description: "Require the configured groups claim to be an array of stable group UIDs.",
+      }),
+      requireNbf: jsonSchema.boolean({ description: "Require a numeric nbf claim." }),
+      requireUserPoolRefInIssuer: jsonSchema.boolean({
+        description: "Require the Agent Identity issuer hostname to contain the configured UserPool UID.",
+      }),
     },
     {
       required: ["issuer", "audience", "jwksUri", "userPoolRef", "subjectClaim", "groupsClaim"],
@@ -1351,6 +1363,7 @@ function accessAuditRecordSchema(): JsonSchema {
   return jsonSchema.object(
     {
       id: jsonSchema.string({ description: "Audit record identifier." }),
+      requestId: jsonSchema.string({ description: "Inbound or generated request correlation identifier." }),
       subject: { $ref: "#/components/schemas/RuntimeSubject" },
       connectionId: jsonSchema.string({ description: "Evaluated connection id, when present." }),
       actionId: jsonSchema.string({ description: "Evaluated action id, when present." }),
@@ -1358,7 +1371,7 @@ function accessAuditRecordSchema(): JsonSchema {
       createdAt: jsonSchema.dateTime("Audit creation timestamp."),
     },
     {
-      required: ["id", "subject", "decision", "createdAt"],
+      required: ["id", "requestId", "subject", "decision", "createdAt"],
       description: "Stored access policy decision audit record. Raw bearer tokens are not persisted.",
     },
   );

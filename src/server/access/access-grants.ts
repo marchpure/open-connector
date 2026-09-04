@@ -14,6 +14,12 @@ export interface IdentityProviderConfig {
   groupsClaim: string;
   tenantClaim?: string;
   tenant?: string;
+  allowedClientIds?: string[];
+  tokenTypeClaim?: string;
+  tokenType?: string;
+  requireGroupsClaim?: boolean;
+  requireNbf?: boolean;
+  requireUserPoolRefInIssuer?: boolean;
 }
 
 export interface RuntimeSubject {
@@ -56,6 +62,7 @@ export interface AccessPolicyVersion {
 
 export interface AccessAuditRecord {
   id: string;
+  requestId: string;
   subject: RuntimeSubject;
   connectionId?: string;
   actionId?: string;
@@ -139,7 +146,10 @@ export class AccessGrantService {
     return revoked;
   }
 
-  async createSnapshot(subject: RuntimeSubject): Promise<AccessGrantPolicySnapshot> {
+  async createSnapshot(
+    subject: RuntimeSubject,
+    requestId: string = crypto.randomUUID(),
+  ): Promise<AccessGrantPolicySnapshot> {
     const [version, grants] = await Promise.all([this.store.getPolicyVersion(), this.store.listGrants()]);
     await this.store.recordSubject(subject, new Date().toISOString());
     return new AccessGrantPolicySnapshot(
@@ -147,6 +157,7 @@ export class AccessGrantService {
       subject,
       grants.filter((grant) => !grant.revokedAt),
       this,
+      requestId,
     );
   }
 
@@ -172,23 +183,37 @@ export class AccessGrantPolicySnapshot implements AccessPolicySnapshot {
   private readonly subject: RuntimeSubject;
   private readonly grants: AccessGrantRecord[];
   private readonly auditService: AccessGrantService;
+  private readonly requestId: string;
 
-  constructor(version: number, subject: RuntimeSubject, grants: AccessGrantRecord[], auditService: AccessGrantService) {
+  constructor(
+    version: number,
+    subject: RuntimeSubject,
+    grants: AccessGrantRecord[],
+    auditService: AccessGrantService,
+    requestId: string,
+  ) {
     this.version = version;
     this.subject = subject;
     this.grants = grants.filter((grant) => subjectMatchesGrant(subject, grant));
     this.auditService = auditService;
+    this.requestId = requestId;
   }
 
   evaluateConnection(connectionId?: string): ActionPolicyDecision {
     const decision = this.decide(connectionId, undefined);
-    void this.auditService.audit({ subject: this.subject, connectionId, decision });
+    void this.auditService.audit({ requestId: this.requestId, subject: this.subject, connectionId, decision });
     return decision;
   }
 
   evaluateAction(action: ActionDefinition, connectionId?: string): ActionPolicyDecision {
     const decision = this.decide(connectionId, action);
-    void this.auditService.audit({ subject: this.subject, connectionId, actionId: action.id, decision });
+    void this.auditService.audit({
+      requestId: this.requestId,
+      subject: this.subject,
+      connectionId,
+      actionId: action.id,
+      decision,
+    });
     return decision;
   }
 
@@ -291,6 +316,12 @@ function normalizeIdentityProviderConfig(config: IdentityProviderConfig): Identi
     groupsClaim: requiredNonEmpty(config.groupsClaim, "groupsClaim"),
     tenantClaim: normalizeOptionalString(config.tenantClaim),
     tenant: normalizeOptionalString(config.tenant),
+    allowedClientIds: normalizeActions(config.allowedClientIds ?? []),
+    tokenTypeClaim: normalizeOptionalString(config.tokenTypeClaim),
+    tokenType: normalizeOptionalString(config.tokenType),
+    requireGroupsClaim: config.requireGroupsClaim === true,
+    requireNbf: config.requireNbf === true,
+    requireUserPoolRefInIssuer: config.requireUserPoolRefInIssuer === true,
   };
   return normalized;
 }

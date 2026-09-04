@@ -80,7 +80,8 @@
   },
   "overrides": {
     "deepmerge-ts": "^8.0.2",
-    "ip-address": "^10.7.0"
+    "ip-address": "^10.7.0",
+    "nanoid": "^3.3.18"
   },
   "allowScripts": {
     "fsevents@2.3.3": true,

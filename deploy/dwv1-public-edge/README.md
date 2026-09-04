@@ -4,12 +4,10 @@ This directory owns only the dev VeFaaS, KMS, PostgreSQL, TOS, and APIG deployme
 OpenConnector. It does not create or operate ECS, EIP, Caddy, local PostgreSQL,
 MinIO, AgentKit MCP Gateway, or product UI resources.
 
-The immutable source is
-`20b966a0bdcbbcef55d8cba33ef5c380b2502efe`. The immutable image is:
-
-```text
-idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service@sha256:d853446c637643990677feb7bbe21b24acd78e9a21446cc00a75e201ed942583
-```
+W4.1 starts from immutable W4 deployment commit
+`a2d798a1d34a17c97f40aa3365bab2fa62e1f000` and source commit
+`20b966a0bdcbbcef55d8cba33ef5c380b2502efe`. Its release image is built
+from the final W4.1 Git commit with `Dockerfile.w41`, then pinned by digest.
 
 ## Architecture
 
@@ -63,12 +61,30 @@ JWKS URI, UserPool, and Client are not all approved and available, deploy and
 verify the Runtime API Key path, then report Identity/WorkBuddy as the sole
 external blocker.
 
+## WorkBuddy OAuth bridge
+
+W4.1 enables the bridge only after a dedicated UserPool and confidential web
+client exist. The browser-facing WorkBuddy configuration contains only the
+public `/mcp` URL. The client secret is supplied to `provision-sensitive.mjs`
+through the `OPENCONNECTOR_OAUTH_CLIENT_SECRET` process environment and is
+written only to the existing KMS Secret; it must not be placed in the config
+file, Git, logs, evidence, or WorkBuddy.
+
+`identity.allowedRedirectUris` is a comma-separated exact allowlist obtained
+from WorkBuddy's first authorization request. Wildcard `workbuddy:` redirects
+are rejected. Both functions receive the same KMS-backed OAuth metadata, while
+only the control-plane role serves `/.well-known/*` and `/oauth/*`.
+
 ## Release
 
 After PostgreSQL reuse and the cloud write set are approved:
 
 1. Run `preflight.sh`.
-2. Build and push the thin bootstrap image derived from the corrected digest.
+2. Build and push the W4.1 application plus KMS bootstrap image from repository
+   root:
+
+   `docker build -f deploy/dwv1-public-edge/Dockerfile.w41 -t <image> .`
+
 3. Create the dedicated KMS Secret, IAM policy/role, database/account and
    VeFaaS network security group.
 4. Run `deploy-vefaas.sh` to create/update and release with `MinInstance=1`.

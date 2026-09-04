@@ -93,6 +93,7 @@ export interface IConnectServerOptions {
   runtimePolicyStore: IRuntimePolicyStore;
   actionSearch?: ActionSearchIndexProvider;
   accessGrants?: AccessGrantService;
+  registerPreAuthRoutes?: (app: Hono) => void;
   registerStaticRoutes?: (app: Hono) => void;
   logger?: Logger;
   compressApiResponses?: boolean;
@@ -153,6 +154,7 @@ export class ConnectServer {
       // (e.g. transit file downloads).
       app.use("/api/*", compress());
     }
+    this.options.registerPreAuthRoutes?.(app);
     app.use("*", createLocalAuthMiddleware(auth));
     if (controlPlaneEnabled && this.options.marketplace) {
       app.get("/api/marketplace", (context) => context.json(this.options.marketplace!.getState()));
@@ -1402,7 +1404,9 @@ export class ConnectServer {
       const record = await this.options.runtimePolicyStore.get();
       const subject = readRuntimeSubject(context);
       const access =
-        subject && this.options.accessGrants ? await this.options.accessGrants.createSnapshot(subject) : undefined;
+        subject && this.options.accessGrants
+          ? await this.options.accessGrants.createSnapshot(subject, readRequestId(context))
+          : undefined;
       return this.actionPolicy.createSnapshot(
         record?.rules ?? emptyPolicyRules(),
         readRuntimeGrant(context),
@@ -1471,6 +1475,14 @@ export class ConnectServer {
   }
 }
 
+function readRequestId(context: Context): string {
+  for (const name of ["x-request-id", "x-faas-request-id"]) {
+    const value = context.req.header(name)?.trim();
+    if (value && value.length <= 256) return value;
+  }
+  return crypto.randomUUID();
+}
+
 function readOAuthClientConfigInput(body: Record<string, unknown>): OAuthClientConfigInput | undefined {
   const keys = ["clientId", "clientSecret", "requestedScopes", "extra", "secretExtra"];
   if (!keys.some((key) => key in body)) {
@@ -1509,6 +1521,21 @@ function readIdentityProviderConfig(body: Record<string, unknown>): IdentityProv
       optionalString(body.groupsClaim ?? body.groupClaim ?? body.groups_claim ?? body.group_claim) ?? "groups",
     tenantClaim: optionalString(body.tenantClaim ?? body.tenant_claim),
     tenant: optionalString(body.tenant),
+    allowedClientIds: readOptionalStringList(body.allowedClientIds ?? body.allowed_client_ids),
+    tokenTypeClaim: optionalString(body.tokenTypeClaim ?? body.token_type_claim),
+    tokenType: optionalString(body.tokenType ?? body.token_type),
+    requireGroupsClaim:
+      typeof (body.requireGroupsClaim ?? body.require_groups_claim) === "boolean"
+        ? Boolean(body.requireGroupsClaim ?? body.require_groups_claim)
+        : undefined,
+    requireNbf:
+      typeof (body.requireNbf ?? body.require_nbf) === "boolean"
+        ? Boolean(body.requireNbf ?? body.require_nbf)
+        : undefined,
+    requireUserPoolRefInIssuer:
+      typeof (body.requireUserPoolRefInIssuer ?? body.require_user_pool_ref_in_issuer) === "boolean"
+        ? Boolean(body.requireUserPoolRefInIssuer ?? body.require_user_pool_ref_in_issuer)
+        : undefined,
   };
 }
 

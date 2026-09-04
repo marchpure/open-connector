@@ -19,6 +19,7 @@ for role in controlPlane mcpRuntime; do
     --arg role_trn "$(jq -r '.kms.roleTrn' "$config")" \
     --arg openconnector_role "$openconnector_role" \
     --arg source_sha "$(jq -r '.sourceSha' "$config")" \
+    --arg public_origin "$(jq -r '.apig.publicOrigin' "$config")" \
     --argjson port "$(jq '.runtime.port' "$config")" \
     --argjson timeout "$(jq '.runtime.requestTimeout' "$config")" \
     --argjson cpu "$(jq '.runtime.cpuMilli' "$config")" \
@@ -48,6 +49,7 @@ for role in controlPlane mcpRuntime; do
         {Key: "DWV1_KMS_SECRET_NAME", Value: $secret_name},
         {Key: "DWV1_OPENCONNECTOR_ROLE", Value: $openconnector_role},
         {Key: "DWV1_INTERNAL_PORT", Value: "3000"}
+        ,{Key: "OOMOL_CONNECT_ORIGIN", Value: $public_origin}
       ],
       TosMountConfig: {EnableTos: false},
       NasStorage: {EnableNas: false},
@@ -78,6 +80,6 @@ for role in controlPlane mcpRuntime; do
     --MaxInstance "$(jq -r '.runtime.maxInstance' "$config")" \
     --RollingStep 25 \
     --TargetTrafficWeight 100 \
-    --Description "DWV1 corrected 20b966a0bdcbbcef" \
+    --Description "DWV1 W4.1 $(jq -r '.sourceSha' "$config" | cut -c1-16)" \
     ---profile default
 done

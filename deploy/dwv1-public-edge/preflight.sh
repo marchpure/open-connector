@@ -2,8 +2,8 @@
 set -eu
 
 config=${1:?usage: preflight.sh CONFIG_JSON}
-expected_source=20b966a0bdcbbcef55d8cba33ef5c380b2502efe
-expected_digest=sha256:d853446c637643990677feb7bbe21b24acd78e9a21446cc00a75e201ed942583
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+expected_source=$(git -C "$root" rev-parse HEAD)
 expected_registry=idv-order-discount-agent-test-cn-beijing.cr.volces.com
 
 fail() {
@@ -15,12 +15,10 @@ test -f "$config" || fail "configuration file does not exist"
 test "$(jq -r '.profile' "$config")" = default || fail "profile must be default"
 test "$(jq -r '.region' "$config")" = cn-beijing || fail "region must be cn-beijing"
 test "$(jq -r '.sourceSha' "$config")" = "$expected_source" || fail "source SHA mismatch"
-test "$(jq -r '.baseImage' "$config")" = "$expected_registry/idv-order-discount-agent-test/knowledge-dev-connection-service@$expected_digest" ||
-  fail "base image must use the corrected registry digest"
 image=$(jq -r '.image' "$config")
 printf '%s' "$image" |
-  grep -Eq "^$expected_registry/idv-order-discount-agent-test/knowledge-dev-connection-service:corrected-20b966a0bdcbbcef-kms-bootstrap(-r[0-9]+)?$" ||
-  fail "VeFaaS image must use the unique corrected bootstrap tag"
+  grep -Eq "^$expected_registry/idv-order-discount-agent-test/knowledge-dev-connection-service:dwv1-w41-[a-f0-9]{12}(-r[0-9]+)?$" ||
+  fail "VeFaaS image must use a unique dwv1-w41 source tag"
 printf '%s' "$(jq -r '.imageDigest' "$config")" |
   grep -Eq '^sha256:[a-f0-9]{64}$' || fail "bootstrap registry digest is missing"
 
@@ -59,6 +57,17 @@ fi
 identity_count=$(jq '[.identity.issuer,.identity.audience,.identity.jwksUri,.identity.userPoolRef,.identity.clientRef] | map(select(length > 0)) | length' "$config")
 test "$identity_count" = 0 || test "$identity_count" = 5 ||
   fail "identity settings must be entirely empty or entirely populated"
+if test "$(jq -r '.identity.oauthCompatEnabled' "$config")" = true; then
+  test "$identity_count" = 5 || fail "OAuth compatibility requires complete identity settings"
+  for path in .identity.upstreamIssuer .identity.clientId .identity.scopes .identity.allowedRedirectUris; do
+    test -n "$(jq -r "$path // empty" "$config")" || fail "$path is required for OAuth compatibility"
+  done
+  test "$(jq -r '.identity.clientId' "$config")" = "$(jq -r '.identity.clientRef' "$config")" ||
+    fail "OAuth clientId and identity clientRef must match"
+  printf '%s' "$(jq -r '.identity.allowedRedirectUris' "$config")" |
+    grep -Eq '^workbuddy://workbuddy/mcp/custom-mcp%3A[^,[:space:]]+/oauth/callback(,workbuddy://workbuddy/mcp/custom-mcp%3A[^,[:space:]]+/oauth/callback)*$' ||
+    fail "WorkBuddy redirect allowlist must contain exact connector callback URIs"
+fi
 
 printf 'PREFLIGHT_READY'
 test "$identity_count" = 5 && printf ' IDENTITY_CONFIGURED\n' || printf ' IDENTITY_PENDING\n'

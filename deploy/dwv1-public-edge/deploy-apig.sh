@@ -41,6 +41,8 @@ create_route() {
 }
 
 create_route dwv1-mcp /mcp 10 "$runtime_upstream"
-create_route dwv1-runtime-v1 /v1/ 20 "$runtime_upstream"
-create_route dwv1-control-api /api/ 30 "$control_upstream"
+create_route dwv1-oauth-metadata /.well-known/ 20 "$control_upstream"
+create_route dwv1-oauth-bridge /oauth/ 30 "$control_upstream"
+create_route dwv1-runtime-v1 /v1/ 40 "$runtime_upstream"
+create_route dwv1-control-api /api/ 50 "$control_upstream"
 create_route dwv1-console / 100 "$control_upstream"

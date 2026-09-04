@@ -936,6 +936,7 @@ describe("SqliteRuntimeDatabase", () => {
     await first.accessGrantStore.recordSubject(subject, "2026-09-04T00:01:00.000Z");
     await first.accessGrantStore.addAudit({
       id: "audit-1",
+      requestId: "request-1",
       subject,
       connectionId: "connection-1",
       actionId: "example.echo",
