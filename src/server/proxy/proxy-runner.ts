@@ -116,7 +116,9 @@ export class ProxyRunner {
     try {
       const connection = await this.options.connections.getConnectionSummary(provider.service, input.connectionName);
       const connectionDecision =
-        connection?.authType === "no_auth" ? undefined : snapshot?.evaluateConnection(connection?.id);
+        connection?.authType === "no_auth" && !snapshot?.enforcesAccessGrants
+          ? undefined
+          : snapshot?.evaluateConnection(connection?.id);
       if (connectionDecision && !connectionDecision.allowed) {
         return {
           ok: false,

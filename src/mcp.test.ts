@@ -206,6 +206,56 @@ describe("MCP server", () => {
     );
   });
 
+  it("requires AccessGrants for virtual no-auth connections in user mode", async () => {
+    const policy = new ActionPolicyService().createSnapshot(emptyPolicyRules(), undefined, undefined, {
+      version: 1,
+      evaluateConnection() {
+        return {
+          allowed: false,
+          code: "connection_not_allowed",
+          message: "connection is not granted",
+          checks: [{ source: "access_grant", outcome: "allow_miss", policyVersion: 1 }],
+        };
+      },
+      evaluateAction() {
+        return {
+          allowed: false,
+          code: "action_not_allowed",
+          message: "action is not granted",
+          checks: [{ source: "access_grant", outcome: "allow_miss", policyVersion: 1 }],
+        };
+      },
+    });
+    const loadActionExecutor = vi.spyOn(EchoProviderLoader.prototype, "loadActionExecutor");
+    await withMcpClient(
+      async (client) => {
+        const connections = await client.callTool({
+          name: "list_connections",
+          arguments: { service: "example" },
+        });
+        expect(connections.structuredContent).toMatchObject({ ok: true, data: [] });
+
+        const actions = await client.callTool({
+          name: "search_actions",
+          arguments: { query: "echo", service: "example", limit: 10 },
+        });
+        expect(actions.structuredContent).toMatchObject({ ok: true, data: [] });
+
+        const execution = await client.callTool({
+          name: "execute_action",
+          arguments: { actionId: "example.echo", input: { message: "blocked" } },
+        });
+        expect(execution.structuredContent).toMatchObject({
+          ok: false,
+          error: { code: "connection_not_allowed" },
+        });
+      },
+      { getPolicySnapshot: async () => policy },
+    );
+    expect(loadActionExecutor).not.toHaveBeenCalled();
+    loadActionExecutor.mockRestore();
+  });
+
   it("uses an explicitly selected connection for guides and execution", async () => {
     const runs = new MemoryRunLogStore();
     await withAuthenticatedMcpClient(async (client) => {

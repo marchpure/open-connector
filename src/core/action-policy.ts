@@ -89,6 +89,7 @@ interface CompiledLayer {
  */
 export class ActionPolicySnapshot {
   readonly state: RuntimePolicyState;
+  readonly enforcesAccessGrants: boolean;
   private readonly layers: CompiledLayer[];
   private readonly proxyLayers: CompiledLayer[];
   private readonly tokenProxyRules?: CompiledRule[];
@@ -114,6 +115,7 @@ export class ActionPolicySnapshot {
     this.layers = [...this.proxyLayers];
     this.allowedConnections = Object.freeze([...(token?.allowedConnections ?? [])]);
     this.access = access;
+    this.enforcesAccessGrants = access !== undefined;
     if (token) {
       const tokenRules = immutablePolicyRules({
         allowedActions: token.allowedActions,

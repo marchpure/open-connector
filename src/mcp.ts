@@ -269,7 +269,11 @@ async function listConnections(options: IMcpServerOptions, service: string | und
       : await options.connections.listConnections();
     return successPayload(
       connections
-        .filter((connection) => connection.authType === "no_auth" || policy.evaluateConnection(connection.id).allowed)
+        .filter(
+          (connection) =>
+            (connection.authType === "no_auth" && !policy.enforcesAccessGrants) ||
+            policy.evaluateConnection(connection.id).allowed,
+        )
         .map(serializeConnection),
     );
   } catch (error) {
@@ -535,7 +539,9 @@ function evaluateConnectionGrant(
   policy: ActionPolicySnapshot,
   connection: ConnectionSummary | undefined,
 ): ActionPolicyDecision {
-  return connection?.authType === "no_auth" ? { allowed: true, checks: [] } : policy.evaluateConnection(connection?.id);
+  return connection?.authType === "no_auth" && !policy.enforcesAccessGrants
+    ? { allowed: true, checks: [] }
+    : policy.evaluateConnection(connection?.id);
 }
 
 async function allowedConnections(
@@ -543,7 +549,9 @@ async function allowedConnections(
   policy: ActionPolicySnapshot,
 ): Promise<ConnectionSummary[]> {
   return (await options.connections.listConnections()).filter(
-    (connection) => connection.authType === "no_auth" || policy.evaluateConnection(connection.id).allowed,
+    (connection) =>
+      (connection.authType === "no_auth" && !policy.enforcesAccessGrants) ||
+      policy.evaluateConnection(connection.id).allowed,
   );
 }
 

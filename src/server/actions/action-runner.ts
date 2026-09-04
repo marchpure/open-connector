@@ -86,13 +86,17 @@ export class ActionRunner {
         const summary = await this.options.connections.getConnectionSummary(action.service, input.connectionName);
         input.signal?.throwIfAborted();
         const connectionPolicy =
-          summary?.authType === "no_auth" ? undefined : snapshot?.evaluateConnection(summary?.id);
+          summary?.authType === "no_auth" && !snapshot?.enforcesAccessGrants
+            ? undefined
+            : snapshot?.evaluateConnection(summary?.id);
         if (connectionPolicy && !connectionPolicy.allowed) {
           policy = connectionPolicy;
           result = { ok: false, error: { code: policy.code, message: policy.message } };
         } else {
           const actionConnectionPolicy =
-            summary?.authType === "no_auth" ? undefined : snapshot?.evaluateActionForConnection(action, summary?.id);
+            summary?.authType === "no_auth" && !snapshot?.enforcesAccessGrants
+              ? undefined
+              : snapshot?.evaluateActionForConnection(action, summary?.id);
           if (actionConnectionPolicy && !actionConnectionPolicy.allowed) {
             policy = actionConnectionPolicy;
             result = { ok: false, error: { code: policy.code, message: policy.message } };
