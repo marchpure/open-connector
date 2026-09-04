@@ -1,0 +1,198 @@
+name: dwv1-w4-public-edge
+
+x-open-connector: &open-connector
+  image: ${OPEN_CONNECTOR_IMAGE:?digest-pinned image required}
+  restart: unless-stopped
+  read_only: true
+  user: "10001:10001"
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  depends_on:
+    postgres:
+      condition: service_healthy
+    object-store-init:
+      condition: service_completed_successfully
+    migrate:
+      condition: service_completed_successfully
+  environment:
+    NODE_ENV: production
+    HOST: 0.0.0.0
+    PORT: "3000"
+    OOMOL_CONNECT_ORIGIN: ${PUBLIC_ORIGIN:?required}
+    OOMOL_CONNECT_DATABASE_URL: ${OOMOL_CONNECT_DATABASE_URL:?required}
+    OOMOL_CONNECT_DATABASE_POOL_MAX: "10"
+    OOMOL_CONNECT_ADMIN_TOKEN: ${OOMOL_CONNECT_ADMIN_TOKEN:?required}
+    OOMOL_CONNECT_RUNTIME_TOKEN: ${OOMOL_CONNECT_RUNTIME_TOKEN:?required}
+    OOMOL_CONNECT_ENCRYPTION_KEY: ${OOMOL_CONNECT_ENCRYPTION_KEY:?required}
+    OOMOL_CONNECT_JWKS_URI: ${IDENTITY_JWKS_URI:-}
+    OOMOL_CONNECT_JWT_ISSUER: ${IDENTITY_ISSUER:-}
+    OOMOL_CONNECT_JWT_AUDIENCE: ${IDENTITY_AUDIENCE:-}
+    OOMOL_CONNECT_JWT_USER_POOL_REF: ${IDENTITY_USER_POOL_REF:-}
+    OOMOL_CONNECT_TRANSIT_FILE_BACKEND: s3
+    OOMOL_CONNECT_S3_BUCKET: open-connector-transit
+    OOMOL_CONNECT_S3_REGION: cn-beijing
+    OOMOL_CONNECT_S3_ENDPOINT: http://object-store:9000
+    OOMOL_CONNECT_S3_FORCE_PATH_STYLE: "true"
+    OOMOL_CONNECT_S3_ACCESS_KEY_ID: ${OOMOL_CONNECT_S3_ACCESS_KEY_ID:?required}
+    OOMOL_CONNECT_S3_SECRET_ACCESS_KEY: ${OOMOL_CONNECT_S3_SECRET_ACCESS_KEY:?required}
+    OOMOL_CONNECT_LOG_LEVEL: info
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=256m
+  expose:
+    - "3000"
+  healthcheck:
+    test:
+      [
+        "CMD",
+        "node",
+        "-e",
+        "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+      ]
+    interval: 10s
+    timeout: 3s
+    retries: 12
+    start_period: 20s
+  stop_grace_period: 30s
+  logging: &rotated-logs
+    driver: local
+    options:
+      max-size: 10m
+      max-file: "5"
+
+services:
+  postgres:
+    image: postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?required}
+      POSTGRES_USER: ${POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    logging: *rotated-logs
+
+  object-store:
+    image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: server /data --console-address :9001
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?required}
+    volumes:
+      - object-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    logging: *rotated-logs
+
+  object-store-init:
+    image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    restart: "no"
+    depends_on:
+      object-store:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?required}
+    entrypoint:
+      - /bin/sh
+      - -euc
+      - |
+        mc alias set local http://object-store:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing local/open-connector-transit
+        mc anonymous set none local/open-connector-transit
+        mc ilm rule add --expire-days 2 local/open-connector-transit || true
+    logging: *rotated-logs
+
+  migrate:
+    image: ${OPEN_CONNECTOR_IMAGE:?digest-pinned image required}
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      OOMOL_CONNECT_DATABASE_URL: ${OOMOL_CONNECT_DATABASE_URL:?required}
+    command: ["migrate"]
+    logging: *rotated-logs
+
+  control-plane:
+    <<: *open-connector
+    command: ["control-plane"]
+    volumes:
+      - ./configure-identity.mjs:/app/configure-identity.mjs:ro
+
+  runtime-blue:
+    profiles: [blue]
+    <<: *open-connector
+    command: ["mcp-runtime"]
+
+  runtime-green:
+    profiles: [green]
+    <<: *open-connector
+    command: ["mcp-runtime"]
+
+  contract:
+    image: node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
+    command: ["node", "/app/contract-backend.mjs"]
+    restart: unless-stopped
+    read_only: true
+    user: "65532:65532"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./contract-backend.mjs:/app/contract-backend.mjs:ro
+    expose:
+      - "3100"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3100/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    logging: *rotated-logs
+
+  caddy:
+    image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    restart: unless-stopped
+    depends_on:
+      control-plane:
+        condition: service_healthy
+      contract:
+        condition: service_healthy
+    environment:
+      RUNTIME_UPSTREAM: ${ACTIVE_SLOT:?blue or green runtime slot}
+    ports:
+      - "80:8080"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /config
+      - /data
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    logging: *rotated-logs
+
+volumes:
+  postgres-data:
+  object-data:

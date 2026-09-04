@@ -1,0 +1,42 @@
+{
+	admin off
+	auto_https off
+	log {
+		output discard
+	}
+}
+
+:8080 {
+	encode zstd gzip
+
+	@contract path /edge-contract/*
+	handle @contract {
+		uri strip_prefix /edge-contract
+		header X-DWV1-Backend "contract-blocked-upstream"
+		header Cache-Control "no-store"
+		reverse_proxy contract:3100 {
+			flush_interval -1
+			transport http {
+				read_timeout 0
+				write_timeout 0
+			}
+		}
+	}
+
+	@runtime path /mcp /mcp/* /v1 /v1/* /api/files/*
+	handle @runtime {
+		header Cache-Control "no-store"
+		reverse_proxy {$RUNTIME_UPSTREAM}:3000 {
+			flush_interval -1
+			transport http {
+				read_timeout 0
+				write_timeout 0
+			}
+		}
+	}
+
+	handle {
+		header Cache-Control "no-store"
+		reverse_proxy control-plane:3000
+	}
+}
