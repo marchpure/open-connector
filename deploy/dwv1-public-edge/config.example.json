@@ -1,0 +1,48 @@
+{
+  "profile": "default",
+  "region": "cn-beijing",
+  "sourceSha": "20b966a0bdcbbcef55d8cba33ef5c380b2502efe",
+  "image": "idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service@sha256:d853446c637643990677feb7bbe21b24acd78e9a21446cc00a75e201ed942583",
+  "controlPlane": {
+    "name": "dwv1-openconnector-control-plane-dev",
+    "functionId": "",
+    "command": "/usr/local/bin/open-connector control-plane"
+  },
+  "mcpRuntime": {
+    "name": "dwv1-openconnector-mcp-runtime-dev",
+    "functionId": "",
+    "command": "/usr/local/bin/open-connector mcp-runtime"
+  },
+  "runtime": {
+    "port": 3000,
+    "requestTimeout": 900,
+    "minInstance": 1,
+    "maxInstance": 3,
+    "cpuMilli": 2000,
+    "memoryMB": 4096
+  },
+  "drc": {
+    "bindingId": "",
+    "postgresResourceId": "",
+    "tosResourceId": "",
+    "secretResourceId": ""
+  },
+  "apig": {
+    "gatewayId": "",
+    "serviceId": "",
+    "controlPlaneUpstreamId": "",
+    "mcpRuntimeUpstreamId": "",
+    "consoleRouteId": "",
+    "apiRouteId": "",
+    "mcpRouteId": "",
+    "v1RouteId": "",
+    "publicOrigin": ""
+  },
+  "identity": {
+    "issuer": "",
+    "audience": "",
+    "jwksUri": "",
+    "userPoolRef": "",
+    "clientRef": ""
+  }
+}
