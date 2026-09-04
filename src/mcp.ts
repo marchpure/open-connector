@@ -385,6 +385,10 @@ async function getActionGuide(
     if (!connectionDecision.allowed) {
       return errorPayload(connectionDecision.code, connectionDecision.message);
     }
+    const actionDecision = policy.evaluateActionForConnection(action, connection?.id);
+    if (!actionDecision.allowed) {
+      return errorPayload(actionDecision.code, actionDecision.message);
+    }
     return successPayload({
       capability: await describeActionCapability(options, action, connectionName, policy),
       markdown: renderActionMarkdown(

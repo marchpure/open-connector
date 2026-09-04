@@ -249,6 +249,15 @@ describe("MCP server", () => {
           ok: false,
           error: { code: "connection_not_allowed" },
         });
+
+        const guide = await client.callTool({
+          name: "get_action_guide",
+          arguments: { actionId: "example.echo" },
+        });
+        expect(guide.structuredContent).toMatchObject({
+          ok: false,
+          error: { code: "connection_not_allowed" },
+        });
       },
       { getPolicySnapshot: async () => policy },
     );
@@ -527,16 +536,8 @@ describe("MCP server", () => {
           arguments: { actionId: "example.echo" },
         });
         expect(guide.structuredContent).toMatchObject({
-          ok: true,
-          data: {
-            capability: {
-              policy: {
-                allowed: false,
-                checks: [{ source: "token", outcome: "block_match", rule: "example.echo" }],
-              },
-            },
-            markdown: expect.stringContaining("`token`: `block_match` via `example.echo`"),
-          },
+          ok: false,
+          error: { code: "action_blocked" },
         });
 
         const execution = await client.callTool({
@@ -785,6 +786,15 @@ describe("MCP server", () => {
           arguments: { actionId: "example_auth.get_account", input: {}, connectionName: "default" },
         });
         expect(execution.structuredContent).toMatchObject({
+          ok: false,
+          error: { code: "connection_not_allowed" },
+        });
+
+        const guide = await client.callTool({
+          name: "get_action_guide",
+          arguments: { actionId: "example_auth.get_account", connectionName: "default" },
+        });
+        expect(guide.structuredContent).toMatchObject({
           ok: false,
           error: { code: "connection_not_allowed" },
         });
