@@ -40,7 +40,11 @@ interface OracleResult<T> {
 }
 
 interface OracleConnection {
-  execute<T = unknown>(sql: string, binds?: unknown[], options?: Record<string, unknown>): Promise<OracleResult<T>>;
+  execute<T = unknown>(
+    sql: string,
+    binds?: unknown[] | Record<string, unknown>,
+    options?: Record<string, unknown>,
+  ): Promise<OracleResult<T>>;
   close(): Promise<void>;
 }
 
@@ -49,14 +53,16 @@ interface OracleDbModule {
   getConnection(options: Record<string, unknown>): Promise<OracleConnection>;
 }
 
+type OracleDbImport = OracleDbModule | { default: OracleDbModule };
+
 interface OracleColumnRow extends Omit<DatabaseColumn, "nullable"> {
   nullable?: string | boolean;
 }
 
-export function createOracleAdapter(loadOracle: () => Promise<OracleDbModule> = defaultLoadOracle): DatabaseAdapter {
+export function createOracleAdapter(loadOracle: () => Promise<OracleDbImport> = defaultLoadOracle): DatabaseAdapter {
   return {
     async validate(credentials, signal): Promise<DatabaseProfile> {
-      const oracle = await loadOracle();
+      const oracle = normalizeOracleModule(await loadOracle());
       const connection = await openConnection(oracle, credentials);
       try {
         throwIfAborted(signal);
@@ -74,7 +80,7 @@ export function createOracleAdapter(loadOracle: () => Promise<OracleDbModule> = 
       }
     },
     async discover(credentials, input, signal): Promise<DatabaseSchema> {
-      const oracle = await loadOracle();
+      const oracle = normalizeOracleModule(await loadOracle());
       const connection = await openConnection(oracle, credentials);
       try {
         throwIfAborted(signal);
@@ -86,7 +92,11 @@ export function createOracleAdapter(loadOracle: () => Promise<OracleDbModule> = 
                and (:table_name is null or table_name = :table_name)
              order by owner, table_name
              fetch first :row_limit rows only`,
-            [input.schema?.toUpperCase() ?? null, input.table?.toUpperCase() ?? null, input.limit],
+            {
+              schema_name: input.schema?.toUpperCase() ?? null,
+              table_name: input.table?.toUpperCase() ?? null,
+              row_limit: input.limit,
+            },
             { outFormat: oracle.OUT_FORMAT_OBJECT },
           ),
           connection.execute<OracleColumnRow>(
@@ -98,7 +108,11 @@ export function createOracleAdapter(loadOracle: () => Promise<OracleDbModule> = 
                and (:table_name is null or table_name = :table_name)
              order by owner, table_name, column_id
              fetch first :row_limit rows only`,
-            [input.schema?.toUpperCase() ?? null, input.table?.toUpperCase() ?? null, input.limit],
+            {
+              schema_name: input.schema?.toUpperCase() ?? null,
+              table_name: input.table?.toUpperCase() ?? null,
+              row_limit: input.limit,
+            },
             { outFormat: oracle.OUT_FORMAT_OBJECT },
           ),
         ]);
@@ -108,7 +122,7 @@ export function createOracleAdapter(loadOracle: () => Promise<OracleDbModule> = 
       }
     },
     async query(credentials, input, signal): Promise<DatabaseQueryResult> {
-      const oracle = await loadOracle();
+      const oracle = normalizeOracleModule(await loadOracle());
       const connection = await openConnection(oracle, credentials);
       try {
         throwIfAborted(signal);
@@ -133,8 +147,12 @@ async function openConnection(oracle: OracleDbModule, credentials: DatabaseCrede
   });
 }
 
-async function defaultLoadOracle(): Promise<OracleDbModule> {
-  return loadOptionalModule<OracleDbModule>("oracledb");
+async function defaultLoadOracle(): Promise<OracleDbImport> {
+  return loadOptionalModule<OracleDbImport>("oracledb");
+}
+
+function normalizeOracleModule(oracle: OracleDbImport): OracleDbModule {
+  return "getConnection" in oracle ? oracle : oracle.default;
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

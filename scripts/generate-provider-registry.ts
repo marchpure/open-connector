@@ -2,7 +2,6 @@ import type { ProviderSource } from "./provider-source.ts";
 
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { format } from "oxfmt";
 import { loadProviderSources } from "./provider-source.ts";
 
 const providersDir = join(process.cwd(), "src/providers");
@@ -75,20 +74,34 @@ async function writeActionContracts(sources: ProviderSource[]): Promise<void> {
   lines.push("}");
   const filename = "action-contracts.generated.ts";
   const path = join(providersDir, filename);
-  const result = await format(path, `${lines.join("\n")}\n`, {
-    printWidth: 120,
-    trailingComma: "all",
-  });
-  if (result.errors.length > 0) {
-    throw new Error(`Failed to format generated action contracts: ${result.errors[0]!.message}`);
-  }
-  const content = result.code;
+  const content = await formatGeneratedTypeScript(path, `${lines.join("\n")}\n`);
   const existingContent = await readTextFile(path);
   if (existingContent !== content) {
     await writeFile(path, content);
     console.log(`Generated ${filename} (${sources.length} providers).`);
   } else {
     console.log(`${filename} is up to date (${sources.length} providers).`);
+  }
+}
+
+async function formatGeneratedTypeScript(path: string, content: string): Promise<string> {
+  try {
+    const { format } = await import("oxfmt");
+    const result = await format(path, content, {
+      printWidth: 120,
+      trailingComma: "all",
+    });
+    if (result.errors.length > 0) {
+      throw new Error(result.errors[0]!.message);
+    }
+    return result.code;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("Cannot find native binding")) {
+      console.warn(`Skipping generated action contract formatting because oxfmt native binding is unavailable.`);
+      return content;
+    }
+    throw new Error(`Failed to format generated action contracts: ${message}`);
   }
 }
 

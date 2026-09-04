@@ -10,12 +10,32 @@ const credentials = {
   ssl: false,
 };
 
-type OracleTestModule = Awaited<ReturnType<NonNullable<Parameters<typeof createOracleAdapter>[0]>>>;
-type OracleTestConnection = Awaited<ReturnType<OracleTestModule["getConnection"]>> & {
+type OracleTestConnection = {
+  execute<T = unknown>(
+    sql: string,
+    binds?: unknown[] | Record<string, unknown>,
+    options?: Record<string, unknown>,
+  ): Promise<{ rows?: T[] }>;
+  close(): Promise<void>;
   executeMock: ReturnType<typeof vi.fn>;
 };
 
 describe("Oracle Database provider adapter", () => {
+  it("uses a default-exported node-oracledb module shape", async () => {
+    const connection = fakeConnection([{ CURRENT_SCHEMA: "READER", CURRENT_USER: "READER" }]);
+    const adapter = createOracleAdapter(async () => ({
+      default: {
+        OUT_FORMAT_OBJECT: 4002,
+        getConnection: async () => connection,
+      },
+    }));
+
+    await expect(adapter.validate(credentials)).resolves.toEqual({
+      displayName: "READER@127.0.0.1/READER",
+    });
+    expect(connection.close).toHaveBeenCalledOnce();
+  });
+
   it("discovers tables and normalizes nullable flags", async () => {
     const connection = fakeConnection(
       [{ schema: "READER", name: "USERS", type: "TABLE" }],
@@ -51,19 +71,23 @@ describe("Oracle Database provider adapter", () => {
         { schema: "READER", table: "USERS", name: "NAME", dataType: "VARCHAR2", nullable: true, ordinalPosition: 2 },
       ],
     });
-    expect(connection.executeMock).toHaveBeenCalledWith(expect.any(String), ["READER", "USERS", 25], {
-      outFormat: 4002,
-    });
+    expect(connection.executeMock).toHaveBeenCalledWith(
+      expect.any(String),
+      { schema_name: "READER", table_name: "USERS", row_limit: 25 },
+      { outFormat: 4002 },
+    );
     expect(connection.close).toHaveBeenCalledOnce();
   });
 });
 
 function fakeConnection(...results: unknown[][]): OracleTestConnection {
-  const executeMock = vi.fn(async (_sql: string, _binds?: unknown[], _options?: Record<string, unknown>) => ({
-    rows: results.shift() ?? [],
-  }));
+  const executeMock = vi.fn(
+    async (_sql: string, _binds?: unknown[] | Record<string, unknown>, _options?: Record<string, unknown>) => ({
+      rows: results.shift() ?? [],
+    }),
+  );
   return {
-    async execute<T>(sql: string, binds?: unknown[], options?: Record<string, unknown>) {
+    async execute<T>(sql: string, binds?: unknown[] | Record<string, unknown>, options?: Record<string, unknown>) {
       const result = await executeMock(sql, binds, options);
       return { rows: result.rows as T[] };
     },

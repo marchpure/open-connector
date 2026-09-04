@@ -1,7 +1,18 @@
-import type { CredentialDefinition, CredentialValidators, ExecutionContext, ProviderExecutors } from "../core/types.ts";
+import type {
+  CredentialDefinition,
+  CredentialValidators,
+  ExecutionContext,
+  ExecutionResult,
+  ProviderExecutors,
+} from "../core/types.ts";
 
 import { optionalInteger, optionalString, requiredString } from "../core/cast.ts";
-import { defineProviderExecutors, ProviderRequestError, requireCustomCredential } from "./provider-runtime.ts";
+import {
+  defineProviderExecutors,
+  ProviderRequestError,
+  requireCustomCredential,
+  toProviderExecutionError,
+} from "./provider-runtime.ts";
 
 export interface DatabaseAdapter {
   validate(credentials: DatabaseCredentials, signal?: AbortSignal): Promise<DatabaseProfile>;
@@ -131,6 +142,8 @@ export function databaseCredentialFields(defaultPort: number): CredentialDefinit
 export function createDatabaseExecutors(options: DatabaseProviderRuntimeOptions): ProviderExecutors {
   return defineProviderExecutors<DatabaseActionContext>({
     service: options.service,
+    mapError: (error) =>
+      toProviderExecutionError(toDatabaseProviderError(error), `${options.displayName} request failed`),
     handlers: {
       discover_schema(input, context) {
         return context.adapter.discover(context.credentials, readDiscoveryInput(input), context.signal);
@@ -157,7 +170,12 @@ export function createDatabaseCredentialValidators(
   return {
     async customCredential(input, { signal }) {
       const credentials = readDatabaseCredentials(input.values, defaultPort);
-      const profile = await options.adapter.validate(credentials, signal);
+      let profile: DatabaseProfile;
+      try {
+        profile = await options.adapter.validate(credentials, signal);
+      } catch (error) {
+        throw toDatabaseProviderError(error);
+      }
       return {
         profile: {
           accountId: `${credentials.username}@${credentials.host}:${credentials.port}/${credentials.database}`,
@@ -258,6 +276,29 @@ export async function loadOptionalModule<T>(packageName: string, installName: st
   }
 }
 
+export function toDatabaseProviderError(error: unknown): unknown {
+  if (error instanceof ProviderRequestError) {
+    return error;
+  }
+  if (isDriverMissingError(error)) {
+    return new ProviderRequestError(501, "Database driver is not installed in this runtime image.");
+  }
+  if (isDatabaseAuthError(error)) {
+    return new ProviderRequestError(401, "Database rejected the supplied credentials.");
+  }
+  if (isDatabaseTimeoutError(error)) {
+    return new ProviderRequestError(504, "Database connection timed out.");
+  }
+  if (isDatabaseNetworkError(error)) {
+    return new ProviderRequestError(502, "Database network connection failed.");
+  }
+  return error;
+}
+
+export function toDatabaseExecutionError(error: unknown, displayName = "Database"): ExecutionResult {
+  return toProviderExecutionError(toDatabaseProviderError(error), `${displayName} request failed`);
+}
+
 function withoutSqlComments(sql: string): string {
   return sql.replace(/--.*$/gmu, "").replace(/\/\*[\s\S]*?\*\//gu, "");
 }
@@ -272,4 +313,55 @@ function parseBoolean(value: unknown): boolean {
 
 function providerInputError(message: string): ProviderRequestError {
   return new ProviderRequestError(400, message);
+}
+
+function isDatabaseAuthError(error: unknown): boolean {
+  const code = errorCode(error);
+  return code === "28P01" || code === "ER_ACCESS_DENIED_ERROR" || code === "ORA-01017" || code === "NJS-116";
+}
+
+function isDriverMissingError(error: unknown): boolean {
+  const code = errorCode(error);
+  return code === "ERR_MODULE_NOT_FOUND" || code === "MODULE_NOT_FOUND";
+}
+
+function isDatabaseTimeoutError(error: unknown): boolean {
+  const code = errorCode(error);
+  return (
+    code === "ETIMEDOUT" ||
+    code === "ETIMEOUT" ||
+    code === "CONNECT_TIMEOUT" ||
+    code === "PROTOCOL_SEQUENCE_TIMEOUT" ||
+    code === "NJS-040" ||
+    code === "NJS-510"
+  );
+}
+
+function isDatabaseNetworkError(error: unknown): boolean {
+  const code = errorCode(error);
+  return (
+    code === "ECONNREFUSED" ||
+    code === "ECONNRESET" ||
+    code === "EHOSTUNREACH" ||
+    code === "ENETUNREACH" ||
+    code === "ENOTFOUND" ||
+    code === "ORA-12154" ||
+    code === "ORA-12514" ||
+    code === "ORA-12541" ||
+    code === "ORA-12545" ||
+    code === "NJS-503" ||
+    code === "NJS-511"
+  );
+}
+
+function errorCode(error: unknown): string | undefined {
+  if (!(error instanceof Error)) {
+    return undefined;
+  }
+  const code = "code" in error && typeof error.code === "string" ? error.code : undefined;
+  if (code) {
+    return code;
+  }
+  const match = /(?:ORA|NJS)-\d{4,5}/u.exec(error.message);
+  return match?.[0];
 }
