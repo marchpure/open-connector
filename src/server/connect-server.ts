@@ -49,7 +49,7 @@ import {
 } from "./api/auth.ts";
 import { getResponseCachePolicy } from "./api/cache-policy.ts";
 import { HttpRequestError, internalError, jsonError, notFound, readJsonBody } from "./api/http-utils.ts";
-import { mcpM2mAuthorizer } from "./api/mcp-authorizer.ts";
+import { createMcpAuthorizer } from "./api/mcp-authorizer.ts";
 import { renderOAuthCompletionPage } from "./api/oauth-completion-page.ts";
 import { createOpenApiDocument } from "./api/openapi.ts";
 import { policyRequestMaxBytes, readRuntimePolicyRules, readTokenPolicy } from "./api/policy-input.ts";
@@ -190,6 +190,7 @@ export class ConnectServer {
         context.json({
           tools: await listAuthorizedMcpToolSummaries(this.mcpAuthorizer, {
             auth: readRuntimeAuthContext(context),
+            identity: readRuntimeSubject(context),
           }),
         }),
       );
@@ -907,6 +908,8 @@ export class ConnectServer {
 
   private async handleMcp(context: Context): Promise<Response> {
     const subject = { auth: readRuntimeAuthContext(context), identity: readRuntimeSubject(context) };
+    const discovery = await this.mcpAuthorizer.authorizeToolDiscovery(subject);
+    const authorizationSubject = { ...subject, discoveryAllowed: discovery.allowed };
     const handler = createMcpHandler(
       () =>
         createMcpServer({
@@ -919,7 +922,7 @@ export class ConnectServer {
           getPolicySnapshot: () => this.getPolicySnapshot(context),
           runtimeGrant: readRuntimeGrant(context),
           authorizer: this.mcpAuthorizer,
-          authorizationSubject: subject,
+          authorizationSubject,
           signal: context.req.raw.signal,
         }),
       { legacy: "stateless", responseMode: "json" },
@@ -932,7 +935,7 @@ export class ConnectServer {
   }
 
   private get mcpAuthorizer(): McpAuthorizer {
-    return this.options.mcpAuthorizer ?? mcpM2mAuthorizer;
+    return this.options.mcpAuthorizer ?? createMcpAuthorizer(this.options.accessGrants);
   }
 
   private rejectMcpMethod(context: Context): Response {

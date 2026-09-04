@@ -114,7 +114,11 @@ export function createMcpServer(options: IMcpServerOptions): McpServer {
     },
   );
 
-  if (authorizer?.mode === "m2m_only_fail_closed" && subject.auth?.kind === "user_bearer" && !subject.identity) {
+  if (
+    authorizer?.mode === "m2m_only_fail_closed" &&
+    subject.auth?.kind === "user_bearer" &&
+    (!subject.identity || subject.discoveryAllowed === false)
+  ) {
     return server;
   }
 

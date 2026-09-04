@@ -959,7 +959,13 @@ describe("ConnectServer", () => {
     expect(
       (await app.request("/mcp/tools", { headers: { authorization: `Bearer ${runtimeToken.token}` } })).status,
     ).toBe(200);
-    expect((await app.request("/mcp/tools", { headers: { authorization: "Bearer jwt-user-c" } })).status).toBe(200);
+    const jwtTools = await app.request("/mcp/tools", {
+      headers: { authorization: "Bearer jwt-user-c" },
+    });
+    expect(jwtTools.status).toBe(200);
+    await expect(jwtTools.json()).resolves.toMatchObject({
+      tools: expect.arrayContaining([expect.objectContaining({ name: "execute_action" })]),
+    });
     expect((await app.request("/mcp/tools", { headers: adminHeaders })).status).toBe(401);
 
     await expect(
@@ -985,10 +991,7 @@ describe("ConnectServer", () => {
     expect(adminRevoke.status).toBe(200);
     await expect(
       callMcpTool(app, "jwt-user-c", "execute_action", { actionId: "example.echo", input: {} }),
-    ).resolves.toMatchObject({
-      ok: false,
-      error: { code: "connection_not_allowed" },
-    });
+    ).rejects.toThrow("Method not found");
   });
 
   it("serves API routes when static routes are disabled", async () => {
@@ -1631,6 +1634,47 @@ describe("ConnectServer", () => {
     const transport = new StreamableHTTPClientTransport(new URL("https://connect.test/mcp"), { fetch: fetcher });
     const client = new Client({ name: "connect-server-test", version: "0.0.0" });
 
+    try {
+      await client.connect(transport);
+      await expect(client.listTools()).resolves.toEqual({ tools: [] });
+      await expect(
+        client.callTool({ name: "execute_action", arguments: { actionId: "example.echo", input: {} } }),
+      ).rejects.toThrow("Method not found");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("keeps GET /mcp/tools and MCP tools/list fail-closed for a JWT subject without an AccessGrant", async () => {
+    const subject: RuntimeSubject = {
+      issuer: "https://issuer.example.com",
+      audience: "runtime",
+      userPoolRef: "pool",
+      sub: "user-without-grant",
+      groups: [],
+    };
+    const app = createTestServer([apiKeyProvider], {
+      auth: { verifyRuntimeJwt: async () => subject },
+    }).createApp();
+
+    const summary = await app.request("/mcp/tools", {
+      headers: { authorization: "Bearer jwt-without-grant" },
+    });
+    expect(summary.status).toBe(200);
+    await expect(summary.json()).resolves.toEqual({ tools: [] });
+
+    const fetcher: typeof fetch = async (input, init) =>
+      app.fetch(
+        new Request(input, {
+          ...init,
+          headers: {
+            ...Object.fromEntries(new Headers(init?.headers).entries()),
+            authorization: "Bearer jwt-without-grant",
+          },
+        }),
+      );
+    const transport = new StreamableHTTPClientTransport(new URL("https://connect.test/mcp"), { fetch: fetcher });
+    const client = new Client({ name: "connect-server-test", version: "0.0.0" });
     try {
       await client.connect(transport);
       await expect(client.listTools()).resolves.toEqual({ tools: [] });

@@ -1,9 +1,11 @@
 import type { RuntimeSubject } from "../access/access-grants.ts";
+import type { AccessGrantService } from "../access/access-grants.ts";
 import type { RuntimeAuthContext } from "./auth.ts";
 
 export interface McpAuthorizationSubject {
   auth?: RuntimeAuthContext;
   identity?: RuntimeSubject;
+  discoveryAllowed?: boolean;
 }
 
 export interface McpAuthorizationRequest {
@@ -33,6 +35,42 @@ export const mcpM2mAuthorizer: McpAuthorizer = {
     return isM2mSubject(request.subject) || request.subject.identity ? allowedDecision() : failClosedUserDecision();
   },
 };
+
+export function createMcpAuthorizer(accessGrants?: AccessGrantService): McpAuthorizer {
+  return {
+    mode: "m2m_only_fail_closed",
+    async authorizeToolDiscovery(subject) {
+      return authorizeSubject(subject, accessGrants);
+    },
+    async authorizeToolExecution(request) {
+      return authorizeExecutionSubject(request.subject);
+    },
+  };
+}
+
+function authorizeExecutionSubject(subject: McpAuthorizationSubject): McpAuthorizationDecision {
+  return isM2mSubject(subject) || subject.identity ? allowedDecision() : failClosedUserDecision();
+}
+
+async function authorizeSubject(
+  subject: McpAuthorizationSubject,
+  accessGrants?: AccessGrantService,
+): Promise<McpAuthorizationDecision> {
+  if (isM2mSubject(subject)) {
+    return allowedDecision();
+  }
+  if (!subject.identity || !accessGrants) {
+    return failClosedUserDecision();
+  }
+  const grants = await accessGrants.listGrants();
+  const hasActiveGrant = grants.some(
+    (grant) =>
+      !grant.revokedAt &&
+      ((grant.subjectType === "user" && grant.subject === subject.identity!.sub) ||
+        (grant.subjectType === "group" && subject.identity!.groups.includes(grant.subject))),
+  );
+  return hasActiveGrant ? allowedDecision() : failClosedUserDecision();
+}
 
 function isM2mSubject(subject: McpAuthorizationSubject): boolean {
   return (
