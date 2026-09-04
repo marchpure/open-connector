@@ -1,4 +1,4 @@
-FROM node:24-alpine3.21 AS build
+FROM node:24-bookworm-slim@sha256:6642ef280aebc09c4541bee0b15c9f89f0f3f3c247ddee79ae1d37eddfdcbbaa AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.json vitest.config.ts ./
 COPY web ./web
@@ -10,7 +10,7 @@ RUN npm run generate:catalog
 RUN npm run build
 RUN npm run build --workspace web
 
-FROM node:24-alpine3.21
+FROM node:24-bookworm-slim@sha256:6642ef280aebc09c4541bee0b15c9f89f0f3f3c247ddee79ae1d37eddfdcbbaa
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
@@ -27,7 +27,6 @@ COPY --from=build /app/dist ./dist
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/open-connector
 
 RUN npm ci --omit=dev --ignore-scripts \
-  && apk upgrade --no-cache libcrypto3 libssl3 \
   && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 VOLUME ["/app/data"]
 EXPOSE 3000
