@@ -3,6 +3,13 @@ import { readFile } from "node:fs/promises";
 import { CreateSecretCommand, KMSClient } from "@volcengine/kms";
 import { Client, Command, buildRequestConfigFromMetaPath } from "@volcengine/sdk-core";
 
+class OpenApiCommand extends Command {
+  constructor(metaPath, input) {
+    super(input);
+    this.requestConfig = buildRequestConfigFromMetaPath(metaPath);
+  }
+}
+
 const configPath = process.argv[2];
 if (!configPath) throw new Error("usage: node provision-sensitive.mjs CONFIG_JSON");
 const config = JSON.parse(await readFile(configPath, "utf8"));
@@ -82,13 +89,6 @@ console.log(
     secretValuesRecorded: false,
   }),
 );
-
-class OpenApiCommand extends Command {
-  constructor(metaPath, input) {
-    super(input);
-    this.requestConfig = buildRequestConfigFromMetaPath(metaPath);
-  }
-}
 
 function randomSecret(bytes) {
   return randomBytes(bytes).toString("base64url");

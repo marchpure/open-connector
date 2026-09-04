@@ -8,13 +8,7 @@ policy_name=$(jq -r '.kms.policyName' "$config")
 vpc_id=$(jq -r '.network.vpcId' "$config")
 instance_id=$(jq -r '.postgresql.instanceId' "$config")
 
-security_group_id=$(ve vpc CreateSecurityGroup \
-  --VpcId "$vpc_id" \
-  --SecurityGroupName dwv1-openconnector-vefaas-dev \
-  --Description "DWV1 OpenConnector VeFaaS dev egress" \
-  --ProjectName default \
-  --Tags.1.Key workload --Tags.1.Value dwv1-openconnector-dev \
-  ---profile default | jq -r '.Result.SecurityGroupId')
+security_group_id=$(jq -r '.network.securityGroupIds[0] // empty' "$config")
 test -n "$security_group_id"
 
 allow_list_id=$(ve rdspostgresql CreateAllowList \

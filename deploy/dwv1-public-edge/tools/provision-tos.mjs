@@ -1,11 +1,16 @@
+import { DefaultCredentialProvider } from "@volcengine/sdk-core";
 import { StorageClassType, TosClient } from "@volcengine/tos-sdk";
 
 const bucket = process.argv[2];
 if (!bucket) throw new Error("usage: node provision-tos.mjs BUCKET_NAME");
 
+const credentials = await new DefaultCredentialProvider().resolveCredentials();
 const client = new TosClient({
+  accessKeyId: credentials.accessKeyId,
+  accessKeySecret: credentials.secretAccessKey,
+  stsToken: credentials.sessionToken,
   region: "cn-beijing",
-  endpoint: "https://tos-cn-beijing.volces.com",
+  endpoint: "tos-cn-beijing.volces.com",
 });
 await client.createBucket({
   bucket,

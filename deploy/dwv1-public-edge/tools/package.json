@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@volcengine/sdk-core": "1.0.3",
     "@volcengine/tos-sdk": "2.9.1"
   }
 }

@@ -3,7 +3,7 @@
   "region": "cn-beijing",
   "sourceSha": "20b966a0bdcbbcef55d8cba33ef5c380b2502efe",
   "baseImage": "idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service@sha256:d853446c637643990677feb7bbe21b24acd78e9a21446cc00a75e201ed942583",
-  "image": "idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service@sha256:replace_with_bootstrap_registry_digest",
+  "image": "idv-order-discount-agent-test-cn-beijing.cr.volces.com/idv-order-discount-agent-test/knowledge-dev-connection-service@sha256:083561964108b0220defa15c17f0bec19a9fc1644c8e7d83f1eaaaae96efab98",
   "controlPlane": {
     "name": "dwv1-openconnector-control-plane-dev",
     "functionId": "",
