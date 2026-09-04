@@ -19,11 +19,36 @@ test -n "$control_upstream" && test -n "$runtime_upstream" || {
   exit 1
 }
 
-create_route() {
+upsert_route() {
   name=$1
   path=$2
   priority=$3
   upstream=$4
+  route_id=$(ve apig20221112 ListRoutes \
+    --GatewayId "$gateway_id" \
+    --ServiceId "$service_id" \
+    --PageNumber 1 \
+    --PageSize 100 \
+    ---profile default |
+    jq -r --arg name "$name" '.Result.Items[]? | select(.Name == $name) | .Id' |
+    head -n 1)
+  if test -n "$route_id"; then
+    ve apig20221112 UpdateRoute \
+      --Id "$route_id" \
+      --Name "$name" \
+      --Enable true \
+      --Priority "$priority" \
+      --MatchRule.Path.MatchType Prefix \
+      --MatchRule.Path.MatchContent "$path" \
+      --MatchRule.Method '["GET","POST","PUT","DELETE","HEAD","OPTIONS","PATCH"]' \
+      --AdvancedSetting.TimeoutSetting.Enable true \
+      --AdvancedSetting.TimeoutSetting.Timeout 900 \
+      --AdvancedSetting.RetryPolicySetting.Enable false \
+      --UpstreamList.1.UpstreamId "$upstream" \
+      --UpstreamList.1.Weight 100 \
+      ---profile default
+    return
+  fi
   ve apig20221112 CreateRoute \
     --Name "$name" \
     --ServiceId "$service_id" \
@@ -40,9 +65,9 @@ create_route() {
     ---profile default
 }
 
-create_route dwv1-mcp /mcp 10 "$runtime_upstream"
-create_route dwv1-oauth-metadata /.well-known/ 20 "$control_upstream"
-create_route dwv1-oauth-bridge /oauth/ 30 "$control_upstream"
-create_route dwv1-runtime-v1 /v1/ 40 "$runtime_upstream"
-create_route dwv1-control-api /api/ 50 "$control_upstream"
-create_route dwv1-console / 100 "$control_upstream"
+upsert_route dwv1-mcp /mcp 10 "$runtime_upstream"
+upsert_route dwv1-oauth-metadata /.well-known/ 20 "$control_upstream"
+upsert_route dwv1-oauth-bridge /oauth/ 30 "$control_upstream"
+upsert_route dwv1-runtime-v1 /v1/ 40 "$runtime_upstream"
+upsert_route dwv1-control-api /api/ 50 "$control_upstream"
+upsert_route dwv1-console / 100 "$control_upstream"
