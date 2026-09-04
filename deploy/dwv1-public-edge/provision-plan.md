@@ -19,7 +19,7 @@ databases, and zero allowlists. Reuse still requires explicit approval.
 ## Required new resources
 
 - Database `open_connector_dev`
-- Normal account `open_connector_dev` with `Login,Inherit`
+- Normal account `open_connector_app` with `Login,Inherit`
 - Dedicated VeFaaS VPC security group
 - KMS Generic Secret `dwv1/openconnector/dev`
 - IAM policy `DWV1OpenConnectorSecretRead`

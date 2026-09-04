@@ -47,20 +47,13 @@ const secret = {
   OOMOL_CONNECT_ENCRYPTION_KEY: encryptionKey,
 };
 if (config.tos.enabled) {
-  for (const key of [
-    "OOMOL_CONNECT_S3_ACCESS_KEY_ID",
-    "OOMOL_CONNECT_S3_SECRET_ACCESS_KEY",
-  ]) {
-    const value = process.env[key];
-    if (!value) throw new Error(`${key} is required when TOS is enabled.`);
-    secret[key] = value;
-  }
   Object.assign(secret, {
     OOMOL_CONNECT_TRANSIT_FILE_BACKEND: "s3",
     OOMOL_CONNECT_S3_BUCKET: config.tos.bucket,
     OOMOL_CONNECT_S3_REGION: config.tos.region,
     OOMOL_CONNECT_S3_ENDPOINT: config.tos.endpoint,
     OOMOL_CONNECT_S3_FORCE_PATH_STYLE: "false",
+    TOS_CREDENTIAL_SOURCE: "VEFAAS_ROLE_STS",
   });
 }
 

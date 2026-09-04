@@ -4,6 +4,7 @@ import http from "node:http";
 
 const listenPort = readPort("PORT", 8080);
 const internalPort = readPort("DWV1_INTERNAL_PORT", 3000);
+const credentialPort = readPort("DWV1_CREDENTIAL_PORT", 18081);
 const secretName = requiredEnv("DWV1_KMS_SECRET_NAME");
 const role = requiredEnv("DWV1_OPENCONNECTOR_ROLE");
 const allowedRoles = new Set(["control-plane", "mcp-runtime"]);
@@ -27,6 +28,7 @@ const allowedSecretKeys = new Set([
   "OOMOL_CONNECT_JWT_ISSUER",
   "OOMOL_CONNECT_JWT_AUDIENCE",
   "OOMOL_CONNECT_JWT_USER_POOL_REF",
+  "TOS_CREDENTIAL_SOURCE",
 ]);
 const requiredSecretKeys = [
   "OOMOL_CONNECT_DATABASE_URL",
@@ -41,9 +43,29 @@ const strippedHeaders = new Set([
 ]);
 
 let ready;
+let currentCredentials;
+
+http
+  .createServer((request, response) => {
+    if (request.url !== "/credentials" || !currentCredentials) {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    response.end(
+      JSON.stringify({
+        AccessKeyId: currentCredentials.accessKeyId,
+        SecretAccessKey: currentCredentials.secretAccessKey,
+        Token: currentCredentials.sessionToken,
+        Expiration: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      }),
+    );
+  })
+  .listen(credentialPort, "127.0.0.1");
 
 const server = http.createServer(async (request, response) => {
   try {
+    updateCredentials(request.headers);
     ready ??= bootstrap(request.headers);
     await ready;
     proxy(request, response);
@@ -64,6 +86,7 @@ async function bootstrap(headers) {
   if (!accessKeyId || !secretAccessKey || !sessionToken) {
     throw new Error("VeFaaS role credentials are missing.");
   }
+  currentCredentials = { accessKeyId, secretAccessKey, sessionToken };
 
   const client = new KMSClient({
     region: "cn-beijing",
@@ -90,6 +113,8 @@ async function bootstrap(headers) {
     env: {
       ...process.env,
       ...secrets,
+      AWS_ACCESS_KEY_ID: accessKeyId,
+      AWS_CONTAINER_CREDENTIALS_FULL_URI: `http://127.0.0.1:${credentialPort}/credentials`,
       HOST: "127.0.0.1",
       PORT: String(internalPort),
     },
@@ -155,4 +180,13 @@ function readPort(name, fallback) {
 
 function singleHeader(value) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function updateCredentials(headers) {
+  const accessKeyId = singleHeader(headers["x-faas-access-key-id"]);
+  const secretAccessKey = singleHeader(headers["x-faas-secret-access-key"]);
+  const sessionToken = singleHeader(headers["x-faas-session-token"]);
+  if (accessKeyId && secretAccessKey && sessionToken) {
+    currentCredentials = { accessKeyId, secretAccessKey, sessionToken };
+  }
 }

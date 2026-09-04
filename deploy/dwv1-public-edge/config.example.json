@@ -36,7 +36,7 @@
     "endpoint": "postgresef669f38f7c6.rds-pg.ivolces.com",
     "port": 5432,
     "database": "open_connector_dev",
-    "account": "open_connector_dev"
+    "account": "open_connector_app"
   },
   "kms": {
     "secretName": "dwv1/openconnector/dev",

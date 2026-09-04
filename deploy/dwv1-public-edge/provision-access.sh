@@ -31,8 +31,20 @@ ve rdspostgresql AssociateAllowList \
   ---profile default >/dev/null
 
 secret_trn="trn:kms:cn-beijing:2107625663:secrets/$secret_name"
-policy_document=$(jq -cn --arg trn "$secret_trn" \
-  '{Statement:[{Effect:"Allow",Action:["kms:GetSecretValue"],Resource:[$trn]}]}')
+bucket=$(jq -r '.tos.bucket' "$config")
+policy_document=$(jq -cn --arg trn "$secret_trn" --arg bucket "$bucket" \
+  '{
+    Statement:
+      [{Effect:"Allow",Action:["kms:GetSecretValue"],Resource:[$trn]}] +
+      (if $bucket == "" then [] else [{
+        Effect:"Allow",
+        Action:["tos:HeadObject","tos:GetObject","tos:PutObject","tos:ListBucket"],
+        Resource:[
+          ("trn:tos:::bucket/" + $bucket),
+          ("trn:tos:::bucket/" + $bucket + "/transit/*")
+        ]
+      }] end)
+  }')
 trust_document='{"Statement":[{"Effect":"Allow","Action":["sts:AssumeRole"],"Principal":{"Service":["vefaas","vefaas_dev"]}}]}'
 
 ve iam CreatePolicy \
