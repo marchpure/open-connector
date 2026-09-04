@@ -88,14 +88,61 @@ describe("createRuntimeJwtVerifier", () => {
     const verifier = configuredVerifier();
     const token = await signToken();
 
-    await expect(verifier(token)).resolves.toBe(true);
+    await expect(verifier(token)).resolves.toMatchObject({
+      issuer,
+      audience,
+      userPoolRef: issuer,
+      sub: "caller",
+      groups: [],
+    });
   });
 
   it("accepts an audience array containing the expected audience", async () => {
     const verifier = configuredVerifier();
     const token = await signToken({ tokenAudience: ["https://other.example.com", audience] });
 
-    await expect(verifier(token)).resolves.toBe(true);
+    await expect(verifier(token)).resolves.toMatchObject({ sub: "caller" });
+  });
+
+  it("resolves configured subject, group, and tenant claims", async () => {
+    const verifier = createRuntimeJwtVerifier({
+      jwksUri,
+      issuer,
+      audience,
+      userPoolRef: "pool-a",
+      subjectClaim: "uid",
+      groupsClaim: "roles",
+      tenantClaim: "tenant_id",
+      tenant: "tenant-a",
+    });
+    if (!verifier) throw new Error("JWT verifier was not configured.");
+    const token = await signToken({
+      claims: {
+        uid: "user-1",
+        roles: ["analysts", "operators"],
+        tenant_id: "tenant-a",
+      },
+    });
+
+    await expect(verifier(token)).resolves.toMatchObject({
+      userPoolRef: "pool-a",
+      tenant: "tenant-a",
+      sub: "user-1",
+      groups: ["analysts", "operators"],
+    });
+  });
+
+  it("rejects cross-tenant tokens", async () => {
+    const verifier = createRuntimeJwtVerifier({
+      jwksUri,
+      issuer,
+      audience,
+      tenantClaim: "tenant_id",
+      tenant: "tenant-a",
+    });
+    if (!verifier) throw new Error("JWT verifier was not configured.");
+
+    await expect(verifier(await signToken({ claims: { tenant_id: "tenant-b" } }))).resolves.toBeUndefined();
   });
 
   it.each([
@@ -140,7 +187,7 @@ describe("createRuntimeJwtVerifier", () => {
       token: async () => await signToken({ notBefore: "1h" }),
     },
   ])("rejects $name", async ({ token }) => {
-    await expect(configuredVerifier()(await token())).resolves.toBe(false);
+    await expect(configuredVerifier()(await token())).resolves.toBeUndefined();
   });
 
   it("fails closed when the JWKS response is invalid", async () => {
@@ -153,7 +200,7 @@ describe("createRuntimeJwtVerifier", () => {
       throw new Error("JWT verifier was not configured.");
     }
 
-    await expect(verifier(await signToken())).resolves.toBe(false);
+    await expect(verifier(await signToken())).resolves.toBeUndefined();
   });
 });
 
@@ -164,10 +211,14 @@ interface SignTokenOptions {
   tokenAudience?: string | string[] | false;
   expirationTime?: string | false;
   notBefore?: string;
+  claims?: Record<string, unknown>;
 }
 
 async function signToken(options: SignTokenOptions = {}): Promise<string> {
-  let token = new SignJWT({ subject: "caller" }).setProtectedHeader({ alg: "RS256", kid: options.kid ?? keyId });
+  let token = new SignJWT(options.claims ?? {}).setProtectedHeader({ alg: "RS256", kid: options.kid ?? keyId });
+  if (!options.claims || !("sub" in options.claims)) {
+    token = token.setSubject("caller");
+  }
   if (options.tokenIssuer !== false) {
     token = token.setIssuer(options.tokenIssuer ?? issuer);
   }
@@ -183,7 +234,7 @@ async function signToken(options: SignTokenOptions = {}): Promise<string> {
   return await token.sign(options.key ?? privateKey);
 }
 
-function configuredVerifier(): (token: string) => Promise<boolean> {
+function configuredVerifier(): NonNullable<ReturnType<typeof createRuntimeJwtVerifier>> {
   const verifier = createRuntimeJwtVerifier({ jwksUri, issuer, audience });
   if (!verifier) {
     throw new Error("JWT verifier was not configured.");

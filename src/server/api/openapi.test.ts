@@ -240,6 +240,57 @@ describe("action execution OpenAPI", () => {
     expect(tokenPolicy.properties.allowedConnections.description).toMatch(/connection APIs/i);
     expect(tokenPolicy.properties.allowedConnections.description).not.toMatch(/omit/i);
   });
+
+  it("documents identity provider and AccessGrant APIs", () => {
+    const document = createOpenApiDocument([provider]);
+    const identityProvider = document.paths["/api/identity-provider"] as {
+      get?: unknown;
+      put?: unknown;
+    };
+    const adminGrants = document.paths["/api/access-grants"] as {
+      get?: unknown;
+      post?: { requestBody?: unknown; responses: Record<string, unknown> };
+    };
+    const runtimePreview = document.paths["/v1/access:preview"] as {
+      post?: { responses: Record<string, unknown> };
+    };
+    const policyCheck = document.components.schemas.PolicyCheck as {
+      properties: {
+        source: { enum: string[] };
+        grantId?: unknown;
+        policyVersion?: unknown;
+      };
+    };
+    const accessGrant = document.components.schemas.AccessGrantRecord as {
+      required: string[];
+      properties: Record<string, unknown>;
+    };
+    const previewRequest = document.components.schemas.AccessPreviewRequest as {
+      required: string[];
+      properties: Record<string, unknown>;
+    };
+
+    expect(identityProvider.get).toBeDefined();
+    expect(identityProvider.put).toBeDefined();
+    expect(adminGrants.get).toBeDefined();
+    expect(adminGrants.post?.responses["413"]).toBeDefined();
+    expect(document.paths["/v1/access-grants"]).toBeUndefined();
+    expect(document.paths["/v1/access-grants/{id}"]).toBeUndefined();
+    expect(document.paths["/v1/access-grants/{id}:revoke"]).toBeUndefined();
+    expect(document.paths["/v1/access-grants/{id}/revoke"]).toBeUndefined();
+    expect(document.paths["/v1/access/audit"]).toBeUndefined();
+    expect(document.paths["/v1/identity/subjects"]).toBeUndefined();
+    expect(runtimePreview.post?.responses["404"]).toBeDefined();
+    expect(policyCheck.properties.source.enum).toContain("access_grant");
+    expect(policyCheck.properties.grantId).toBeDefined();
+    expect(policyCheck.properties.policyVersion).toBeDefined();
+    expect(accessGrant.required).toEqual(
+      expect.arrayContaining(["id", "subjectType", "subject", "connectionId", "role", "effect", "customActions"]),
+    );
+    expect(accessGrant.properties.revokedAt).toBeDefined();
+    expect(previewRequest.required).toEqual(["connectionId"]);
+    expect(previewRequest.properties.subject).toEqual({ $ref: "#/components/schemas/RuntimeSubject" });
+  });
 });
 
 interface ConnectionGrantSchema {

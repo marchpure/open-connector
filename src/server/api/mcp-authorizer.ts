@@ -1,7 +1,9 @@
+import type { RuntimeSubject } from "../access/access-grants.ts";
 import type { RuntimeAuthContext } from "./auth.ts";
 
 export interface McpAuthorizationSubject {
   auth?: RuntimeAuthContext;
+  identity?: RuntimeSubject;
 }
 
 export interface McpAuthorizationRequest {
@@ -25,10 +27,10 @@ export interface McpAuthorizer {
 export const mcpM2mAuthorizer: McpAuthorizer = {
   mode: "m2m_only_fail_closed",
   async authorizeToolDiscovery(subject) {
-    return isM2mSubject(subject) ? allowedDecision() : failClosedUserDecision();
+    return isM2mSubject(subject) || subject.identity ? allowedDecision() : failClosedUserDecision();
   },
   async authorizeToolExecution(request) {
-    return isM2mSubject(request.subject) ? allowedDecision() : failClosedUserDecision();
+    return isM2mSubject(request.subject) || request.subject.identity ? allowedDecision() : failClosedUserDecision();
   },
 };
 

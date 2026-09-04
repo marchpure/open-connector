@@ -51,6 +51,7 @@ describe("SqliteRuntimeDatabase", () => {
       "0010_connection_revision.sql",
       "0011_runtime_token_connection_scope.sql",
       "0012_marketplace.sql",
+      "0013_access_grants.sql",
     ];
     expect(entries.filter((entry) => entry.message === "sqlite migration started")).toEqual(
       migrations.map((migration) => ({ fields: { migration }, message: "sqlite migration started" })),
@@ -897,6 +898,70 @@ describe("SqliteRuntimeDatabase", () => {
       response: successResponse({ token: "rotated-idempotency-secret" }),
     });
     withNewKey.close();
+  });
+
+  it("persists identity config, access grants, subjects, and access audit across database instances", async () => {
+    const databasePath = await createDatabasePath();
+    const first = new SqliteRuntimeDatabase(databasePath);
+    await first.accessGrantStore.setIdentityProviderConfig({
+      issuer: "https://issuer.example.com",
+      audience: "runtime",
+      jwksUri: "https://issuer.example.com/jwks",
+      userPoolRef: "pool-a",
+      subjectClaim: "sub",
+      groupsClaim: "groups",
+      tenantClaim: "tenant",
+      tenant: "tenant-a",
+    });
+    await first.accessGrantStore.addGrant({
+      id: "grant-1",
+      subjectType: "group",
+      subject: "operators",
+      connectionId: "connection-1",
+      role: "custom",
+      effect: "allow",
+      customActions: ["example.echo"],
+      reason: "test",
+      createdAt: "2026-09-04T00:00:00.000Z",
+      updatedAt: "2026-09-04T00:00:00.000Z",
+    });
+    const subject = {
+      issuer: "https://issuer.example.com",
+      audience: "runtime",
+      userPoolRef: "pool-a",
+      tenant: "tenant-a",
+      sub: "user-1",
+      groups: ["operators"],
+    };
+    await first.accessGrantStore.recordSubject(subject, "2026-09-04T00:01:00.000Z");
+    await first.accessGrantStore.addAudit({
+      id: "audit-1",
+      subject,
+      connectionId: "connection-1",
+      actionId: "example.echo",
+      decision: {
+        allowed: true,
+        checks: [{ source: "access_grant", outcome: "allow_match", grantId: "grant-1", policyVersion: 2 }],
+      },
+      createdAt: "2026-09-04T00:02:00.000Z",
+    });
+    await first.accessGrantStore.bumpPolicyVersion("2026-09-04T00:03:00.000Z");
+    first.close();
+
+    const reopened = new SqliteRuntimeDatabase(databasePath);
+    await expect(reopened.accessGrantStore.getIdentityProviderConfig()).resolves.toMatchObject({
+      issuer: "https://issuer.example.com",
+      userPoolRef: "pool-a",
+    });
+    await expect(reopened.accessGrantStore.listGrants()).resolves.toMatchObject([
+      { id: "grant-1", role: "custom", customActions: ["example.echo"] },
+    ]);
+    await expect(reopened.accessGrantStore.listSubjects()).resolves.toMatchObject([{ sub: "user-1" }]);
+    await expect(reopened.accessGrantStore.listAudit()).resolves.toMatchObject([
+      { id: "audit-1", actionId: "example.echo" },
+    ]);
+    await expect(reopened.accessGrantStore.getPolicyVersion()).resolves.toMatchObject({ version: 2 });
+    reopened.close();
   });
 });
 

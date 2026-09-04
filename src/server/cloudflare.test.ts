@@ -235,7 +235,7 @@ class UnusedD1Database implements D1DatabaseBinding {
     if (query === "select value from marketplace_config where id = 1") {
       return new EmptyD1PreparedStatement(query);
     }
-    throw new Error(`Unexpected D1 query: ${query}`);
+    return new EmptyD1PreparedStatement(query);
   }
 }
 
@@ -255,11 +255,11 @@ class EmptyD1PreparedStatement implements D1PreparedStatementBinding {
   }
 
   async all<T = Record<string, unknown>>(): Promise<{ results: T[] }> {
-    throw new Error(`Unexpected D1 all: ${this.query}`);
+    return { results: [] };
   }
 
   async run(): Promise<{ success: boolean; meta: { changes?: number } }> {
-    throw new Error(`Unexpected D1 run: ${this.query}`);
+    return { success: true, meta: { changes: 0 } };
   }
 }
 

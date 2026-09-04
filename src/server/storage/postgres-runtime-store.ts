@@ -8,6 +8,15 @@ import type {
 } from "../../marketplace/marketplace-service.ts";
 import type { IOAuthClientConfigStore, OAuthClientConfig } from "../../oauth/oauth-client-config-service.ts";
 import type { IOAuthStateStore, OAuthAuthorizationState } from "../../oauth/oauth-flow-service.ts";
+import type {
+  AccessAuditListInput,
+  AccessAuditRecord,
+  AccessGrantRecord,
+  AccessPolicyVersion,
+  IAccessGrantStore,
+  IdentityProviderConfig,
+  RuntimeSubject,
+} from "../access/access-grants.ts";
 import type { ISecretCodec } from "../secrets/secret-codec-core.ts";
 import type {
   CompleteIdempotencyInput,
@@ -38,6 +47,7 @@ export interface PostgresRuntimeDatabaseOptions {
 }
 
 export class PostgresRuntimeDatabase implements RuntimeDatabase {
+  readonly accessGrantStore: IAccessGrantStore;
   readonly connectionStore: IConnectionStore;
   readonly oauthClientConfigStore: IOAuthClientConfigStore;
   readonly oauthStateStore: IOAuthStateStore;
@@ -53,6 +63,7 @@ export class PostgresRuntimeDatabase implements RuntimeDatabase {
   private constructor(pool: Pool, options: PostgresRuntimeDatabaseOptions) {
     this.pool = pool;
     this.secretCodec = options.secretCodec ?? new PlainTextSecretCodec();
+    this.accessGrantStore = new PostgresAccessGrantStore(pool);
     this.connectionStore = new PostgresConnectionStore(pool, this.secretCodec);
     this.oauthClientConfigStore = new PostgresOAuthClientConfigStore(pool, this.secretCodec);
     this.oauthStateStore = new PostgresOAuthStateStore(pool, this.secretCodec);
@@ -94,6 +105,11 @@ export class PostgresRuntimeDatabase implements RuntimeDatabase {
     await runInTransaction(this.pool, async (client) => {
       await client.query(`
         delete from connections;
+        delete from identity_provider_config;
+        delete from access_grants;
+        delete from identity_subjects;
+        delete from access_audit;
+        update access_policy_version set version = 1, updated_at = to_char(clock_timestamp() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') where id = 1;
         delete from oauth_client_configs;
         delete from oauth_states;
         delete from runtime_tokens;
@@ -177,6 +193,156 @@ export class PostgresRuntimeDatabase implements RuntimeDatabase {
         await client.query("update marketplace_config set value = $1 where id = 1", [JSON.stringify(config)]);
       }
     });
+  }
+}
+
+class PostgresAccessGrantStore implements IAccessGrantStore {
+  private readonly pool: Pool;
+
+  constructor(pool: Pool) {
+    this.pool = pool;
+  }
+
+  async getIdentityProviderConfig(): Promise<IdentityProviderConfig | undefined> {
+    const result = await this.pool.query<RuntimeRow>("select value from identity_provider_config where id = 1");
+    return result.rows[0] ? parseJson<IdentityProviderConfig>(readString(result.rows[0], "value")) : undefined;
+  }
+
+  async setIdentityProviderConfig(config: IdentityProviderConfig): Promise<void> {
+    await this.pool.query(
+      `
+        insert into identity_provider_config (id, value, updated_at)
+        values (1, $1, $2)
+        on conflict(id) do update set value = excluded.value, updated_at = excluded.updated_at
+      `,
+      [JSON.stringify(config), new Date().toISOString()],
+    );
+  }
+
+  async listGrants(): Promise<AccessGrantRecord[]> {
+    const result = await this.pool.query<RuntimeRow>(
+      `
+        select id, subject_type, subject, connection_id, role, effect, custom_actions, reason, created_at, updated_at, revoked_at
+        from access_grants
+        order by created_at desc, id desc
+      `,
+    );
+    return result.rows.map(readAccessGrantRow);
+  }
+
+  async addGrant(grant: AccessGrantRecord): Promise<void> {
+    await this.pool.query(
+      `
+        insert into access_grants (
+          id, subject_type, subject, connection_id, role, effect, custom_actions, reason, created_at, updated_at, revoked_at
+        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `,
+      [
+        grant.id,
+        grant.subjectType,
+        grant.subject,
+        grant.connectionId,
+        grant.role,
+        grant.effect,
+        JSON.stringify(grant.customActions),
+        grant.reason ?? null,
+        grant.createdAt,
+        grant.updatedAt,
+        grant.revokedAt ?? null,
+      ],
+    );
+  }
+
+  async updateGrant(
+    id: string,
+    patch: Partial<Pick<AccessGrantRecord, "role" | "effect" | "customActions" | "reason" | "updatedAt">>,
+  ): Promise<AccessGrantRecord | undefined> {
+    const existing = await this.pool.query<RuntimeRow>("select * from access_grants where id = $1", [id]);
+    const row = existing.rows[0];
+    if (!row) return undefined;
+    const next = { ...readAccessGrantRow(row), ...patch };
+    await this.pool.query(
+      `
+        update access_grants
+        set role = $1, effect = $2, custom_actions = $3, reason = $4, updated_at = $5
+        where id = $6
+      `,
+      [next.role, next.effect, JSON.stringify(next.customActions), next.reason ?? null, next.updatedAt, id],
+    );
+    return next;
+  }
+
+  async revokeGrant(id: string, revokedAt: string): Promise<AccessGrantRecord | undefined> {
+    const existing = await this.pool.query<RuntimeRow>("select * from access_grants where id = $1", [id]);
+    const row = existing.rows[0];
+    if (!row) return undefined;
+    await this.pool.query("update access_grants set revoked_at = $1, updated_at = $1 where id = $2", [revokedAt, id]);
+    return { ...readAccessGrantRow(row), revokedAt, updatedAt: revokedAt };
+  }
+
+  async getPolicyVersion(): Promise<AccessPolicyVersion> {
+    const result = await this.pool.query<RuntimeRow>(
+      "select version, updated_at from access_policy_version where id = 1",
+    );
+    const row = result.rows[0];
+    if (!row) return { version: 1, updatedAt: new Date(0).toISOString() };
+    return { version: readNumber(row, "version"), updatedAt: readString(row, "updated_at") };
+  }
+
+  async bumpPolicyVersion(updatedAt: string): Promise<AccessPolicyVersion> {
+    await this.pool.query(
+      `
+        insert into access_policy_version (id, version, updated_at)
+        values (1, 2, $1)
+        on conflict(id) do update set version = access_policy_version.version + 1, updated_at = excluded.updated_at
+      `,
+      [updatedAt],
+    );
+    return this.getPolicyVersion();
+  }
+
+  async recordSubject(subject: RuntimeSubject, seenAt: string): Promise<void> {
+    await this.pool.query(
+      `
+        insert into identity_subjects (subject_key, value, seen_at)
+        values ($1, $2, $3)
+        on conflict(subject_key) do update set value = excluded.value, seen_at = excluded.seen_at
+      `,
+      [subjectKey(subject), JSON.stringify(subject), seenAt],
+    );
+  }
+
+  async listSubjects(): Promise<RuntimeSubject[]> {
+    const result = await this.pool.query<RuntimeRow>(
+      "select value from identity_subjects order by seen_at desc, subject_key",
+    );
+    return result.rows.map((row) => parseJson<RuntimeSubject>(readString(row, "value")));
+  }
+
+  async addAudit(record: AccessAuditRecord): Promise<void> {
+    await this.pool.query(
+      `
+        insert into access_audit (id, subject_key, connection_id, action_id, value, created_at)
+        values ($1, $2, $3, $4, $5, $6)
+      `,
+      [
+        record.id,
+        subjectKey(record.subject),
+        record.connectionId ?? null,
+        record.actionId ?? null,
+        JSON.stringify(record),
+        record.createdAt,
+      ],
+    );
+  }
+
+  async listAudit(input: AccessAuditListInput = {}): Promise<AccessAuditRecord[]> {
+    const limit = Math.max(1, Math.min(input.limit ?? 200, 1000));
+    const result = await this.pool.query<RuntimeRow>(
+      "select value from access_audit order by created_at desc, id desc limit $1",
+      [limit],
+    );
+    return result.rows.map((row) => parseJson<AccessAuditRecord>(readString(row, "value")));
   }
 }
 
@@ -713,6 +879,14 @@ function readString(row: RuntimeRow, key: string): string {
   return value;
 }
 
+function readNumber(row: RuntimeRow, key: string): number {
+  const value = row[key];
+  if (typeof value !== "number") {
+    throw new Error(`Expected PostgreSQL column ${key} to be a number.`);
+  }
+  return value;
+}
+
 function readOptionalString(row: RuntimeRow, key: string): string | undefined {
   const value = row[key];
   if (value == null) {
@@ -726,6 +900,26 @@ function readOptionalString(row: RuntimeRow, key: string): string | undefined {
 
 function parseJson<T>(value: string): T {
   return JSON.parse(value) as T;
+}
+
+function readAccessGrantRow(row: RuntimeRow): AccessGrantRecord {
+  return {
+    id: readString(row, "id"),
+    subjectType: readString(row, "subject_type") as AccessGrantRecord["subjectType"],
+    subject: readString(row, "subject"),
+    connectionId: readString(row, "connection_id"),
+    role: readString(row, "role") as AccessGrantRecord["role"],
+    effect: readString(row, "effect") as AccessGrantRecord["effect"],
+    customActions: parseJson<string[]>(readString(row, "custom_actions")),
+    reason: readOptionalString(row, "reason"),
+    createdAt: readString(row, "created_at"),
+    updatedAt: readString(row, "updated_at"),
+    revokedAt: readOptionalString(row, "revoked_at"),
+  };
+}
+
+function subjectKey(subject: RuntimeSubject): string {
+  return [subject.issuer, subject.audience, subject.userPoolRef, subject.tenant ?? "", subject.sub].join("\u001f");
 }
 
 async function runInTransaction<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {

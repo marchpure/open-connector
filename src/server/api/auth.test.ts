@@ -16,7 +16,7 @@ describe("createLocalAuthMiddleware", () => {
     );
     app.get("/v1", (context) => context.json({ ok: true }));
     app.get("/v1/actions", (context) => context.json({ ok: true }));
-    app.get("/mcp-not-runtime", (context) => context.json({ ok: true }));
+    app.get("/health", (context) => context.json({ ok: true }));
 
     expect((await app.request("/v1")).status).toBe(401);
     expect((await app.request("/v1/actions")).status).toBe(401);
@@ -27,7 +27,7 @@ describe("createLocalAuthMiddleware", () => {
         })
       ).status,
     ).toBe(200);
-    expect((await app.request("/mcp-not-runtime")).status).toBe(200);
+    expect((await app.request("/health")).status).toBe(200);
   });
 
   it("does not open POST /v1/actions when runtime tokens exist but admin token is unset", async () => {
@@ -75,10 +75,41 @@ describe("createLocalAuthMiddleware", () => {
       const app = createSchemeApp();
 
       expect((await app.request("/api/connections", { headers: authorize(scheme, "admin-secret") })).status).toBe(200);
+      expect((await app.request("/v1/access-grants", { headers: authorize(scheme, "admin-secret") })).status).toBe(200);
       expect((await app.request("/v1/actions", { headers: authorize(scheme, "runtime-secret") })).status).toBe(200);
       expect((await app.request("/mcp/tools", { headers: authorize(scheme, "runtime-secret") })).status).toBe(200);
     },
   );
+
+  it("keeps legacy v1 management endpoints on the admin scope", async () => {
+    const app = createSchemeApp();
+
+    const managementRequests: Array<[string, RequestInit | undefined]> = [
+      ["/v1/access-grants", undefined],
+      ["/v1/access-grants", { method: "POST" }],
+      ["/v1/access-grants/grant-1", { method: "PATCH" }],
+      ["/v1/access-grants/grant-1:revoke", { method: "POST" }],
+      ["/v1/access-grants/grant-1/revoke", { method: "POST" }],
+      ["/v1/access/audit", undefined],
+      ["/v1/identity/subjects", undefined],
+    ];
+
+    for (const [path, init] of managementRequests) {
+      expect((await app.request(path, { ...init, headers: authorize("Bearer", "runtime-secret") })).status).toBe(401);
+      expect((await app.request(path, { ...init, headers: authorize("Bearer", "admin-secret") })).status).toBe(200);
+    }
+  });
+
+  it("does not leak newly added v1 paths to runtime scope by default", async () => {
+    const app = createSchemeApp();
+
+    expect(
+      (await app.request("/v1/identity-provider", { headers: authorize("Bearer", "runtime-secret") })).status,
+    ).toBe(401);
+    expect((await app.request("/v1/identity-provider", { headers: authorize("Bearer", "admin-secret") })).status).toBe(
+      200,
+    );
+  });
 
   it.each([
     "Basic admin-secret",
@@ -200,6 +231,14 @@ function createSchemeApp(): Hono {
   app.use("*", createLocalAuthMiddleware({ adminToken: "admin-secret", runtimeToken: "runtime-secret" }));
   app.get("/api/connections", (context) => context.json({ ok: true }));
   app.get("/v1/actions", (context) => context.json({ ok: true }));
+  app.get("/v1/access-grants", (context) => context.json({ ok: true }));
+  app.post("/v1/access-grants", (context) => context.json({ ok: true }));
+  app.patch("/v1/access-grants/:id", (context) => context.json({ ok: true }));
+  app.post("/v1/access-grants/:id\\:revoke", (context) => context.json({ ok: true }));
+  app.post("/v1/access-grants/:id/revoke", (context) => context.json({ ok: true }));
+  app.get("/v1/access/audit", (context) => context.json({ ok: true }));
+  app.get("/v1/identity/subjects", (context) => context.json({ ok: true }));
+  app.get("/v1/identity-provider", (context) => context.json({ ok: true }));
   app.get("/mcp/tools", (context) => context.json({ ok: true }));
   return app;
 }
