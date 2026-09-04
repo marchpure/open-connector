@@ -36,6 +36,7 @@ const runLimit = readPositiveIntegerEnv("OOMOL_CONNECT_RUN_LIMIT", DEFAULT_RUN_L
 const databaseUrl = optionalEnv("OOMOL_CONNECT_DATABASE_URL");
 const databasePoolMax = readPositiveIntegerEnv("OOMOL_CONNECT_DATABASE_POOL_MAX", 10);
 const databaseConnectTimeoutMs = readPositiveIntegerEnv("OOMOL_CONNECT_DATABASE_CONNECT_TIMEOUT_MS", 10_000);
+const role = readRuntimeRole(process.env.OOMOL_CONNECT_ROLE);
 
 try {
   await main();
@@ -106,8 +107,9 @@ async function main(): Promise<void> {
       verifyRuntimeJwt,
       actionPolicy,
       allowedCustomOAuth,
-      registerStaticRoutes: (app) => registerStaticRoutes(app, staticRoot),
+      registerStaticRoutes: role === "mcp-runtime" ? undefined : (app) => registerStaticRoutes(app, staticRoot),
       logger,
+      role,
     });
 
     const server = serve(
@@ -119,6 +121,7 @@ async function main(): Promise<void> {
       (info) => {
         logger.info({ url: `http://${hostname}:${info.port}` }, "connect server listening");
         logger.info({ dataDir }, "runtime data directory");
+        logger.info({ role }, "connect server role");
         logger.info({ backend: databaseUrl ? "postgresql" : "sqlite" }, "runtime database ready");
         if (!adminToken) {
           logger.warn("local admin authentication is disabled; set OOMOL_CONNECT_ADMIN_TOKEN to require bearer tokens");
@@ -251,4 +254,15 @@ function requiredEnv(name: string): string {
 function parseBooleanEnv(name: string): boolean {
   const value = process.env[name]?.trim().toLowerCase();
   return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
+function readRuntimeRole(value: string | undefined): "all" | "control-plane" | "mcp-runtime" {
+  const role = value?.trim();
+  if (!role) {
+    return "all";
+  }
+  if (role === "all" || role === "control-plane" || role === "mcp-runtime") {
+    return role;
+  }
+  throw new Error("OOMOL_CONNECT_ROLE must be one of: all, control-plane, mcp-runtime.");
 }

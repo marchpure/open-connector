@@ -40,6 +40,15 @@
   font-weight: 680;
 }
 
+.brand-kicker {
+  margin-top: 3px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 720;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
 .brand-subtitle {
   margin-top: 2px;
   font-size: 12px;
