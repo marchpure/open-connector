@@ -93,6 +93,14 @@ try {
           ? secret.OPENCONNECTOR_OAUTH_STATE_SECRET
           : randomSecret(32),
       OPENCONNECTOR_OAUTH_SCOPES: requiredConfigString(config.identity.scopes, "identity.scopes"),
+      ...(config.identity.upstreamPrompt
+        ? {
+            OPENCONNECTOR_OAUTH_UPSTREAM_PROMPT: requiredConfigString(
+              config.identity.upstreamPrompt,
+              "identity.upstreamPrompt",
+            ),
+          }
+        : {}),
       OPENCONNECTOR_OAUTH_ALLOWED_REDIRECT_URIS: requiredConfigString(
         config.identity.allowedRedirectUris,
         "identity.allowedRedirectUris",

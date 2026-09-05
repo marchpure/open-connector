@@ -12,6 +12,7 @@ export interface OAuthCompatOptions {
   allowedRedirectUris: string[];
   states: IOAuthStateStore;
   scopes?: string;
+  upstreamPrompt?: "login";
   stateTtlSeconds?: number;
   fetch?: typeof fetch;
   now?: () => number;
@@ -33,6 +34,7 @@ export function registerOAuthCompatRoutes(app: Hono, options: OAuthCompatOptions
   const upstreamIssuer = normalizeHttpsOrigin(options.upstreamIssuer);
   const redirectEndpoint = `${origin}/oauth/callback`;
   const scopes = normalizeScopes(options.scopes);
+  const upstreamPrompt = normalizeUpstreamPrompt(options.upstreamPrompt);
   const allowedRedirectUris = options.allowedRedirectUris.map(normalizeAllowedRedirectUri);
   if (allowedRedirectUris.length === 0) {
     throw new Error("OPENCONNECTOR_OAUTH_ALLOWED_REDIRECT_URIS must contain at least one exact redirect URI.");
@@ -157,6 +159,7 @@ export function registerOAuthCompatRoutes(app: Hono, options: OAuthCompatOptions
       upstream.searchParams.set("state", signedState);
       upstream.searchParams.set("code_challenge", query.code_challenge);
       upstream.searchParams.set("code_challenge_method", "S256");
+      if (upstreamPrompt) upstream.searchParams.set("prompt", upstreamPrompt);
       if (query.resource) upstream.searchParams.set("resource", query.resource);
       return context.redirect(upstream.toString(), 302);
     } catch {
@@ -353,6 +356,12 @@ function isRedirectUriAllowed(value: string, exact: Set<string>, loopbackKeys: s
 
 function normalizeScopes(value: string | undefined): string[] {
   return [...new Set((value?.trim() || defaultScopes).split(/\s+/u).filter(Boolean))];
+}
+
+function normalizeUpstreamPrompt(value: string | undefined): "login" | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  if (value === "login") return value;
+  throw new Error("OPENCONNECTOR_OAUTH_UPSTREAM_PROMPT must be login when configured.");
 }
 
 function isHttpsUrl(value: unknown): value is string {

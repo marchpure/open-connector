@@ -154,6 +154,7 @@ function readOAuthCompatEnvironment(origin: string):
       clientSecret: string;
       stateSecret: string;
       scopes?: string;
+      upstreamPrompt?: "login";
       allowedRedirectUris: string[];
     }
   | undefined {
@@ -170,9 +171,17 @@ function readOAuthCompatEnvironment(origin: string):
     clientSecret: required("OPENCONNECTOR_OAUTH_CLIENT_SECRET"),
     stateSecret: required("OPENCONNECTOR_OAUTH_STATE_SECRET"),
     scopes: process.env.OPENCONNECTOR_OAUTH_SCOPES,
+    upstreamPrompt: readUpstreamPrompt(process.env.OPENCONNECTOR_OAUTH_UPSTREAM_PROMPT),
     allowedRedirectUris: required("OPENCONNECTOR_OAUTH_ALLOWED_REDIRECT_URIS")
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean),
   };
+}
+
+function readUpstreamPrompt(value: string | undefined): "login" | undefined {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  if (normalized === "login") return normalized;
+  throw new Error("OPENCONNECTOR_OAUTH_UPSTREAM_PROMPT must be login when configured.");
 }

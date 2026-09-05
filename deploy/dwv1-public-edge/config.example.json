@@ -76,6 +76,7 @@
     "upstreamIssuer": "",
     "clientId": "",
     "scopes": "openid profile email offline_access",
+    "upstreamPrompt": "",
     "allowedRedirectUris": ""
   }
 }

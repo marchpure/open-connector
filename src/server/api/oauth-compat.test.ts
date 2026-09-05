@@ -111,6 +111,36 @@ describe("OAuth compatibility bridge", () => {
     expect(request).toHaveBeenCalledWith(`${issuer}/.well-known/openid-configuration`, expect.anything());
   });
 
+  it("forwards the server-controlled login prompt to the upstream authorize endpoint", async () => {
+    const { app } = createApp({ upstreamPrompt: "login" });
+    const response = await authorize(app);
+    const upstream = new URL(response.headers.get("location")!);
+    expect(upstream.searchParams.get("prompt")).toBe("login");
+  });
+
+  it("does not add an upstream prompt by default or allow the client to override it", async () => {
+    const { app } = createApp();
+    const response = await app.request(
+      `/oauth/authorize?${new URLSearchParams({
+        client_id: "bridge-client",
+        response_type: "code",
+        redirect_uri: redirectUri,
+        state: "workbuddy-state",
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        prompt: "consent",
+      })}`,
+    );
+    const upstream = new URL(response.headers.get("location")!);
+    expect(upstream.searchParams.has("prompt")).toBe(false);
+  });
+
+  it("rejects an unsupported upstream prompt configuration", () => {
+    expect(() => createApp({ upstreamPrompt: "consent" as never })).toThrow(
+      "OPENCONNECTOR_OAUTH_UPSTREAM_PROMPT must be login when configured.",
+    );
+  });
+
   it("atomically consumes callback state and rejects replay", async () => {
     const { app } = createApp();
     const authorization = await authorize(app);
@@ -240,6 +270,7 @@ function createApp(
     now?: () => number;
     stateTtlSeconds?: number;
     allowedRedirectUris?: string[];
+    upstreamPrompt?: "login";
   } = {},
 ): {
   app: Hono;
@@ -275,6 +306,7 @@ function createApp(
     allowedRedirectUris: overrides.allowedRedirectUris ?? [redirectUri],
     states,
     fetch: request as unknown as typeof fetch,
+    upstreamPrompt: overrides.upstreamPrompt,
     ...overrides,
   });
   return { app, states, request, tokenForms };
