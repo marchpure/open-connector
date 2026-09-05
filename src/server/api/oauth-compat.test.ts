@@ -7,6 +7,7 @@ import { registerOAuthCompatRoutes } from "./oauth-compat.ts";
 const origin = "https://connector.example.com";
 const issuer = "https://identity.example.com";
 const redirectUri = "workbuddy://workbuddy/mcp/custom-mcp%3Atest/oauth/callback";
+const loopbackRedirectUri = "http://127.0.0.1/mcp/oauth/callback";
 const verifier = "v".repeat(43);
 const challenge = "7w_YNF9DSfIdPf_pRjSq646_kPr-2-o9NAl16JGghdM";
 
@@ -49,6 +50,32 @@ describe("OAuth compatibility bridge", () => {
       "workbuddy://workbuddy/other/oauth/callback",
       `${redirectUri}/suffix`,
       "workbuddy://evil/mcp/custom-mcp%3Atest/oauth/callback",
+    ]) {
+      const rejected = await app.request("/oauth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ redirect_uris: [candidate] }),
+      });
+      expect(rejected.status).toBe(400);
+    }
+  });
+
+  it("allows only the approved 127.0.0.1 callback path on any temporary port", async () => {
+    const { app } = createApp({ allowedRedirectUris: [redirectUri, loopbackRedirectUri] });
+    const accepted = await app.request("/oauth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ redirect_uris: ["http://127.0.0.1:58071/mcp/oauth/callback"] }),
+    });
+    expect(accepted.status).toBe(200);
+
+    for (const candidate of [
+      "http://localhost:58071/mcp/oauth/callback",
+      "http://127.0.0.2:58071/mcp/oauth/callback",
+      "http://127.0.0.1:58071/oauth/callback",
+      "http://127.0.0.1:58071/mcp/oauth/callback?x=1",
+      "http://127.0.0.1:58071/mcp/oauth/callback#fragment",
+      "http://user@127.0.0.1:58071/mcp/oauth/callback",
     ]) {
       const rejected = await app.request("/oauth/register", {
         method: "POST",
@@ -159,6 +186,27 @@ describe("OAuth compatibility bridge", () => {
     ).toBe(400);
   });
 
+  it("requires the complete original loopback URI, including its port, at token exchange", async () => {
+    const loopback = "http://127.0.0.1:58071/mcp/oauth/callback";
+    const { app } = createApp({ allowedRedirectUris: [redirectUri, loopbackRedirectUri] });
+    const authorization = await authorizeWithRedirect(app, loopback);
+    const state = new URL(authorization.headers.get("location")!).searchParams.get("state")!;
+    const callback = await app.request(`/oauth/callback?code=upstream-code&state=${encodeURIComponent(state)}`);
+    const bridgeCode = new URL(callback.headers.get("location")!).searchParams.get("code")!;
+    const wrongPort = await app.request("/oauth/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: "bridge-client",
+        code: bridgeCode,
+        code_verifier: verifier,
+        redirect_uri: "http://127.0.0.1:58072/mcp/oauth/callback",
+      }),
+    });
+    expect(wrongPort.status).toBe(400);
+  });
+
   it("forwards refresh grants and rejects unsupported grants", async () => {
     const { app, tokenForms } = createApp();
     const refreshed = await app.request("/oauth/token", {
@@ -187,7 +235,13 @@ describe("OAuth compatibility bridge", () => {
   });
 });
 
-function createApp(overrides: { now?: () => number; stateTtlSeconds?: number } = {}): {
+function createApp(
+  overrides: {
+    now?: () => number;
+    stateTtlSeconds?: number;
+    allowedRedirectUris?: string[];
+  } = {},
+): {
   app: Hono;
   states: MemoryStateStore;
   request: ReturnType<typeof vi.fn>;
@@ -218,7 +272,7 @@ function createApp(overrides: { now?: () => number; stateTtlSeconds?: number } =
     clientId: "bridge-client",
     clientSecret: "server-only-secret",
     stateSecret: "state-secret-at-least-32-bytes-long",
-    allowedRedirectUris: [redirectUri],
+    allowedRedirectUris: overrides.allowedRedirectUris ?? [redirectUri],
     states,
     fetch: request as unknown as typeof fetch,
     ...overrides,
@@ -227,10 +281,14 @@ function createApp(overrides: { now?: () => number; stateTtlSeconds?: number } =
 }
 
 async function authorize(app: Hono): Promise<Response> {
+  return authorizeWithRedirect(app, redirectUri);
+}
+
+async function authorizeWithRedirect(app: Hono, callback: string): Promise<Response> {
   const query = new URLSearchParams({
     client_id: "bridge-client",
     response_type: "code",
-    redirect_uri: redirectUri,
+    redirect_uri: callback,
     state: "workbuddy-state",
     code_challenge: challenge,
     code_challenge_method: "S256",

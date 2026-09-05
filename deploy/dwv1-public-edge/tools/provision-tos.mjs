@@ -4,8 +4,7 @@ import { StorageClassType, TosClient } from "@volcengine/tos-sdk";
 const bucket = process.argv[2];
 if (!bucket) throw new Error("usage: node provision-tos.mjs BUCKET_NAME");
 
-const credentials =
-  await new CLIConfigCredentialProvider().resolveCredentials();
+const credentials = await new CLIConfigCredentialProvider().resolveCredentials();
 const client = new TosClient({
   accessKeyId: credentials.accessKeyId,
   accessKeySecret: credentials.secretAccessKey,

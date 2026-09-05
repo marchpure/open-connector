@@ -65,8 +65,8 @@ if test "$(jq -r '.identity.oauthCompatEnabled' "$config")" = true; then
   test "$(jq -r '.identity.clientId' "$config")" = "$(jq -r '.identity.clientRef' "$config")" ||
     fail "OAuth clientId and identity clientRef must match"
   printf '%s' "$(jq -r '.identity.allowedRedirectUris' "$config")" |
-    grep -Eq '^workbuddy://workbuddy/mcp/custom-mcp%3A[^,[:space:]]+/oauth/callback(,workbuddy://workbuddy/mcp/custom-mcp%3A[^,[:space:]]+/oauth/callback)*$' ||
-    fail "WorkBuddy redirect allowlist must contain exact connector callback URIs"
+    grep -Eq '^(workbuddy://workbuddy/mcp/custom-mcp%3A[A-Za-z0-9._~-]+/oauth/callback|http://127\.0\.0\.1(:[0-9]+)?/mcp/oauth/callback)(,(workbuddy://workbuddy/mcp/custom-mcp%3A[A-Za-z0-9._~-]+/oauth/callback|http://127\.0\.0\.1(:[0-9]+)?/mcp/oauth/callback))*$' ||
+    fail "OAuth redirect allowlist must contain only the exact WorkBuddy callback and approved 127.0.0.1 loopback path"
 fi
 
 printf 'PREFLIGHT_READY'
